@@ -28,9 +28,10 @@ Mỗi thành viên nhận 1 shard video (theo `video_id`), tự chạy **toàn b
 ```
 ingestion/
 ├── notebooks/
-│   ├── 01_shard_pipeline.ipynb      # Full pipeline cho 1 shard: TransNet V2 → keyframe → PaddleOCR v6 →
-│   │                                 # PhoWhisper → tokenizer (Coccoc/VnCoreNLP) → BEiT3+CLIP → gte-Qwen2 (1.5B/7B)
-│   └── 02_export_shard_dataset.ipynb # Gói output (keyframe, metadata, vector) → publish Kaggle Dataset riêng
+│   ├── 01a_keyframe_extraction.ipynb # Bước 1: Cắt cảnh (TransNet V2) & trích xuất keyframes (ảnh JPG) + scene metadata (Parquet)
+│   ├── 01b_text_extraction.ipynb     # Bước 2: Chạy OCR (PaddleOCR v6) trên keyframe & ASR (PhoWhisper) từ audio video
+│   ├── 01c_embedding_generation.ipynb # Bước 3: Sinh vector embeddings (BEiT3+CLIP cho ảnh, gte-Qwen2 cho OCR/ASR)
+│   └── 02_export_shard_dataset.ipynb # Gói output (keyframes, metadata, vectors) -> publish Kaggle Dataset riêng
 │
 ├── kaggle_utils/
 │   ├── shard_loader.py        # Đọc shard_assignment.yaml, biết shard này gồm video nào
