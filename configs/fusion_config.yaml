@@ -47,7 +47,7 @@ weights:
 # Với mỗi loại query, chỉ enable các nhánh liên quan để tránh nhiễu
 query_routing:
   text_query:
-    enabled_branches: [ocr_dense, asr_dense, ocr_sparse, asr_sparse]
+    enabled_branches: [image_dense, ocr_dense, asr_dense, ocr_sparse, asr_sparse]
   image_query:
     enabled_branches: [image_dense]
   multimodal_query:   # tương lai: query gồm cả ảnh và text

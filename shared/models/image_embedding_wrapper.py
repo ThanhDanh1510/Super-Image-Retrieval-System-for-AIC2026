@@ -108,3 +108,22 @@ class ImageEmbeddingWrapper:
             ValueError: Nếu bytes không decode được thành ảnh hợp lệ.
         """
         raise NotImplementedError
+
+    def encode_text(
+        self,
+        text: str | list[str],
+    ) -> np.ndarray:
+        """
+        Encode text query thành L2-normalized image embedding vector(s) (Text-to-Image).
+        Dùng mô hình CLIP (hoặc BEiT3 text encoder nếu có) để chiếu văn bản vào không gian chung.
+
+        Args:
+            text: Chuỗi văn bản truy vấn hoặc list các chuỗi văn bản.
+
+        Returns:
+            np.ndarray, shape (1024,) nếu input là str,
+                         shape (N, 1024) nếu input là list.
+            Luôn L2-normalized.
+        """
+        raise NotImplementedError
+

@@ -114,10 +114,10 @@ async def run(
     logger.info(f"Pipeline run: input_type={input_type}, task_type={task_type}")
 
     if input_type == InputType.TEXT:
-        return await _run_text(request, task_type, qdrant_client, text_embedder)
+        return await _run_text(request, task_type, qdrant_client, text_embedder, image_embedder)
 
     elif input_type == InputType.VOICE:
-        return await _run_voice(request, task_type, qdrant_client, text_embedder, asr_model)
+        return await _run_voice(request, task_type, qdrant_client, text_embedder, image_embedder, asr_model)
 
     elif input_type == InputType.IMAGE:
         return await _run_image(request, qdrant_client, image_embedder)
@@ -135,6 +135,7 @@ async def _run_text(
     task_type: TaskType,
     qdrant_client,
     text_embedder,
+    image_embedder,
 ) -> PipelineResult:
     """
     Route text query sang text_query.process() và wrap kết quả thành PipelineResult.
@@ -144,6 +145,7 @@ async def _run_text(
         task_type: TaskType để text_query biết có cần tách sub-events không.
         qdrant_client: AsyncQdrantClient singleton.
         text_embedder: TextEmbeddingWrapper singleton.
+        image_embedder: ImageEmbeddingWrapper singleton.
 
     Returns:
         PipelineResult với candidates, enhanced_query, và sub_events (nếu TRAKE).
@@ -156,6 +158,7 @@ async def _run_voice(
     task_type: TaskType,
     qdrant_client,
     text_embedder,
+    image_embedder,
     asr_model,
 ) -> PipelineResult:
     """
@@ -169,12 +172,14 @@ async def _run_voice(
         task_type: KIS / VQA / TRAKE.
         qdrant_client: AsyncQdrantClient singleton.
         text_embedder: TextEmbeddingWrapper singleton.
+        image_embedder: ImageEmbeddingWrapper singleton.
         asr_model: PhoWhisper model singleton.
 
     Returns:
         PipelineResult với candidates, transcript, enhanced_query, sub_events.
     """
     raise NotImplementedError
+
 
 
 async def _run_image(

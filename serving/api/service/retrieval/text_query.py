@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from serving.api.schema.retrieval import CandidateResult, TaskType
 from serving.api.repo import qdrant_repo
 from shared.models.text_embedding_wrapper import TextEmbeddingWrapper
+from shared.models.image_embedding_wrapper import ImageEmbeddingWrapper
 
 logger = logging.getLogger(__name__)
 
@@ -70,9 +71,10 @@ async def process(
     query_input: TextQueryInput,
     qdrant_client,
     text_embedder: TextEmbeddingWrapper,
+    image_embedder: ImageEmbeddingWrapper,
 ) -> TextQueryOutput:
     """
-    Xử lý toàn bộ luồng text query: enhance → encode → retrieve.
+    Xử lý toàn bộ luồng text query: enhance → encode (text + image vectors) → retrieve.
 
     Đây là hàm duy nhất mà retrieval_pipeline.py gọi vào module này.
 
@@ -80,6 +82,7 @@ async def process(
         query_input: TextQueryInput chứa raw query và metadata.
         qdrant_client: AsyncQdrantClient đã inject từ dependencies.py.
         text_embedder: TextEmbeddingWrapper đã load model (singleton từ dependencies.py).
+        image_embedder: ImageEmbeddingWrapper đã load model (singleton từ dependencies.py).
 
     Returns:
         TextQueryOutput với danh sách candidates thô và enhanced query.
@@ -93,6 +96,7 @@ async def process(
 
     ocr_vector, asr_vector = await _encode_text(enhanced, text_embedder)
     ocr_sparse, asr_sparse = _encode_sparse(enhanced)
+    image_vector = await _encode_text_to_image_vector(enhanced, image_embedder)
 
     candidates = await qdrant_repo.search_by_text_vectors(
         client=qdrant_client,
@@ -100,8 +104,10 @@ async def process(
         asr_vector=asr_vector,
         ocr_sparse_vector=ocr_sparse,
         asr_sparse_vector=asr_sparse,
+        image_vector=image_vector,
         top_k=query_input.top_k,
     )
+
 
     return TextQueryOutput(
         candidates=candidates,
@@ -195,3 +201,21 @@ def _encode_sparse(text: str) -> tuple[object | None, object | None]:
         Mỗi phần tử là qdrant_client.models.SparseVector hoặc None nếu không dùng sparse.
     """
     raise NotImplementedError
+
+
+async def _encode_text_to_image_vector(
+    text: str,
+    embedder: ImageEmbeddingWrapper,
+) -> list[float]:
+    """
+    Encode text query thành image dense vector (Text-to-Image) dùng CLIP text encoder.
+
+    Args:
+        text: Text đã enhanced (tiếng Anh).
+        embedder: ImageEmbeddingWrapper singleton.
+
+    Returns:
+        list[float], len=1024, L2-normalized.
+    """
+    raise NotImplementedError
+

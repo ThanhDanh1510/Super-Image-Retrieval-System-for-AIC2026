@@ -91,16 +91,18 @@ async def search_by_text_vectors(
     asr_vector: list[float],
     ocr_sparse_vector: SparseVector | None,
     asr_sparse_vector: SparseVector | None,
+    image_vector: list[float] | None = None,
     top_k: int = 100,
     collection_name: str = PRODUCTION_ALIAS,
     score_threshold: float | None = None,
 ) -> list[CandidateResult]:
     """
-    Tìm kiếm keyframe bằng text vectors (dense + sparse) với RRF fusion.
+    Tìm kiếm keyframe bằng text vectors (dense + sparse) cùng với image vector (Text-to-Image) qua RRF fusion.
 
     Thực hiện multi-vector prefetch từ các nhánh:
-      - ocr_dense  (BEiT3+CLIP embedding của text OCR)
-      - asr_dense  (gte-Qwen2-7B embedding của transcript ASR)
+      - image_dense (CLIP text vector mô phỏng ảnh, dim=1024)
+      - ocr_dense  (gte-Qwen2-1.5B embedding của text OCR, dim=1536)
+      - asr_dense  (gte-Qwen2-1.5B embedding của transcript ASR, dim=1536)
       - ocr_sparse (BM42 keyword matching cho OCR)
       - asr_sparse (BM42 keyword matching cho ASR)
 
@@ -109,9 +111,10 @@ async def search_by_text_vectors(
     Args:
         client: AsyncQdrantClient đã được inject từ dependencies.py
         ocr_vector: Dense embedding của text query, dim=1536 (gte-Qwen2-1.5B).
-        asr_vector: Dense embedding của text query, dim=3584 (gte-Qwen2-7B).
+        asr_vector: Dense embedding của text query, dim=1536 (gte-Qwen2-1.5B).
         ocr_sparse_vector: Sparse vector BM42 cho OCR matching. None nếu không dùng sparse.
         asr_sparse_vector: Sparse vector BM42 cho ASR matching. None nếu không dùng sparse.
+        image_vector: Dense CLIP text embedding để search Text-to-Image, dim=1024. None nếu không dùng.
         top_k: Số kết quả trả về sau RRF. Tối đa 100.
         collection_name: Tên collection hoặc alias. Mặc định là 'production'.
         score_threshold: Lọc bỏ kết quả có score thấp hơn ngưỡng này.

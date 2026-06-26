@@ -74,6 +74,7 @@ async def process(
     query_input: VoiceQueryInput,
     qdrant_client,
     text_embedder,
+    image_embedder,
     asr_model,
 ) -> VoiceQueryOutput:
     """
@@ -83,6 +84,7 @@ async def process(
         query_input: VoiceQueryInput chứa audio bytes và metadata.
         qdrant_client: AsyncQdrantClient đã inject.
         text_embedder: TextEmbeddingWrapper singleton.
+        image_embedder: ImageEmbeddingWrapper singleton.
         asr_model: ASR model (PhoWhisper) singleton đã load.
 
     Returns:
@@ -99,7 +101,9 @@ async def process(
         ),
         qdrant_client=qdrant_client,
         text_embedder=text_embedder,
+        image_embedder=image_embedder,
     )
+
 
     return VoiceQueryOutput(
         candidates=text_output.candidates,
