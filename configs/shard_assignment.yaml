@@ -26,25 +26,25 @@ members:
   # Thêm member vào đây theo template bên dưới
   # -------------------------------------------------------------------------
 
-  member_a:
-    dataset_name: "aic2026-shard-member-a-v1"   # Tên Kaggle Dataset khi publish
+  Danh:
+    dataset_name: "aic2026-shard-danh-v1"
     video_ids: []
     # Ví dụ: [L01_V001, L01_V002, L01_V003, ...]
 
-  member_b:
-    dataset_name: "aic2026-shard-member-b-v1"
+  Vu:
+    dataset_name: "aic2026-shard-vu-v1"
     video_ids: []
 
-  member_c:
-    dataset_name: "aic2026-shard-member-c-v1"
+  Thien:
+    dataset_name: "aic2026-shard-thien-v1"
     video_ids: []
 
-  member_d:
-    dataset_name: "aic2026-shard-member-d-v1"
+  Tien:
+    dataset_name: "aic2026-shard-tien-v1"
     video_ids: []
 
-  member_e:
-    dataset_name: "aic2026-shard-member-e-v1"
+  Bao:
+    dataset_name: "aic2026-shard-bao-v1"
     video_ids: []
 
 # Dataset thống nhất sau khi aggregation/ merge xong (dùng cho indexing/)

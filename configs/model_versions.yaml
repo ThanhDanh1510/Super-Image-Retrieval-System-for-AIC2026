@@ -70,7 +70,7 @@ text_embedding:
 named_vectors:
   image_dense: "image_dense"        # BEiT3+CLIP, dim=1024
   ocr_dense: "ocr_dense"            # gte-Qwen2-1.5B, dim=1536
-  asr_dense: "asr_dense"            # gte-Qwen2-1.5B, dim=1536 (cùng model với ocr_dense)
+  asr_dense: "asr_dense"            # gte-Qwen2-1.5B, dim=1536
   ocr_sparse: "ocr_sparse"          # BM42 sparse vector
   asr_sparse: "asr_sparse"          # BM42 sparse vector
 
@@ -79,4 +79,3 @@ named_vectors:
 # =============================================================================
 # v1.0.0 (2026-06-26): Initial version — TransNetV2, PaddleOCR v6, PhoWhisper-medium,
 #                       BEiT-large, gte-Qwen2-1.5B
-# v1.0.1 (2026-06-26): Bỏ gte-Qwen2-7B — dùng 1.5B cho cả OCR lẫn ASR (đủ chất lượng, nhẹ hơn)
