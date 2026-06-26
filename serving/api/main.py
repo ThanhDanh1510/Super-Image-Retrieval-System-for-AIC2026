@@ -45,15 +45,13 @@ async def lifespan(app: FastAPI):
     Quản lý lifecycle của ứng dụng.
 
     STARTUP:
-        1. Load tất cả AI models vào GPU (text_embedder, image_embedder, asr_model)
-        2. Khởi tạo Qdrant async client
+        1. Khởi tạo Qdrant async client
+        2. Load tất cả AI models vào GPU (text_embedder, image_embedder, asr_model)
         3. Lưu vào app.state để inject vào endpoints qua dependencies
 
     SHUTDOWN:
         1. Đóng Qdrant client connection
-        2. Giải phóng GPU memory (del models, torch.cuda.empty_cache)
-
-    SKELETON: Implement startup và shutdown logic.
+        2. Giải phóng GPU memory (del models)
     """
     settings = get_settings()
     logger.info(f"Starting {settings.APP_NAME} v{settings.APP_VERSION}")
@@ -61,24 +59,61 @@ async def lifespan(app: FastAPI):
     logger.info(f"Device: {settings.DEVICE}")
 
     # --- STARTUP: Load models và kết nối Qdrant ---
-    # TODO: Implement
-    #   app.state.qdrant_client = await get_async_qdrant_client(
-    #       settings.QDRANT_URL, settings.QDRANT_API_KEY
-    #   )
-    #   app.state.text_embedder = TextEmbeddingWrapper(device=settings.DEVICE)
-    #   app.state.image_embedder = ImageEmbeddingWrapper(device=settings.DEVICE)
-    #   app.state.asr_model = load_asr_model(device=settings.DEVICE)  # hoặc None
-    logger.warning("SKELETON: Models chưa được load — implement lifespan startup.")
+    from serving.api.repo.qdrant_repo import get_async_qdrant_client
+    from shared.models.text_embedding_wrapper import TextEmbeddingWrapper
+    from shared.models.image_embedding_wrapper import ImageEmbeddingWrapper
+
+    # 1. Khởi tạo Qdrant client
+    app.state.qdrant_client = get_async_qdrant_client(
+        settings.QDRANT_URL, settings.QDRANT_API_KEY
+    )
+
+    # 2. Khởi tạo Text Embedding Wrapper
+    try:
+        app.state.text_embedder = TextEmbeddingWrapper(device=settings.DEVICE)
+        logger.info("TextEmbeddingWrapper loaded successfully.")
+    except Exception as e:
+        logger.warning(f"Could not load TextEmbeddingWrapper: {e}. Text queries may fail.")
+        app.state.text_embedder = None
+
+    # 3. Khởi tạo Image Embedding Wrapper
+    try:
+        app.state.image_embedder = ImageEmbeddingWrapper(device=settings.DEVICE)
+        logger.info("ImageEmbeddingWrapper loaded successfully.")
+    except Exception as e:
+        logger.warning(f"Could not load ImageEmbeddingWrapper: {e}. Image/Similar queries may fail.")
+        app.state.image_embedder = None
+
+    # 4. Khởi tạo ASR model (PhoWhisper)
+    try:
+        from transformers import pipeline
+        logger.info(f"Loading ASR model (vinai/PhoWhisper-medium) on {settings.DEVICE}...")
+        app.state.asr_model = pipeline(
+            "automatic-speech-recognition",
+            model="vinai/PhoWhisper-medium",
+            device=0 if settings.DEVICE == "cuda" else -1
+        )
+        logger.info("ASR model loaded successfully.")
+    except Exception as e:
+        logger.warning(f"Could not load ASR model: {e}. Voice queries will be disabled.")
+        app.state.asr_model = None
 
     yield
 
     # --- SHUTDOWN: Cleanup ---
-    # TODO: Implement
-    #   await app.state.qdrant_client.close()
-    #   del app.state.text_embedder
-    #   del app.state.image_embedder
-    #   torch.cuda.empty_cache()
+    if hasattr(app.state, "qdrant_client"):
+        await app.state.qdrant_client.close()
+        logger.info("Closed Qdrant client connection.")
+
+    if hasattr(app.state, "text_embedder"):
+        del app.state.text_embedder
+    if hasattr(app.state, "image_embedder"):
+        del app.state.image_embedder
+    if hasattr(app.state, "asr_model"):
+        del app.state.asr_model
+
     logger.info("Shutdown complete.")
+
 
 
 # =============================================================================

@@ -34,6 +34,12 @@ from serving.api.schema.retrieval import (
     TRAKEResponse,
 )
 from serving.api.service.retrieval import retrieval_pipeline
+from serving.api.core.dependencies import (
+    get_qdrant_client,
+    get_text_embedder,
+    get_image_embedder,
+    get_asr_model,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -45,23 +51,40 @@ router = APIRouter(prefix="/api/v1", tags=["Retrieval"])
     response_model=KISResponse,
     summary="Known-Item Search — tìm kiếm keyframe theo mô tả text/voice",
 )
-async def search_kis(request: KISRequest) -> KISResponse:
+async def search_kis(
+    request: KISRequest,
+    qdrant_client = Depends(get_qdrant_client),
+    text_embedder = Depends(get_text_embedder),
+    image_embedder = Depends(get_image_embedder),
+    asr_model = Depends(get_asr_model),
+) -> KISResponse:
     """
     Endpoint KIS: nhận text query, trả về danh sách keyframe xếp hạng.
 
     Luồng xử lý:
         1. Validate KISRequest (Pydantic tự xử lý)
         2. Gọi retrieval_pipeline.run() với InputType tương ứng
-        3. (Tùy chọn) Gọi reranker để cải thiện thứ hạng
-        4. Build KISResponse và trả về
-
-    Args:
-        request: KISRequest từ frontend.
-
-    Returns:
-        KISResponse với danh sách candidates và metadata.
+        3. Build KISResponse và trả về
     """
-    raise NotImplementedError
+    try:
+        pipeline_res = await retrieval_pipeline.run(
+            input_type=request.input_type,
+            task_type=TaskType.KIS,
+            request=request,
+            qdrant_client=qdrant_client,
+            text_embedder=text_embedder,
+            image_embedder=image_embedder,
+            asr_model=asr_model,
+        )
+
+        return KISResponse(
+            results=pipeline_res.candidates,
+            total=len(pipeline_res.candidates),
+            query_text=pipeline_res.enhanced_query or request.query,
+        )
+    except Exception as e:
+        logger.error(f"Error in search_kis: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post(
@@ -69,22 +92,48 @@ async def search_kis(request: KISRequest) -> KISResponse:
     response_model=VQAResponse,
     summary="Visual Question Answering — tìm cảnh và trả lời câu hỏi",
 )
-async def search_vqa(request: VQARequest) -> VQAResponse:
+async def search_vqa(
+    request: VQARequest,
+    qdrant_client = Depends(get_qdrant_client),
+    text_embedder = Depends(get_text_embedder),
+    image_embedder = Depends(get_image_embedder),
+    asr_model = Depends(get_asr_model),
+) -> VQAResponse:
     """
     Endpoint VQA: nhận query + question, trả về danh sách kết quả kèm answer.
 
     Luồng xử lý:
         1. Gọi retrieval_pipeline.run() để tìm candidates
-        2. Với mỗi candidate, chạy VQA model để trả lời câu hỏi
+        2. Với mỗi candidate, sinh ra câu trả lời cho câu hỏi (VQA)
         3. Build VQAResponse với results + answers
-
-    Args:
-        request: VQARequest từ frontend.
-
-    Returns:
-        VQAResponse với danh sách candidates và câu trả lời.
     """
-    raise NotImplementedError
+    try:
+        pipeline_res = await retrieval_pipeline.run(
+            input_type=request.input_type,
+            task_type=TaskType.VQA,
+            request=request,
+            qdrant_client=qdrant_client,
+            text_embedder=text_embedder,
+            image_embedder=image_embedder,
+            asr_model=asr_model,
+        )
+
+        # Mock answers cho từng candidate ở Tuần 1.
+        # Ở các tuần sau, Researcher B sẽ tích hợp mô hình VQA thực tế.
+        answers = [
+            f"Mock VQA Answer for scene {cand.scene_id} at {cand.timestamp_mid:.1f}s to question: '{request.question}'"
+            for cand in pipeline_res.candidates
+        ]
+
+        return VQAResponse(
+            results=pipeline_res.candidates,
+            answers=answers,
+            total=len(pipeline_res.candidates),
+            query_text=pipeline_res.enhanced_query or request.query,
+        )
+    except Exception as e:
+        logger.error(f"Error in search_vqa: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post(
@@ -92,19 +141,52 @@ async def search_vqa(request: VQARequest) -> VQAResponse:
     response_model=TRAKEResponse,
     summary="Temporal Retrieval — tìm chuỗi sự kiện theo thứ tự thời gian",
 )
-async def search_trake(request: TRAKERequest) -> TRAKEResponse:
+async def search_trake(
+    request: TRAKERequest,
+    qdrant_client = Depends(get_qdrant_client),
+    text_embedder = Depends(get_text_embedder),
+    image_embedder = Depends(get_image_embedder),
+    asr_model = Depends(get_asr_model),
+) -> TRAKEResponse:
     """
     Endpoint TRAKE: nhận mô tả chuỗi sự kiện, trả về N-tuple keyframes.
 
     Luồng xử lý:
         1. Gọi retrieval_pipeline.run() với TaskType.TRAKE
-        2. Gọi temporal_aligner để sắp xếp candidates theo thứ tự thời gian
+        2. Sắp xếp candidates theo thứ tự thời gian (temporal_aligner)
         3. Build TRAKEResponse với danh sách chuỗi sự kiện
-
-    Args:
-        request: TRAKERequest từ frontend.
-
-    Returns:
-        TRAKEResponse với danh sách chuỗi sự kiện.
     """
-    raise NotImplementedError
+    try:
+        pipeline_res = await retrieval_pipeline.run(
+            input_type=request.input_type,
+            task_type=TaskType.TRAKE,
+            request=request,
+            qdrant_client=qdrant_client,
+            text_embedder=text_embedder,
+            image_embedder=image_embedder,
+            asr_model=asr_model,
+        )
+
+        # Mock gom nhóm candidates thành các chuỗi sự kiện cho Tuần 1.
+        # Ở Tuần 3, Researcher B sẽ cài đặt thuật toán temporal_aligner thực tế.
+        results = []
+        candidates = pipeline_res.candidates
+        n = request.num_events
+        # Tạm thời gom nhóm tuần tự n phần tử làm 1 event chain
+        for i in range(0, len(candidates) - n + 1, n):
+            group = candidates[i : i + n]
+            results.append(group)
+
+        # Nếu không đủ candidates, đưa toàn bộ candidates thành 1 chain nếu có ít nhất 1
+        if not results and candidates:
+            results.append(candidates[:n])
+
+        return TRAKEResponse(
+            results=results,
+            total=len(results),
+            query_text=pipeline_res.enhanced_query or request.query,
+            num_events=n,
+        )
+    except Exception as e:
+        logger.error(f"Error in search_trake: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
