@@ -1,7 +1,5 @@
 # AI Challenge HCMC — Task & Scoring Context (tham chiếu cho pipeline)
 
-> Nguồn: tài liệu tập huấn AI VIETNAM (GenAI4E) — Buổi 3, dùng song song với `contest_info.md` (thông tin chính thức từ BTC). File này chỉ tóm tắt phần kỹ thuật: 3 dạng task thi và cách chấm điểm.
-
 ## 3 dạng truy vấn (task)
 
 **1. Textual-KIS (Known-Item Search)** — Input: 1 câu/đoạn mô tả tự nhiên. Output: list `(video_id, frame_id)` xếp hạng, top-K ≤ 100. Đúng nếu khớp đúng video VÀ frame nằm trong khoảng `[s, e]` của ground truth.

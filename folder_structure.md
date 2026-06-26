@@ -4,15 +4,16 @@ Dự án vận hành theo **4 nhịp**: **ingestion theo shard** (mỗi member c
 
 ```
 project-root/
-├── configs/        # Cấu hình tập trung (model versions, shard assignments, fusion weights)
-├── ingestion/      # Mỗi member chạy full pipeline trên shard riêng (Kaggle Notebook)
-├── aggregation/    # Gộp output của tất cả member thành 1 dataset thống nhất
-├── indexing/       # Pull dataset thống nhất, đẩy named vectors vào Qdrant
-├── serving/        # Backend API real-time lúc thi (controller-service-repo)
-├── shared/         # Code dùng chung (models, schemas, specs) giữa ingestion và serving
-├── eval/           # Benchmark offline theo metric chấm điểm cuộc thi
-├── infra/          # Docker, CI/CD, monitoring
-├── data/           # Local, không commit git
+├── AGENT_CONTEXT.md  # Project Context Block cho AI Agent — MLOps Lead viết và giữ, không delegate
+├── configs/          # Cấu hình tập trung (model versions, shard assignments, fusion weights)
+├── ingestion/        # Mỗi member chạy full pipeline trên shard riêng (Kaggle Notebook)
+├── aggregation/      # Gộp output của tất cả member thành 1 dataset thống nhất
+├── indexing/         # Pull dataset thống nhất, đẩy named vectors vào Qdrant
+├── serving/          # Backend API real-time lúc thi (controller-service-repo)
+├── shared/           # Code dùng chung (models, schemas, specs) giữa ingestion và serving
+├── eval/             # Benchmark offline theo metric chấm điểm cuộc thi
+├── infra/            # Docker, CI/CD, monitoring
+├── data/             # Local, không commit git
 ├── docs/
 ├── tests/
 ├── pyproject.toml
@@ -27,15 +28,22 @@ Mỗi thành viên nhận 1 shard video (theo `video_id`), tự chạy **toàn b
 
 ```
 ingestion/
+├── skeletons/
+│   ├── 01a_keyframe_extraction.ipynb  # [MLOps viết] Skeleton notebook — function signatures, output schema, constraints nhúng sẵn
+│   ├── 01b_text_extraction.ipynb      # [MLOps viết] Skeleton notebook
+│   ├── 01c_embedding_generation.ipynb # [MLOps viết] Skeleton notebook
+│   ├── 02_export_shard_dataset.ipynb  # [MLOps viết] Skeleton notebook
+│   └── checkpoint_manifest.py         # [MLOps viết] Skeleton class — Researcher dùng Agent fill implementation
+│
 ├── notebooks/
-│   ├── 01a_keyframe_extraction.ipynb # Bước 1: Cắt cảnh (TransNet V2) & trích xuất keyframes (ảnh JPG) + scene metadata (Parquet)
-│   ├── 01b_text_extraction.ipynb     # Bước 2: Chạy OCR (PaddleOCR v6) trên keyframe & ASR (PhoWhisper) từ audio video
-│   ├── 01c_embedding_generation.ipynb # Bước 3: Sinh vector embeddings (BEiT3+CLIP cho ảnh, gte-Qwen2 cho OCR/ASR)
-│   └── 02_export_shard_dataset.ipynb # Gói output (keyframes, metadata, vectors) -> publish Kaggle Dataset riêng
+│   ├── 01a_keyframe_extraction.ipynb  # Bước 1: Cắt cảnh (TransNet V2) & trích xuất keyframes (ảnh JPG) + scene metadata (Parquet)
+│   ├── 01b_text_extraction.ipynb      # Bước 2: Chạy OCR (PaddleOCR v6) trên keyframe & ASR (PhoWhisper) từ audio video
+│   ├── 01c_embedding_generation.ipynb # Bước 3: Sinh vector embeddings (BEiT3+CLIP cho ảnh, gte-Qwen2-1.5B cho OCR/ASR)
+│   └── 02_export_shard_dataset.ipynb  # Gói output (keyframes, metadata, vectors) → publish Kaggle Dataset riêng
 │
 ├── kaggle_utils/
 │   ├── shard_loader.py        # Đọc shard_assignment.yaml, biết shard này gồm video nào
-│   ├── checkpoint_manifest.py # Ghi video_id đã xử lý — resume khi Kaggle session bị ngắt giữa shard
+│   ├── checkpoint_manifest.py # Ghi scene_id đã xử lý — resume khi Kaggle session bị ngắt (granularity: scene, không phải video)
 │   └── dataset_io.py          # Helper đọc/ghi đúng path Kaggle (/kaggle/working)
 │
 └── configs/
@@ -100,12 +108,21 @@ serving/
     │                            # khi truyền tiếp vào retrieval_service, không tạo route riêng cho voice
     ├── service/
     │   ├── retrieval/
-    │   │   ├── text_query.py          # Dịch thuật, tách sự kiện (event splitter cho TRAKE), tạo vector và truy vấn text
+    │   │   ├── skeletons/              # [MLOps viết] Skeleton files cho Researcher A — function signatures, constraints nhúng sẵn
+    │   │   │   ├── text_query.py
+    │   │   │   ├── image_query.py
+    │   │   │   ├── voice_query.py
+    │   │   │   └── retrieval_pipeline.py
+    │   │   ├── text_query.py           # Dịch thuật, tách sự kiện (event splitter cho TRAKE), tạo vector và truy vấn text
     │   │   ├── image_query.py          # Trích xuất vector ảnh và truy vấn ảnh tương đồng (Image-to-Image)
-    │   │   ├── voice_query.py          # Chuyển giọng nói -> text (voice-to-text) và tái sử dụng luồng của text_query
-    │   │   └── retrieval_pipeline.py   # Bộ điều phối (orchestrator) nhận query đầu vào, điều hướng và trả về danh sách candidates thô
+    │   │   ├── voice_query.py          # Chuyển giọng nói → text (voice-to-text) và tái sử dụng luồng của text_query
+    │   │   └── retrieval_pipeline.py   # Orchestrator: nhận query đầu vào, điều hướng, trả về danh sách candidates thô
     │   ├── temporal_aligner.py         # Căn chỉnh thời gian (TRAKE) sau khi đã retrieve candidates
     │   └── reranker/
+    │       ├── skeletons/              # [MLOps viết] Skeleton files cho Researcher B
+    │       │   ├── text_branch/viranker.py
+    │       │   ├── crossmodal_branch/jina_reranker_m0.py
+    │       │   └── fusion_score.py
     │       ├── text_branch/viranker.py            # ViRanker (BGE-M3 + BPT, MMARCO-VI tuned)
     │       ├── crossmodal_branch/jina_reranker_m0.py # Verify keyframe, lọc false positive CLIP
     │       └── fusion_score.py                     # Hợp nhất 2 nhánh → ranking cuối
@@ -149,6 +166,11 @@ configs/
 
 ```
 eval/
+├── skeletons/
+│   ├── metrics/
+│   │   ├── r_score.py      # [MLOps viết] Skeleton — công thức nhúng trong docstring, Agent không được suy diễn
+│   │   └── final_score.py  # [MLOps viết] Skeleton
+│   └── run_benchmark.py    # [MLOps viết] Skeleton
 ├── queries/           # sample_queries_kis.json, sample_queries_vqa.json, sample_queries_trake.json (kèm ground truth)
 ├── metrics/           # r_score.py, final_score.py (Final Score = trung bình R@{1,5,20,50,100})
 └── run_benchmark.py   # So sánh phương án: đổi model, đổi trọng số fusion, có/không reranker
@@ -199,7 +221,8 @@ tests/
 ├── test_fusion_score.py     # Logic fusion 2 nhánh reranker
 ├── test_query_parsing.py    # event_splitter, translate_enhance
 ├── test_api_schema.py       # Endpoint trả đúng schema response
-└── test_merge_shards.py     # verify_shards.py không bỏ sót/trùng video_id khi gộp dataset
+├── test_merge_shards.py     # verify_shards.py không bỏ sót/trùng video_id khi gộp dataset
+└── test_r_score.py          # Edge cases r_score theo từng task type (KIS/VQA/TRAKE)
 ```
 
 ---
@@ -207,8 +230,11 @@ tests/
 ## File gốc ở root
 
 ```
+AGENT_CONTEXT.md   # Project Context Block cho AI Agent — MLOps Lead viết và giữ
+                   # Researcher copy block này vào đầu prompt mỗi khi dùng Agent
+                   # Nội dung: pipeline overview, named vector spec, import rules, constraint cứng
 pyproject.toml     # Dependency, version Python, entry points
-Makefile            # make ingest-shard / make aggregate / make index / make serve / make benchmark
+Makefile           # make ingest-shard / make aggregate / make index / make serve / make benchmark
 ```
 
 ---
@@ -220,5 +246,9 @@ Makefile            # make ingest-shard / make aggregate / make index / make ser
 `aggregation/` là lớp mới, đứng giữa `ingestion/` và `indexing/`, vì giờ có N dataset (N member) cần gộp thành 1 trước khi index — tách riêng để `verify_shards.py` bắt lỗi thiếu/trùng video_id sớm, trước khi tốn công upsert vào Qdrant.
 
 `indexing/` chỉ làm việc với 1 dataset thống nhất duy nhất (`aic2026-unified-v<n>`), không cần biết gì về việc dataset đó được gộp từ bao nhiêu shard — giữ logic upsert đơn giản, và việc thêm batch video mới sau này (dù từ 1 hay nhiều member) đều đi qua đúng 1 luồng `aggregation → indexing`.
+
+`skeletons/` trong mỗi module là ranh giới rõ ràng giữa **MLOps Lead** (viết skeleton) và **Researcher + AI Agent** (fill implementation). Skeleton chứa function signature, type hint, docstring với constraint cứng, và `raise NotImplementedError` — Agent đọc code tốt hơn đọc prose, nên skeleton chính là spec. Không commit implementation vào `skeletons/` — đó là nơi MLOps Lead đặt contract, không phải nơi chứa code chạy thật.
+
+`AGENT_CONTEXT.md` ở root thay thế hoàn toàn cho ý tưởng tạo folder `agents/` riêng — Agent không phải thành phần của hệ thống, chỉ là công cụ viết code. File này chứa Project Context Block mà Researcher paste vào đầu mỗi prompt, giúp Agent hiểu constraint toàn hệ thống mà không cần giải thích miệng.
 
 Nguyên tắc dữ liệu xuyên suốt: **video gốc không bao giờ rời khỏi máy/Kaggle account của member phụ trách**; thứ duy nhất di chuyển giữa người với người, và giữa các tầng trong hệ thống, là keyframe đã crop, metadata, và vector — vì đó là tất cả những gì retrieval cần.
