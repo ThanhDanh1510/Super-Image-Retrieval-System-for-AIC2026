@@ -77,9 +77,41 @@ async def search_kis(
             asr_model=asr_model,
         )
 
+        # Merge logic: Ghép các frame người dùng đã tự chọn bằng tay lên đầu
+        final_results = []
+        seen = set()
+
+        # 1. Thêm các lựa chọn thủ công của người dùng trước
+        for choice in request.user_choices:
+            key = (choice.video_id, choice.frame_id)
+            seen.add(key)
+            final_results.append(
+                CandidateResult(
+                    video_id=choice.video_id,
+                    frame_id=choice.frame_id,
+                    scene_id=choice.scene_id,
+                    timestamp_start=choice.timestamp_start,
+                    timestamp_end=choice.timestamp_end,
+                    timestamp_mid=choice.timestamp_mid,
+                    keyframe_path=choice.keyframe_path,
+                    ocr_text=choice.ocr_text,
+                    asr_text=choice.asr_text,
+                    score=1.0,  # Điểm số tối đa cho frame tự chọn
+                )
+            )
+
+        # 2. Bổ sung nốt kết quả từ AI (Reranking) cho đủ top_k và tránh trùng lặp
+        for cand in pipeline_res.candidates:
+            if len(final_results) >= request.top_k:
+                break
+            key = (cand.video_id, cand.frame_id)
+            if key not in seen:
+                seen.add(key)
+                final_results.append(cand)
+
         return KISResponse(
-            results=pipeline_res.candidates,
-            total=len(pipeline_res.candidates),
+            results=final_results,
+            total=len(final_results),
             query_text=pipeline_res.enhanced_query or request.query,
         )
     except Exception as e:
@@ -118,14 +150,45 @@ async def search_vqa(
             asr_model=asr_model,
         )
 
-        # Nhóm quyết định tự trả lời bằng tay trực tiếp trên UI (Human-in-the-loop).
-        # Không dùng mô hình VQA tự động trên server, trả về danh sách chuỗi rỗng.
-        answers = ["" for _ in pipeline_res.candidates]
+        # Merge logic cho VQA: Ghép lựa chọn thủ công (kèm đáp án) lên đầu
+        final_results = []
+        answers = []
+        seen = set()
+
+        # 1. Thêm các lựa chọn thủ công của người dùng trước
+        for choice in request.user_choices:
+            key = (choice.video_id, choice.frame_id)
+            seen.add(key)
+            final_results.append(
+                CandidateResult(
+                    video_id=choice.video_id,
+                    frame_id=choice.frame_id,
+                    scene_id=choice.scene_id,
+                    timestamp_start=choice.timestamp_start,
+                    timestamp_end=choice.timestamp_end,
+                    timestamp_mid=choice.timestamp_mid,
+                    keyframe_path=choice.keyframe_path,
+                    ocr_text=choice.ocr_text,
+                    asr_text=choice.asr_text,
+                    score=1.0,
+                )
+            )
+            answers.append(choice.answer)
+
+        # 2. Bổ sung nốt kết quả từ AI, gán câu trả lời trống ""
+        for cand in pipeline_res.candidates:
+            if len(final_results) >= request.top_k:
+                break
+            key = (cand.video_id, cand.frame_id)
+            if key not in seen:
+                seen.add(key)
+                final_results.append(cand)
+                answers.append("")  # Để trống câu trả lời để người dùng tự gõ trên UI nếu cần
 
         return VQAResponse(
-            results=pipeline_res.candidates,
+            results=final_results,
             answers=answers,
-            total=len(pipeline_res.candidates),
+            total=len(final_results),
             query_text=pipeline_res.enhanced_query or request.query,
         )
     except Exception as e:

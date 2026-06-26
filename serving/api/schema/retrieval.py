@@ -79,6 +79,24 @@ class CandidateResult(BaseModel):
 # Request Models
 # =============================================================================
 
+class UserChoice(BaseModel):
+    """
+    Lựa chọn frame thủ công của người dùng.
+    
+    Chứa thông tin frame người dùng tự chọn để ưu tiên xếp lên đầu.
+    """
+    video_id: str = Field(..., description="ID video gốc, ví dụ: 'L01_V001'")
+    frame_id: int = Field(..., description="Frame number của keyframe trong video gốc")
+    scene_id: str = Field(default="", description="ID scene, ví dụ: 'L01_V001_S003'")
+    timestamp_start: float = Field(default=0.0)
+    timestamp_end: float = Field(default=0.0)
+    timestamp_mid: float = Field(default=0.0)
+    keyframe_path: str = Field(default="", description="Đường dẫn tương đối tới ảnh keyframe")
+    ocr_text: str = Field(default="")
+    asr_text: str = Field(default="")
+    answer: str = Field(default="", description="Câu trả lời do người dùng gõ (chỉ dùng cho VQA)")
+
+
 class KISRequest(BaseModel):
     """Request cho Known-Item Search (text hoặc voice query)."""
 
@@ -92,9 +110,13 @@ class KISRequest(BaseModel):
         default=InputType.TEXT,
         description="Loại đầu vào: 'text' (gõ tay) hoặc 'voice' (ghi âm, controller xử lý trước)",
     )
-    top_k: Annotated[int, Field(ge=1, le=100)] = Field(
+    top_k: Annotated[int, Field(ge=1, le=200)] = Field(
         default=100,
-        description="Số kết quả trả về. Tối đa 100 theo luật thi.",
+        description="Số kết quả trả về. Tối đa 200 cho vòng chung kết.",
+    )
+    user_choices: list[UserChoice] = Field(
+        default_factory=list,
+        description="Danh sách các frame do người dùng tự chọn bằng tay để xếp lên đầu."
     )
 
 
@@ -104,7 +126,11 @@ class VQARequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=2000, description="Câu mô tả cảnh")
     question: str = Field(..., min_length=1, max_length=500, description="Câu hỏi về cảnh đó")
     input_type: InputType = Field(default=InputType.TEXT)
-    top_k: Annotated[int, Field(ge=1, le=100)] = Field(default=100)
+    top_k: Annotated[int, Field(ge=1, le=200)] = Field(default=100)
+    user_choices: list[UserChoice] = Field(
+        default_factory=list,
+        description="Danh sách các frame và câu trả lời do người dùng tự chọn bằng tay."
+    )
 
 
 class TRAKERequest(BaseModel):
@@ -121,7 +147,7 @@ class TRAKERequest(BaseModel):
         description="Số lượng khoảnh khắc/sự kiện trong query (N). Controller tự động tách từ query.",
     )
     input_type: InputType = Field(default=InputType.TEXT)
-    top_k: Annotated[int, Field(ge=1, le=100)] = Field(default=100)
+    top_k: Annotated[int, Field(ge=1, le=200)] = Field(default=100)
 
 
 class ImageSearchRequest(BaseModel):
@@ -133,7 +159,7 @@ class ImageSearchRequest(BaseModel):
     """
 
     image_base64: str = Field(..., description="Ảnh query dạng base64-encoded string")
-    top_k: Annotated[int, Field(ge=1, le=100)] = Field(default=100)
+    top_k: Annotated[int, Field(ge=1, le=200)] = Field(default=100)
 
 
 # =============================================================================
