@@ -118,12 +118,9 @@ async def search_vqa(
             asr_model=asr_model,
         )
 
-        # Mock answers cho từng candidate ở Tuần 1.
-        # Ở các tuần sau, Researcher B sẽ tích hợp mô hình VQA thực tế.
-        answers = [
-            f"Mock VQA Answer for scene {cand.scene_id} at {cand.timestamp_mid:.1f}s to question: '{request.question}'"
-            for cand in pipeline_res.candidates
-        ]
+        # Nhóm quyết định tự trả lời bằng tay trực tiếp trên UI (Human-in-the-loop).
+        # Không dùng mô hình VQA tự động trên server, trả về danh sách chuỗi rỗng.
+        answers = ["" for _ in pipeline_res.candidates]
 
         return VQAResponse(
             results=pipeline_res.candidates,
