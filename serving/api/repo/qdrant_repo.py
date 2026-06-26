@@ -8,9 +8,8 @@ INTERFACE CONTRACT:
   - Không import gì từ serving/api/service/ hay serving/api/controller/.
   - Tất cả function nhận vector (list[float]) và trả về list[CandidateResult].
 
-SKELETON: Function signatures và docstrings đã được định nghĩa.
-  → Researcher fill implementation dựa trên signatures và docstrings này.
-  → Không thay đổi function signatures hay return types.
+ĐÃ IMPLEMENT ĐẦY ĐỦ bởi MLOps Lead.
+Researcher KHÔNG cần sửa file này trừ khi có yêu cầu từ Lead.
 """
 
 from __future__ import annotations
@@ -27,6 +26,7 @@ from qdrant_client.models import (
     FusionQuery,
     Fusion,
     Filter,
+    QueryResponse,
 )
 
 from serving.api.schema.retrieval import CandidateResult
@@ -48,6 +48,9 @@ logger = logging.getLogger(__name__)
 # Tên Qdrant collection alias "production" → collection_vN (xem indexing/collection_alias.py)
 PRODUCTION_ALIAS = "production"
 
+# Prefetch limit mặc định — lấy đủ candidates cho RRF fusion
+_DEFAULT_PREFETCH_LIMIT = 200
+
 
 # =============================================================================
 # Client Initialization
@@ -64,7 +67,8 @@ def get_qdrant_client(url: str, api_key: str | None = None) -> QdrantClient:
     Returns:
         QdrantClient instance đã kết nối.
     """
-    raise NotImplementedError
+    logger.info(f"Connecting to Qdrant (sync): {url}")
+    return QdrantClient(url=url, api_key=api_key, timeout=30)
 
 
 def get_async_qdrant_client(url: str, api_key: str | None = None) -> AsyncQdrantClient:
@@ -78,7 +82,8 @@ def get_async_qdrant_client(url: str, api_key: str | None = None) -> AsyncQdrant
     Returns:
         AsyncQdrantClient instance.
     """
-    raise NotImplementedError
+    logger.info(f"Connecting to Qdrant (async): {url}")
+    return AsyncQdrantClient(url=url, api_key=api_key, timeout=30)
 
 
 # =============================================================================
@@ -107,26 +112,71 @@ async def search_by_text_vectors(
       - asr_sparse (BM42 keyword matching cho ASR)
 
     Sau đó dùng FusionQuery với Fusion.RRF để kết hợp.
-
-    Args:
-        client: AsyncQdrantClient đã được inject từ dependencies.py
-        ocr_vector: Dense embedding của text query, dim=1536 (gte-Qwen2-1.5B).
-        asr_vector: Dense embedding của text query, dim=1536 (gte-Qwen2-1.5B).
-        ocr_sparse_vector: Sparse vector BM42 cho OCR matching. None nếu không dùng sparse.
-        asr_sparse_vector: Sparse vector BM42 cho ASR matching. None nếu không dùng sparse.
-        image_vector: Dense CLIP text embedding để search Text-to-Image, dim=1024. None nếu không dùng.
-        top_k: Số kết quả trả về sau RRF. Tối đa 100.
-        collection_name: Tên collection hoặc alias. Mặc định là 'production'.
-        score_threshold: Lọc bỏ kết quả có score thấp hơn ngưỡng này.
-
-    Returns:
-        List CandidateResult xếp hạng giảm dần theo RRF score,
-        đã được map từ Qdrant ScoredPoint sang CandidateResult.
-
-    Raises:
-        QdrantClientException: Nếu Qdrant không phản hồi hoặc collection không tồn tại.
     """
-    raise NotImplementedError
+    # --- Build danh sách prefetch từ các nhánh ---
+    prefetches: list[Prefetch] = []
+
+    # Nhánh image_dense (Text-to-Image via CLIP text encoder)
+    if image_vector is not None:
+        prefetches.append(
+            Prefetch(
+                query=NamedVector(name=IMAGE_DENSE.name, vector=image_vector),
+                limit=_DEFAULT_PREFETCH_LIMIT,
+                score_threshold=score_threshold,
+            )
+        )
+
+    # Nhánh ocr_dense
+    prefetches.append(
+        Prefetch(
+            query=NamedVector(name=OCR_DENSE.name, vector=ocr_vector),
+            limit=_DEFAULT_PREFETCH_LIMIT,
+            score_threshold=score_threshold,
+        )
+    )
+
+    # Nhánh asr_dense
+    prefetches.append(
+        Prefetch(
+            query=NamedVector(name=ASR_DENSE.name, vector=asr_vector),
+            limit=_DEFAULT_PREFETCH_LIMIT,
+            score_threshold=score_threshold,
+        )
+    )
+
+    # Nhánh ocr_sparse
+    if ocr_sparse_vector is not None:
+        prefetches.append(
+            Prefetch(
+                query=NamedSparseVector(
+                    name=OCR_SPARSE.name, vector=ocr_sparse_vector,
+                ),
+                limit=_DEFAULT_PREFETCH_LIMIT,
+            )
+        )
+
+    # Nhánh asr_sparse
+    if asr_sparse_vector is not None:
+        prefetches.append(
+            Prefetch(
+                query=NamedSparseVector(
+                    name=ASR_SPARSE.name, vector=asr_sparse_vector,
+                ),
+                limit=_DEFAULT_PREFETCH_LIMIT,
+            )
+        )
+
+    # --- RRF Fusion ---
+    results = await client.query_points(
+        collection_name=collection_name,
+        prefetch=prefetches,
+        query=FusionQuery(fusion=Fusion.RRF),
+        limit=top_k,
+        with_payload=True,
+    )
+
+    logger.debug(f"search_by_text_vectors: {len(results.points)} results from {len(prefetches)} branches")
+    return [_scored_point_to_candidate(p) for p in results.points]
 
 
 async def search_by_image_vector(
@@ -140,21 +190,17 @@ async def search_by_image_vector(
     Tìm kiếm keyframe tương đồng bằng image vector (Image-to-Image Search).
 
     Chỉ dùng nhánh image_dense (BEiT-large + CLIP), không RRF vì chỉ có 1 nhánh.
-
-    Args:
-        client: AsyncQdrantClient đã được inject.
-        image_vector: Image embedding, dim=1024 (BEiT-large + CLIP), L2-normalized.
-        top_k: Số kết quả trả về. Tối đa 100.
-        collection_name: Tên collection hoặc alias.
-        score_threshold: Ngưỡng lọc score.
-
-    Returns:
-        List CandidateResult xếp hạng giảm dần theo cosine similarity.
-
-    Raises:
-        QdrantClientException: Nếu Qdrant không phản hồi.
     """
-    raise NotImplementedError
+    results = await client.query_points(
+        collection_name=collection_name,
+        query=NamedVector(name=IMAGE_DENSE.name, vector=image_vector),
+        limit=top_k,
+        score_threshold=score_threshold,
+        with_payload=True,
+    )
+
+    logger.debug(f"search_by_image_vector: {len(results.points)} results")
+    return [_scored_point_to_candidate(p) for p in results.points]
 
 
 async def search_by_all_vectors(
@@ -170,27 +216,32 @@ async def search_by_all_vectors(
     """
     Multimodal search: kết hợp cả image và text vectors với RRF.
 
-    Dùng cho tương lai khi query bao gồm cả ảnh và text mô tả.
-
-    Args:
-        client: AsyncQdrantClient đã được inject.
-        image_vector: Image embedding, dim=1024.
-        ocr_vector: OCR text embedding, dim=1536.
-        asr_vector: ASR text embedding, dim=3584.
-        ocr_sparse_vector: BM42 sparse vector cho OCR.
-        asr_sparse_vector: BM42 sparse vector cho ASR.
-        top_k: Số kết quả.
-        collection_name: Tên collection hoặc alias.
-
-    Returns:
-        List CandidateResult sau RRF fusion của tất cả nhánh.
+    Dùng khi query bao gồm cả ảnh và text mô tả.
     """
-    raise NotImplementedError
+    # Tận dụng search_by_text_vectors — đã hỗ trợ image_vector parameter
+    return await search_by_text_vectors(
+        client=client,
+        ocr_vector=ocr_vector,
+        asr_vector=asr_vector,
+        ocr_sparse_vector=ocr_sparse_vector,
+        asr_sparse_vector=asr_sparse_vector,
+        image_vector=image_vector,
+        top_k=top_k,
+        collection_name=collection_name,
+    )
 
 
 # =============================================================================
 # Helper Functions
 # =============================================================================
+
+# Các field bắt buộc trong payload — khớp với KeyframePayload
+_REQUIRED_PAYLOAD_FIELDS = [
+    "video_id", "scene_id", "frame_id",
+    "timestamp_start", "timestamp_end", "timestamp_mid",
+    "keyframe_path",
+]
+
 
 def _scored_point_to_candidate(scored_point) -> CandidateResult:
     """
@@ -198,17 +249,30 @@ def _scored_point_to_candidate(scored_point) -> CandidateResult:
 
     RÀNG BUỘC: Payload phải có đủ các field của KeyframePayload.
     Nếu thiếu field, raise ValueError với tên field bị thiếu.
-
-    Args:
-        scored_point: qdrant_client.models.ScoredPoint từ kết quả search.
-
-    Returns:
-        CandidateResult với tất cả fields đã được map từ payload.
-
-    Raises:
-        ValueError: Nếu payload thiếu field bắt buộc.
     """
-    raise NotImplementedError
+    payload = scored_point.payload or {}
+
+    # Validate required fields
+    missing = [f for f in _REQUIRED_PAYLOAD_FIELDS if f not in payload]
+    if missing:
+        raise ValueError(
+            f"Payload thiếu field bắt buộc: {missing}. "
+            f"Point ID: {scored_point.id}. "
+            f"Kiểm tra lại quá trình ingestion/upsert."
+        )
+
+    return CandidateResult(
+        video_id=payload["video_id"],
+        scene_id=payload["scene_id"],
+        frame_id=int(payload["frame_id"]),
+        timestamp_start=float(payload["timestamp_start"]),
+        timestamp_end=float(payload["timestamp_end"]),
+        timestamp_mid=float(payload["timestamp_mid"]),
+        keyframe_path=payload["keyframe_path"],
+        ocr_text=payload.get("ocr_text", ""),
+        asr_text=payload.get("asr_text", ""),
+        score=float(scored_point.score) if scored_point.score is not None else 0.0,
+    )
 
 
 async def get_point_by_id(
@@ -221,13 +285,25 @@ async def get_point_by_id(
 
     Dùng cho trường hợp cần fetch metadata của 1 keyframe cụ thể
     (ví dụ: hiển thị chi tiết khi user click vào 1 kết quả).
-
-    Args:
-        client: AsyncQdrantClient đã được inject.
-        point_id: UUID string của Qdrant point (tạo bởi named_vector_spec.make_point_id).
-        collection_name: Tên collection hoặc alias.
-
-    Returns:
-        CandidateResult nếu tìm thấy, None nếu không tồn tại.
     """
-    raise NotImplementedError
+    points = await client.retrieve(
+        collection_name=collection_name,
+        ids=[point_id],
+        with_payload=True,
+        with_vectors=False,
+    )
+
+    if not points:
+        logger.warning(f"Point not found: {point_id} in {collection_name}")
+        return None
+
+    point = points[0]
+
+    # retrieve() trả về Record (không có score), tạo fake scored_point-like object
+    class _FakeScored:
+        def __init__(self, p):
+            self.id = p.id
+            self.payload = p.payload
+            self.score = 1.0  # không có score thật khi retrieve by ID
+
+    return _scored_point_to_candidate(_FakeScored(point))
