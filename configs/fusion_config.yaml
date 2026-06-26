@@ -1,0 +1,54 @@
+# =============================================================================
+# configs/fusion_config.yaml — Tham số Fusion (RRF) dùng chung cho indexing và serving
+# =============================================================================
+#
+# File này kiểm soát cách Qdrant kết hợp nhiều nhánh vector (dense + sparse)
+# để tạo ra danh sách candidates cuối cùng trước khi đưa vào Reranker.
+#
+# CÁCH SỬ DỤNG (Python):
+#   from shared.utils.config_loader import load_fusion_config
+#   cfg = load_fusion_config()
+#
+# Xem thêm: shared/schemas/named_vector_spec.py để biết tên các named vector.
+# =============================================================================
+
+schema_version: "1.0.0"
+
+# --- Reciprocal Rank Fusion (RRF) --------------------------------------------
+# RRF kết hợp kết quả từ nhiều nhánh prefetch bằng công thức:
+#   score(d) = Σ 1 / (k + rank_i(d))
+# Tham số k kiểm soát mức độ ảnh hưởng của rank cao vs rank thấp
+rrf:
+  k: 60   # giá trị khuyến nghị trong paper gốc; tăng lên nếu muốn smooth hơn
+
+# --- Prefetch limits (số candidates lấy về từ mỗi nhánh trước khi RRF) ------
+# Nguyên tắc: prefetch_limit >> top_k (để RRF có đủ candidates để fusion)
+prefetch:
+  image_dense: 200      # lấy top-200 từ nhánh image vector
+  ocr_dense: 200        # lấy top-200 từ nhánh OCR text vector
+  asr_dense: 200        # lấy top-200 từ nhánh ASR text vector
+  ocr_sparse: 200       # lấy top-200 từ nhánh OCR sparse (BM42)
+  asr_sparse: 200       # lấy top-200 từ nhánh ASR sparse (BM42)
+
+# --- Final top-k trả về sau RRF (trước khi Reranker) ------------------------
+retrieval:
+  top_k: 100            # Giới hạn submit theo contest rule: top-K ≤ 100
+
+# --- Trọng số nhánh (dùng trong FusionQuery nếu cần weighted RRF) -----------
+# Mặc định RRF không cần weight, nhưng để sẵn cho thử nghiệm sau
+weights:
+  image_dense: 1.0
+  ocr_dense: 1.0
+  asr_dense: 0.8        # ASR thường noisy hơn OCR — trọng số thấp hơn
+  ocr_sparse: 0.6       # sparse bổ trợ dense, không phải thay thế
+  asr_sparse: 0.5
+
+# --- Cấu hình theo loại query ------------------------------------------------
+# Với mỗi loại query, chỉ enable các nhánh liên quan để tránh nhiễu
+query_routing:
+  text_query:
+    enabled_branches: [ocr_dense, asr_dense, ocr_sparse, asr_sparse]
+  image_query:
+    enabled_branches: [image_dense]
+  multimodal_query:   # tương lai: query gồm cả ảnh và text
+    enabled_branches: [image_dense, ocr_dense, asr_dense, ocr_sparse, asr_sparse]

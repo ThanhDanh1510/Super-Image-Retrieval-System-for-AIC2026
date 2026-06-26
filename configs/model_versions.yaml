@@ -1,0 +1,84 @@
+# =============================================================================
+# configs/model_versions.yaml — NGUỒN XÁC ĐỊNH DUY NHẤT cho phiên bản model
+# =============================================================================
+#
+# QUY TẮC BẮT BUỘC:
+#   - Không tự ý đổi bất kỳ version nào trong file này mà chưa thông báo team.
+#   - Mọi thay đổi phải bump "schema_version" và ghi chú vào CHANGELOG bên dưới.
+#   - Ingestion (Kaggle) và Serving đều đọc file này — lệch version = vector không tương thích.
+#
+# CÁCH SỬ DỤNG (Python):
+#   from shared.utils.config_loader import load_model_versions
+#   cfg = load_model_versions()  # trả về dict từ file này
+#
+# =============================================================================
+
+schema_version: "1.0.0"   # Tăng khi có breaking change ở bất kỳ field nào
+
+# --- Shot Detection -----------------------------------------------------------
+shot_detection:
+  model: "TransNetV2"
+  weights: "transnetv2-pytorch-weights.pth"   # filename trong Kaggle Dataset model
+  threshold: 0.5                              # xác suất tối thiểu để xác nhận một shot boundary
+
+# --- Keyframe Selection -------------------------------------------------------
+keyframe:
+  strategy: "middle_frame"   # "middle_frame" | "representative" — hiện tại dùng frame giữa mỗi scene
+  max_keyframes_per_scene: 1  # giữ 1 keyframe đại diện mỗi scene (có thể tăng lên 3 nếu scene dài)
+
+# --- OCR (Optical Character Recognition) -------------------------------------
+ocr:
+  engine: "PaddleOCR"
+  version: "v6"                   # paddlepaddle + paddleocr==2.8.x
+  lang: "vi"                      # nhận dạng tiếng Việt
+  use_gpu: true
+  det_model_dir: null             # null = dùng model mặc định của PaddleOCR v6
+  rec_model_dir: null
+
+# --- ASR (Automatic Speech Recognition) --------------------------------------
+asr:
+  model: "vinai/PhoWhisper-medium"   # HuggingFace model ID
+  language: "vi"
+  task: "transcribe"
+  device: "cuda"
+  compute_type: "float16"           # "float16" trên GPU, "int8" nếu dùng CPU
+
+# --- Text Tokenizer / Preprocessing ------------------------------------------
+text_tokenizer:
+  word_segmenter: "underthesea"     # "underthesea" | "vncorenlp" — dùng cho tiếng Việt
+  # Lưu ý: underthesea nhẹ hơn và dễ cài trên Kaggle hơn VnCoreNLP
+
+# --- Image Embedding ----------------------------------------------------------
+image_embedding:
+  model: "microsoft/BEiT-large-patch16-224-pt22k-ft22k"   # HuggingFace model ID
+  # Kết hợp với CLIP để tăng khả năng zero-shot
+  clip_model: "openai/clip-vit-large-patch14"
+  vector_dim: 1024                  # dimension của vector đầu ra
+  normalize: true                   # L2 normalize trước khi upsert vào Qdrant
+  batch_size: 32                    # số ảnh xử lý song song (điều chỉnh theo VRAM)
+
+# --- Text Embedding -----------------------------------------------------------
+text_embedding:
+  model: "Alibaba-NLP/gte-Qwen2-1.5B-instruct"   # HuggingFace model ID (version nhẹ)
+  # version nặng hơn dùng cho ASR (audio thường dài hơn OCR):
+  asr_model: "Alibaba-NLP/gte-Qwen2-7B-instruct"
+  vector_dim: 1536                  # dimension của gte-Qwen2-1.5B
+  asr_vector_dim: 3584              # dimension của gte-Qwen2-7B
+  max_tokens: 512                   # cắt bớt nếu text dài hơn
+  normalize: true
+  batch_size: 16
+
+# --- Named Vector Names (phải khớp với indexing/schema/collection_schema.py) --
+# Xem shared/schemas/named_vector_spec.py để biết spec đầy đủ
+named_vectors:
+  image_dense: "image_dense"        # BEiT3+CLIP, dim=1024
+  ocr_dense: "ocr_dense"            # gte-Qwen2-1.5B, dim=1536
+  asr_dense: "asr_dense"            # gte-Qwen2-7B, dim=3584
+  ocr_sparse: "ocr_sparse"          # BM42 sparse vector
+  asr_sparse: "asr_sparse"          # BM42 sparse vector
+
+# =============================================================================
+# CHANGELOG
+# =============================================================================
+# v1.0.0 (2026-06-26): Initial version — TransNetV2, PaddleOCR v6, PhoWhisper-medium,
+#                       BEiT-large, gte-Qwen2-1.5B/7B
