@@ -166,18 +166,19 @@ async def _encode_text(
     """
     Encode text thành 2 dense vectors: ocr_vector và asr_vector.
 
-    Lý do dùng 2 vector khác dim:
-      - ocr_vector (dim=1536, gte-Qwen2-1.5B): match với OCR text ngắn trong keyframe.
-      - asr_vector (dim=3584, gte-Qwen2-7B): match với ASR transcript dài hơn.
+    Cả 2 vector cùng dim=1536, cùng model (gte-Qwen2-1.5B) — được giữ riêng lẻng để
+    Qdrant thực hiện prefetch độc lập trên 2 named vector khác nhau (ocr_dense và asr_dense),
+    sau đó RRF fusion kết quả. Nếu Qdrant chấp nhận 2 vector giống nhau từ cùng 1 model thì
+    chúng sẽ trả kết quả giống nhau — trong trường hợp này có thể disable một nánh.
 
     Args:
         text: Text đã enhanced (tiếng Anh).
-        embedder: TextEmbeddingWrapper singleton (đã load cả 2 model).
+        embedder: TextEmbeddingWrapper singleton (gte-Qwen2-1.5B).
 
     Returns:
         Tuple (ocr_vector, asr_vector).
         - ocr_vector: list[float], len=1536, L2-normalized.
-        - asr_vector: list[float], len=3584, L2-normalized.
+        - asr_vector: list[float], len=1536, L2-normalized.
     """
     raise NotImplementedError
 

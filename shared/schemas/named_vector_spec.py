@@ -60,10 +60,10 @@ OCR_DENSE = VectorSpec(
 
 ASR_DENSE = VectorSpec(
     name="asr_dense",
-    dim=3584,
+    dim=1536,
     distance="Cosine",
     vector_type="dense",
-    description="gte-Qwen2-7B embedding của transcript ASR từ audio, L2-normalized",
+    description="gte-Qwen2-1.5B embedding của transcript ASR từ audio, L2-normalized (cùng model với ocr_dense)",
 )
 
 OCR_SPARSE = VectorSpec(

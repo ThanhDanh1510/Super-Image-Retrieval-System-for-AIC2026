@@ -19,58 +19,42 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Literal
 
 import numpy as np
 
-logger = logging.getLogger(__name__)
-
-ModelSize = Literal["1.5B", "7B"]
 
 
 class TextEmbeddingWrapper:
     """
-    Wrapper load và inference gte-Qwen2 text embedding model.
+    Wrapper load và inference gte-Qwen2-1.5B text embedding model.
 
-    Supports 2 model sizes:
-      - "1.5B" (gte-Qwen2-1.5B-instruct): dim=1536, dùng cho OCR text (ngắn)
-      - "7B"   (gte-Qwen2-7B-instruct):   dim=3584, dùng cho ASR transcript (dài)
+    Dùng cho cả OCR text và ASR transcript — cùng 1 model, cùng dim=1536.
 
     Usage:
-        wrapper_1b = TextEmbeddingWrapper(model_size="1.5B", device="cuda")
-        wrapper_7b = TextEmbeddingWrapper(model_size="7B", device="cuda")
-        ocr_vec = wrapper_1b.encode("Text extracted from keyframe")
-        asr_vec = wrapper_7b.encode("Long ASR transcript text here...")
+        wrapper = TextEmbeddingWrapper(device="cuda")
+        ocr_vec = wrapper.encode("Text extracted from keyframe")
+        asr_vec = wrapper.encode("Long ASR transcript text here...")
     """
 
-    MODEL_IDS: dict[ModelSize, str] = {
-        "1.5B": "Alibaba-NLP/gte-Qwen2-1.5B-instruct",
-        "7B": "Alibaba-NLP/gte-Qwen2-7B-instruct",
-    }
+    MODEL_ID = "Alibaba-NLP/gte-Qwen2-1.5B-instruct"
+    VECTOR_DIM = 1536
 
-    VECTOR_DIMS: dict[ModelSize, int] = {
-        "1.5B": 1536,
-        "7B": 3584,
-    }
-
-    def __init__(self, model_size: ModelSize = "1.5B", device: str = "cuda") -> None:
+    def __init__(self, device: str = "cuda") -> None:
         """
-        Load gte-Qwen2 model vào memory.
+        Load gte-Qwen2-1.5B model vào memory.
 
         Args:
-            model_size: "1.5B" hoặc "7B". Xem MODEL_IDS để biết HuggingFace model ID.
-            device: "cuda" hoặc "cpu". Dùng "cuda" nếu có GPU.
+            device: "cuda" hoặc "cpu".
 
         Raises:
-            ValueError: Nếu model_size không hợp lệ.
-            RuntimeError: Nếu không load được model (thiếu VRAM, sai model ID...).
+            RuntimeError: Nếu không load được model.
         """
         raise NotImplementedError
 
     @property
     def dim(self) -> int:
-        """Dimension của output vector. Phải khớp với named_vector_spec."""
-        raise NotImplementedError
+        """Dimension của output vector = 1536. Phải khớp với named_vector_spec."""
+        return self.VECTOR_DIM
 
     def encode(self, text: str | list[str], batch_size: int = 16) -> np.ndarray:
         """
