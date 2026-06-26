@@ -1,0 +1,75 @@
+# =============================================================================
+# .gitignore — AIC2026 Super Image Retrieval System
+# =============================================================================
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+dist/
+build/
+*.whl
+
+# --- Virtual environments ---
+.venv/
+venv/
+env/
+
+# --- IDE ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# --- Environment & Secrets ---
+.env
+*.env.local
+kaggle.json
+
+# --- Data (không commit video, ảnh, vector lên Git) ---
+data/
+*.npy
+*.npz
+*.parquet
+*.h5
+*.hdf5
+*.onnx
+*.pt
+*.pth
+*.bin
+*.safetensors
+
+# --- Kaggle ---
+/kaggle/
+
+# --- Qdrant snapshots ---
+*.snapshot
+
+# --- Logs ---
+logs/
+*.log
+
+# --- Jupyter Notebook checkpoints ---
+.ipynb_checkpoints/
+
+# --- Coverage & Testing ---
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+
+# --- Docker ---
+*.tar
+
+# --- Misc ---
+*.bak
+*.tmp
