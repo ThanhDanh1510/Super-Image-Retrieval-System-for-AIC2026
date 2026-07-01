@@ -142,19 +142,48 @@ Mỗi point trong Qdrant có payload theo `KeyframePayload`:
 
 ---
 
-## 10. Constraints cứng khi viết code
+## 11. Bổ sung thông tin Tuần 2
+
+### A. Reranker Constraints (Researcher B)
+- Thư mục: `serving/api/service/reranker/skeletons/`
+- Gồm 3 tasks chính:
+  1. `text_branch/viranker.py` (ViRanker): Đo độ tương thích của văn bản.
+  2. `crossmodal_branch/jina_reranker_m0.py` (Jina Reranker): Đối chiếu text query với ảnh keyframe thật.
+  3. `fusion_score.py`: Hợp nhất điểm số 2 nhánh theo linear/RRF với `alpha` cấu hình trong `configs/fusion_config.yaml`.
+- **Ràng buộc**:
+  - **Lazy load**: Khởi tạo model khi được gọi lần đầu, cache lại model instance để tránh OOM khi import.
+  - **Batch inference**: Thực hiện dự đoán song song cho toàn bộ candidates trong 1 forward pass. KHÔNG dùng loop từng candidate.
+
+### B. Temporal Aligner cho TRAKE (Researcher B)
+- File: `serving/api/service/temporal_aligner.py`
+- **Quy tắc**:
+  - Lọc ra chuỗi các keyframes đại diện thỏa mãn: Cùng `video_id`, thứ tự thời gian tăng dần (`timestamp_mid` tăng dần).
+  - Ưu tiên video có số lượng events matched nhiều nhất, sau đó mới tối ưu hóa điểm số.
+
+### C. Aggregation Flow (MLOps Lead)
+- Thư mục: `aggregation/`
+- Luồng chạy:
+  `pull_shards` (tải data từ Kaggle) → `verify_shards` (xác thực tính nhất quán và trùng lặp) → `merge_datasets` (gộp metadata, vectors, copy keyframes) → `publish_unified` (publish unified dataset lên Kaggle).
+
+### D. Evaluation (Researcher)
+- Thư mục: `eval/skeletons/`
+- Công thức `r_score`:
+  - KIS: `1.0` nếu đúng video_id và timestamp trong khoảng ground truth, ngược lại `0.0`.
+  - VQA: `1.0` nếu đúng video_id, timestamp và đúng answer, ngược lại `0.0`.
+  - TRAKE: `0.0` nếu sai video_id, ngược lại `(1 / N) * count_matched_events`.
+- `final_score` = trung bình cộng của `R@1, R@5, R@20, R@50, R@100`.
+
+---
+
+## 12. Constraints bổ sung (Tuần 2)
 
 ```
-✅ Luôn import tên vector từ shared/schemas/named_vector_spec.py
-✅ Luôn đọc model version từ configs/model_versions.yaml
-✅ Point ID = make_point_id(video_id, scene_id) — deterministic
-✅ Skeleton functions: raise NotImplementedError
-✅ Type hints cho tất cả function signatures
-✅ L2-normalize tất cả dense vectors trước khi upsert/search
+✅ Khởi tạo model lazy load (reranker) và cache instance.
+✅ Batch inference cho reranker để tận dụng GPU.
+✅ verify_shards bắt buộc kiểm tra trùng lặp và alignment chéo.
+✅ eval/metrics/r_score.py bắt buộc tính đúng công thức quy định.
 
-❌ KHÔNG hardcode dimension, tên vector, hay model ID
-❌ KHÔNG import ngược chiều (repo → service, service → controller)
-❌ KHÔNG khởi tạo model ở module level (OOM khi import)
-❌ KHÔNG dùng random UUID cho Point ID
-❌ KHÔNG tự ý thay đổi model version
+❌ KHÔNG loop từng candidate để chạy inference.
+❌ KHÔNG merge shards nếu verify phát hiện lỗi trùng/sót video_id.
 ```
+

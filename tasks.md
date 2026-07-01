@@ -218,18 +218,18 @@ fix/<TASK-ID>-<slug>        # ví dụ: fix/TASK-RNK-02-batch-inference
 ## Critical Path
 
 ```
-Tuần 1 — Foundation (bạn unblock mọi người)
-├── [Bạn]          configs/ — shard_assignment + model_versions + fusion_config
-├── [Bạn]          shared/schemas/named_vector_spec.py
-├── [Bạn]          serving/api/schema/ — Pydantic models (CandidateResult, RetrievalRequest...)
-├── [Bạn]          AGENT_CONTEXT.md + skeleton files cho ING-01..05
+Tuần 1 — Foundation (bạn unblock mọi người) [DONE]
+├── [Bạn] [x]      configs/ — shard_assignment + model_versions + fusion_config
+├── [Bạn] [x]      shared/schemas/named_vector_spec.py
+├── [Bạn] [x]      serving/api/schema/ — Pydantic models (CandidateResult, RetrievalRequest...)
+├── [Bạn] [x]      AGENT_CONTEXT.md + skeleton files cho ING-01..05
 ├── [Researcher]   TASK-ING-01, 02, 03 (song song, mỗi người shard riêng)
-└── [Bạn]          serving/repo/qdrant_repo.py
+└── [Bạn] [x]      serving/repo/qdrant_repo.py
 
-Tuần 2 — Core serving
-├── [Bạn]          Skeleton files cho SRV-01..05, RNK-01..04
-├── [Bạn]          aggregation/ (sau khi có ≥1 shard xong)
-├── [Bạn]          indexing/ (sau aggregation)
+Tuần 2 — Core serving [IN PROGRESS]
+├── [Bạn] [x]      Skeleton files cho SRV-01..05, RNK-01..04
+├── [Bạn] [x]      aggregation/ (sau khi có ≥1 shard xong)
+├── [Bạn] [x]      indexing/ (sau aggregation)
 ├── [Researcher A] TASK-SRV-01, 02, 03, 04
 └── [Researcher B] TASK-RNK-01, 02, 03
 

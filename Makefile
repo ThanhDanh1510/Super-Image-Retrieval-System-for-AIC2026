@@ -51,7 +51,7 @@ serve-reload: ## Chạy API server (dev mode, auto-reload)
 	$(UVICORN) serving.api.main:app --host $(HOST) --port $(PORT) --reload
 
 # =============================================================================
-# Indexing
+# Indexing & Aggregation
 # =============================================================================
 
 create-collection: ## Tạo Qdrant collection với schema đầy đủ
@@ -64,6 +64,26 @@ verify-collection: ## Kiểm tra collection đã tạo đúng schema chưa
 	$(PYTHON) -c "from indexing.schema.collection_schema import *; \
 		client = QdrantClient(url='$(QDRANT_URL)'); \
 		print('OK' if verify_collection(client) else 'FAILED')"
+
+pull-shards: ## Tải toàn bộ shard datasets từ Kaggle (yêu cầu --owner)
+	$(PYTHON) -m aggregation.pull_shards --owner $(OWNER)
+
+verify-shards: ## Xác thực các shard datasets
+	$(PYTHON) -m aggregation.verify_shards
+
+merge-datasets: ## Gộp các shard datasets thành bộ thống nhất
+	$(PYTHON) -m aggregation.merge_datasets
+
+publish-unified: ## Đóng gói và publish Unified Dataset lên Kaggle (yêu cầu --owner)
+	$(PYTHON) -m aggregation.publish_unified --owner $(OWNER)
+
+# =============================================================================
+# Evaluation
+# =============================================================================
+
+benchmark: ## Chạy offline benchmark đánh giá độ chính xác và latency
+	$(PYTHON) -m eval.skeletons.run_benchmark
+
 
 # =============================================================================
 # Code Quality
