@@ -77,7 +77,7 @@ indexing/
 │
 ├── schema/
 │   └── collection_schema.py    # Named vectors: image_dense (BEiT3+CLIP), ocr_dense (gte-Qwen2-1.5B),
-│                                # asr_dense (gte-Qwen2-7B), ocr_sparse, asr_sparse — định nghĩa 1 lần, dùng cho mọi lần index.
+│                                # asr_dense (gte-Qwen2-1.5B), ocr_sparse, asr_sparse — định nghĩa 1 lần, dùng cho mọi lần index.
 │                                # (Tham số RRF đọc từ configs/fusion_config.yaml ở root)
 │
 ├── upsert/
