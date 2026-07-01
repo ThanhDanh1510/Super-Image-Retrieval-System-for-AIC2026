@@ -58,8 +58,10 @@ data/
 logs/
 *.log
 
-# --- Jupyter Notebook checkpoints ---
+# --- Jupyter Notebooks & checkpoints (để chạy nháp trên Kaggle, không commit) ---
 .ipynb_checkpoints/
+*.ipynb
+ingestion/notebooks/
 
 # --- Coverage & Testing ---
 .coverage

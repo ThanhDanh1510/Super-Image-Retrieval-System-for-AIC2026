@@ -34,12 +34,7 @@ ingestion/
 │   ├── 01c_embedding_generation.py    # [MLOps viết] Skeleton script
 │   ├── 02_export_shard_dataset.py     # [MLOps viết] Skeleton script
 │   └── checkpoint_manifest.py         # [MLOps viết] Skeleton class — Researcher dùng Agent fill implementation
-│
-├── notebooks/                         # Các runner scripts/notebooks chạy trên Kaggle (import logic từ skeletons ở trên)
-│   ├── 01a_keyframe_extraction.ipynb  # Bước 1: Gọi logic từ skeletons/01a_keyframe_extraction.py
-│   ├── 01b_text_extraction.ipynb      # Bước 2: Gọi logic từ skeletons/01b_text_extraction.py
-│   ├── 01c_embedding_generation.ipynb # Bước 3: Gọi logic từ skeletons/01c_embedding_generation.py
-│   └── 02_export_shard_dataset.ipynb  # Gọi logic từ skeletons/02_export_shard_dataset.py
+│                                      # (Chạy offline bằng CLI / notebook nháp trên Kaggle, không commit file .ipynb)
 │
 ├── kaggle_utils/
 │   ├── shard_loader.py        # Đọc shard_assignment.yaml, biết shard này gồm video nào
