@@ -88,10 +88,10 @@ Mỗi người tự chạy toàn bộ pipeline trên Kaggle Notebook của mình
 
 | Task | Skeleton file | Output cần đạt |
 |---|---|---|
-| **TASK-ING-01** | `01a_keyframe_extraction.ipynb` | Keyframe JPG + `scene_metadata.parquet` (scene_id, video_id, start_frame, end_frame, fps) |
-| **TASK-ING-02** | `01b_text_extraction.ipynb` | `ocr_text.parquet` (scene_id, ocr_text), `asr_text.parquet` (scene_id, asr_text) |
-| **TASK-ING-03** | `01c_embedding_generation.ipynb` | `image_vectors.npy`, `ocr_vectors.npy`, `asr_vectors.npy` — shape `(N, D)`, cùng thứ tự scene_id |
-| **TASK-ING-04** | `02_export_shard_dataset.ipynb` | Kaggle Dataset `aic2026-shard-<member>-v<n>` publish public |
+| **TASK-ING-01** | `01a_keyframe_extraction.py` | Keyframe JPG + `scene_metadata.parquet` (scene_id, video_id, start_frame, end_frame, fps) |
+| **TASK-ING-02** | `01b_text_extraction.py` | `ocr_text.parquet` (scene_id, ocr_text), `asr_text.parquet` (scene_id, asr_text) |
+| **TASK-ING-03** | `01c_embedding_generation.py` | `image_vectors.npy`, `ocr_vectors.npy`, `asr_vectors.npy` — shape `(N, D)`, cùng thứ tự scene_id |
+| **TASK-ING-04** | `02_export_shard_dataset.py` | Kaggle Dataset `aic2026-shard-<member>-v<n>` publish public |
 | **TASK-ING-05** | `kaggle_utils/checkpoint_manifest.py` | Class ghi/đọc `checkpoint.json` — track scene_id đã xong, resume khi session Kaggle bị ngắt |
 
 **Constraints bắt buộc (đã nhúng trong skeleton, Agent không được override):**

@@ -29,17 +29,17 @@ Mỗi thành viên nhận 1 shard video (theo `video_id`), tự chạy **toàn b
 ```
 ingestion/
 ├── skeletons/
-│   ├── 01a_keyframe_extraction.ipynb  # [MLOps viết] Skeleton notebook — function signatures, output schema, constraints nhúng sẵn
-│   ├── 01b_text_extraction.ipynb      # [MLOps viết] Skeleton notebook
-│   ├── 01c_embedding_generation.ipynb # [MLOps viết] Skeleton notebook
-│   ├── 02_export_shard_dataset.ipynb  # [MLOps viết] Skeleton notebook
+│   ├── 01a_keyframe_extraction.py     # [MLOps viết] Skeleton script — function signatures, output schema, constraints nhúng sẵn
+│   ├── 01b_text_extraction.py         # [MLOps viết] Skeleton script
+│   ├── 01c_embedding_generation.py    # [MLOps viết] Skeleton script
+│   ├── 02_export_shard_dataset.py     # [MLOps viết] Skeleton script
 │   └── checkpoint_manifest.py         # [MLOps viết] Skeleton class — Researcher dùng Agent fill implementation
 │
-├── notebooks/
-│   ├── 01a_keyframe_extraction.ipynb  # Bước 1: Cắt cảnh (TransNet V2) & trích xuất keyframes (ảnh JPG) + scene metadata (Parquet)
-│   ├── 01b_text_extraction.ipynb      # Bước 2: Chạy OCR (PaddleOCR v6) trên keyframe & ASR (PhoWhisper) từ audio video
-│   ├── 01c_embedding_generation.ipynb # Bước 3: Sinh vector embeddings (BEiT3+CLIP cho ảnh, gte-Qwen2-1.5B cho OCR/ASR)
-│   └── 02_export_shard_dataset.ipynb  # Gói output (keyframes, metadata, vectors) → publish Kaggle Dataset riêng
+├── notebooks/                         # Các runner scripts/notebooks chạy trên Kaggle (import logic từ skeletons ở trên)
+│   ├── 01a_keyframe_extraction.ipynb  # Bước 1: Gọi logic từ skeletons/01a_keyframe_extraction.py
+│   ├── 01b_text_extraction.ipynb      # Bước 2: Gọi logic từ skeletons/01b_text_extraction.py
+│   ├── 01c_embedding_generation.ipynb # Bước 3: Gọi logic từ skeletons/01c_embedding_generation.py
+│   └── 02_export_shard_dataset.ipynb  # Gọi logic từ skeletons/02_export_shard_dataset.py
 │
 ├── kaggle_utils/
 │   ├── shard_loader.py        # Đọc shard_assignment.yaml, biết shard này gồm video nào
@@ -65,7 +65,7 @@ Bước "bàn giao" duy nhất giữa các member: mount toàn bộ Kaggle Datas
 aggregation/
 ├── pull_shards.py          # Dùng Kaggle API pull toàn bộ dataset theo danh sách trong shard_assignment.yaml
 ├── verify_shards.py        # Check đủ video_id theo plan, phát hiện shard thiếu hoặc bị trùng video_id giữa 2 member
-├── merge_datasets.ipynb    # Notebook tổng hợp: gộp parquet (metadata+text) và .npy/.npz (vector) từ mọi shard
+├── merge_datasets.py       # Script tổng hợp: gộp parquet (metadata+text) và .npy/.npz (vector) từ mọi shard
 └── publish_unified.py      # Publish dataset đã gộp: `aic2026-unified-v<n>`
 ```
 
