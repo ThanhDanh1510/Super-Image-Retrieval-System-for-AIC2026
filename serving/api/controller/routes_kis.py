@@ -26,6 +26,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from serving.api.schema.retrieval import (
     InputType,
     TaskType,
+    CandidateResult,
     KISRequest,
     KISResponse,
     VQARequest,
