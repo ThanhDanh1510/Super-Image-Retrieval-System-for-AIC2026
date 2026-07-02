@@ -13,7 +13,7 @@ CÁCH CHẠY:
     # Hoặc chỉ in ra config mà không tạo:
     python -m indexing.schema.collection_schema --dry-run
 
-ĐÃ IMPLEMENT ĐẦY ĐỦ bởi MLOps Lead.
+ĐÃ IMPLEMENT ĐẦY ĐỦ bởi Leader.
 
 IMPORT RULES:
     - Import spec từ: shared/schemas/named_vector_spec.py

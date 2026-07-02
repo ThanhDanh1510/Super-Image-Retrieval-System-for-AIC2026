@@ -8,8 +8,8 @@ INTERFACE CONTRACT:
   - Không import gì từ serving/api/service/ hay serving/api/controller/.
   - Tất cả function nhận vector (list[float]) và trả về list[CandidateResult].
 
-ĐÃ IMPLEMENT ĐẦY ĐỦ bởi MLOps Lead.
-Researcher KHÔNG cần sửa file này trừ khi có yêu cầu từ Lead.
+ĐÃ IMPLEMENT ĐẦY ĐỦ bởi Leader.
+Researcher KHÔNG cần sửa file này trừ khi có yêu cầu từ Leader.
 """
 
 from __future__ import annotations

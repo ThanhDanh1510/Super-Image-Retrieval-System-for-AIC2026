@@ -19,7 +19,7 @@ CÁC TÌNH HUỐNG SỬ DỤNG:
     # 4. Xem tất cả aliases:
     python -m indexing.collection_alias --action list
 
-ĐÃ IMPLEMENT ĐẦY ĐỦ bởi MLOps Lead.
+ĐÃ IMPLEMENT ĐẦY ĐỦ bởi Leader.
 """
 
 from __future__ import annotations

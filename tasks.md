@@ -4,9 +4,11 @@
 
 | Vai trò | Thế mạnh | Công cụ |
 |---|---|---|
-| **MLOps Lead** (bạn) | Infrastructure, pipeline, code quality | Toàn bộ |
-| **Researcher A** | Research, model selection, thực nghiệm | AI Agent (Claude/Cursor) |
-| **Researcher B** | Research, model selection, thực nghiệm | AI Agent (Claude/Cursor) |
+| **Leader** (bạn) | Infrastructure, pipeline, code quality | Toàn bộ |
+| **Member_1** | Research, model selection, thực nghiệm | AI Agent (Claude/Cursor) |
+| **Member_2** | Research, model selection, thực nghiệm | AI Agent (Claude/Cursor) |
+| **Member_3** | Research, model selection, thực nghiệm | AI Agent (Claude/Cursor) |
+| **Member_4** | Research, model selection, thực nghiệm | AI Agent (Claude/Cursor) |
 
 **Nguyên tắc quản lý:** AI Agent của researcher cần spec đủ chi tiết để sinh code đúng — không giao miệng, không giải thích sau. Nhiệm vụ của bạn là **viết skeleton + spec trước**, researcher dùng Agent để fill vào, bạn **review/merge**.
 
@@ -62,7 +64,7 @@ Agent đọc file này → hiểu ngay import path, interface, constraint — kh
 
 ## Phân chia trách nhiệm theo module
 
-### 🔴 Bạn phụ trách (MLOps Lead) — KHÔNG delegate
+### 🔴 Bạn phụ trách (Leader) — KHÔNG delegate
 
 Sai một chỗ → cả team bị block, hoặc cần hiểu hệ thống toàn cục mới làm đúng.
 
@@ -80,9 +82,9 @@ Sai một chỗ → cả team bị block, hoặc cần hiểu hệ thống toàn
 
 ---
 
-### 🟡 Bạn viết skeleton + spec → Researcher dùng Agent implement
+### 🟡 Bạn viết skeleton + spec → Members dùng Agent implement
 
-#### Module 1 — `ingestion/` (mỗi Researcher phụ trách shard của mình)
+#### Module 1 — `ingestion/` (mỗi Member phụ trách shard của mình)
 
 Mỗi người tự chạy toàn bộ pipeline trên Kaggle Notebook của mình. Skeleton nằm tại `ingestion/skeletons/`.
 
@@ -107,17 +109,17 @@ Mỗi người tự chạy toàn bộ pipeline trên Kaggle Notebook của mình
 
 ---
 
-#### Module 2 — `serving/service/retrieval/` (Researcher A)
+#### Module 2 — `serving/service/retrieval/` (Member_1 & Member_2)
 
-Skeleton nằm tại `serving/service/retrieval/skeletons/`. Researcher A fill implementation, bạn review interface contract với repo.
+Skeleton nằm tại `serving/service/retrieval/skeletons/`. Member_1 & Member_2 fill implementation, bạn review interface contract với repo.
 
-| Task | Skeleton file | Interface |
-|---|---|---|
-| **TASK-SRV-01** | `text_query.py` | `async def query_by_text(query: str, encoder=Depends(get_text_encoder)) -> list[CandidateResult]` |
-| **TASK-SRV-02** | `image_query.py` | `async def query_by_image(image_bytes: bytes, encoder=Depends(get_image_encoder)) -> list[CandidateResult]` |
-| **TASK-SRV-03** | `voice_query.py` | `async def query_by_voice(audio_bytes: bytes) -> list[CandidateResult]` — transcribe rồi gọi lại `text_query`, không tạo luồng riêng |
-| **TASK-SRV-04** | `retrieval_pipeline.py` | `async def retrieve(request: RetrievalRequest) -> list[CandidateResult]` — orchestrator phân loại input type |
-| **TASK-SRV-05** | `text_query.py` (bổ sung) | `def split_trake_events(query: str) -> list[str]` — tách multi-event query thành N sự kiện |
+| Task | Skeleton file | Interface | Người phụ trách |
+|---|---|---|---|
+| **TASK-SRV-01** | `text_query.py` | `async def query_by_text(query: str, encoder=Depends(get_text_encoder)) -> list[CandidateResult]` | Member_1 |
+| **TASK-SRV-02** | `image_query.py` | `async def query_by_image(image_bytes: bytes, encoder=Depends(get_image_encoder)) -> list[CandidateResult]` | Member_1 |
+| **TASK-SRV-03** | `voice_query.py` | `async def query_by_voice(audio_bytes: bytes) -> list[CandidateResult]` — transcribe rồi gọi lại `text_query`, không tạo luồng riêng | Member_1 |
+| **TASK-SRV-04** | `retrieval_pipeline.py` | `async def retrieve(request: RetrievalRequest) -> list[CandidateResult]` — orchestrator phân loại input type | Member_2 |
+| **TASK-SRV-05** | `text_query.py` (bổ sung) | `def split_trake_events(query: str) -> list[str]` — tách multi-event query thành N sự kiện | Member_2 |
 
 **Constraints bắt buộc (đã nhúng trong skeleton):**
 ```python
@@ -129,16 +131,16 @@ Skeleton nằm tại `serving/service/retrieval/skeletons/`. Researcher A fill i
 
 ---
 
-#### Module 3 — `serving/service/reranker/` (Researcher B)
+#### Module 3 — `serving/service/reranker/` (Member_2 & Member_3)
 
-Skeleton nằm tại `serving/service/reranker/skeletons/`. Researcher B fill implementation, bạn review `fusion_score.py` và edge cases TRAKE.
+Skeleton nằm tại `serving/service/reranker/skeletons/`. Member_2 & Member_3 fill implementation, bạn review `fusion_score.py` và edge cases TRAKE.
 
-| Task | Skeleton file | Interface |
-|---|---|---|
-| **TASK-RNK-01** | `text_branch/viranker.py` | `def score(query: str, candidates: list[CandidateResult]) -> list[float]` — ViRanker (BGE-M3 + BPT, MMARCO-VI) |
-| **TASK-RNK-02** | `crossmodal_branch/jina_reranker_m0.py` | `def score(query: str, candidates: list[CandidateResult]) -> list[float]` — Jina Reranker M0, cross-modal |
-| **TASK-RNK-03** | `fusion_score.py` | `def fuse(text_scores: list[float], crossmodal_scores: list[float], alpha: float) -> list[float]` — alpha đọc từ fusion_config.yaml |
-| **TASK-RNK-04** | `../temporal_aligner.py` | `def align(event_candidates: list[list[CandidateResult]]) -> list[CandidateResult]` — TRAKE, 1 result per event, đảm bảo cùng video + thứ tự thời gian |
+| Task | Skeleton file | Interface | Người phụ trách |
+|---|---|---|---|
+| **TASK-RNK-01** | `text_branch/viranker.py` | `def score(query: str, candidates: list[CandidateResult]) -> list[float]` — ViRanker (BGE-M3 + BPT, MMARCO-VI) | Member_3 |
+| **TASK-RNK-02** | `crossmodal_branch/jina_reranker_m0.py` | `def score(query: str, candidates: list[CandidateResult]) -> list[float]` — Jina Reranker M0, cross-modal | Member_3 |
+| **TASK-RNK-03** | `fusion_score.py` | `def fuse(text_scores: list[float], crossmodal_scores: list[float], alpha: float) -> list[float]` — alpha đọc từ fusion_config.yaml | Member_3 |
+| **TASK-RNK-04** | `../temporal_aligner.py` | `def align(event_candidates: list[list[CandidateResult]]) -> list[CandidateResult]` — TRAKE, 1 result per event, đảm bảo cùng video + thứ tự thời gian | Member_2 |
 
 **Constraints bắt buộc (đã nhúng trong skeleton):**
 ```python
@@ -149,15 +151,15 @@ Skeleton nằm tại `serving/service/reranker/skeletons/`. Researcher B fill im
 
 ---
 
-#### Module 4 — `eval/` (Researcher A hoặc B)
+#### Module 4 — `eval/` (Member_4)
 
-Skeleton nằm tại `eval/skeletons/`. Ai rảnh trước làm — không cần đợi nhau.
+Skeleton nằm tại `eval/skeletons/`. Member_4 fill implementation.
 
-| Task | Skeleton file | Interface |
-|---|---|---|
-| **TASK-EVL-01** | `metrics/r_score.py` | `def r_score(prediction: Prediction, ground_truth: GroundTruth, task_type: Literal["KIS","VQA","TRAKE"]) -> float` |
-| **TASK-EVL-02** | `metrics/final_score.py` | `def final_score(ranked_list: list[Prediction], ground_truth: GroundTruth) -> float` — trung bình R@{1,5,20,50,100} |
-| **TASK-EVL-03** | `run_benchmark.py` | Script so sánh cấu hình: đổi fusion weight, bật/tắt reranker — in bảng kết quả |
+| Task | Skeleton file | Interface | Người phụ trách |
+|---|---|---|---|
+| **TASK-EVL-01** | `metrics/r_score.py` | `def r_score(prediction: Prediction, ground_truth: GroundTruth, task_type: Literal["KIS","VQA","TRAKE"]) -> float` | Member_4 |
+| **TASK-EVL-02** | `metrics/final_score.py` | `def final_score(ranked_list: list[Prediction], ground_truth: GroundTruth) -> float` — trung bình R@{1,5,20,50,100} | Member_4 |
+| **TASK-EVL-03** | `run_benchmark.py` | Script so sánh cấu hình: đổi fusion weight, bật/tắt reranker — in bảng kết quả | Member_4 |
 
 **Constraints (đã nhúng trong skeleton):**
 ```
@@ -176,11 +178,11 @@ R@k = max(r_score(pred) for pred in ranked_list[:k])
 
 | Task | File | Người viết | Gắn với task |
 |---|---|---|---|
-| **TASK-TST-01** | `test_fusion_score.py` | Researcher B | Cùng lúc với TASK-RNK-03 |
-| **TASK-TST-02** | `test_query_parsing.py` | Researcher A | Cùng lúc với TASK-SRV-05 |
-| **TASK-TST-03** | `test_api_schema.py` | Bạn | Khi viết `serving/api/schema/` |
-| **TASK-TST-04** | `test_merge_shards.py` | Bạn | Cùng lúc với `aggregation/verify_shards.py` |
-| **TASK-TST-05** | `test_r_score.py` | Researcher (ai làm EVL) | Cùng lúc với TASK-EVL-01 — test edge cases mỗi task type |
+| **TASK-TST-01** | `test_fusion_score.py` | Member_3 | Cùng lúc với TASK-RNK-03 |
+| **TASK-TST-02** | `test_query_parsing.py` | Member_2 | Cùng lúc với TASK-SRV-05 |
+| **TASK-TST-03** | `test_api_schema.py` | Bạn (Leader) | Khi viết `serving/api/schema/` |
+| **TASK-TST-04** | `test_merge_shards.py` | Bạn (Leader) | Cùng lúc với `aggregation/verify_shards.py` |
+| **TASK-TST-05** | `test_r_score.py` | Member_4 | Cùng lúc với TASK-EVL-01 — test edge cases mỗi task type |
 
 ---
 
@@ -211,7 +213,7 @@ fix/<TASK-ID>-<slug>        # ví dụ: fix/TASK-RNK-02-batch-inference
 | `serving/service/retrieval/` | **Bạn** | Interface contract với `qdrant_repo` |
 | `serving/service/reranker/` | **Bạn** | `fusion_score.py` và edge cases TRAKE |
 | `eval/metrics/` | **Bạn** | Verify công thức theo `contest_info.md` |
-| `ingestion/notebooks/` (nội bộ shard) | Researcher tự review | Bạn chỉ review TASK-ING-04 (publish step) |
+| `ingestion/` (nội bộ shard) | Members tự review | Bạn chỉ review TASK-ING-04 (publish step) |
 
 ---
 
@@ -223,22 +225,22 @@ Tuần 1 — Foundation (bạn unblock mọi người) [DONE]
 ├── [Bạn] [x]      shared/schemas/named_vector_spec.py
 ├── [Bạn] [x]      serving/api/schema/ — Pydantic models (CandidateResult, RetrievalRequest...)
 ├── [Bạn] [x]      AGENT_CONTEXT.md + skeleton files cho ING-01..05
-├── [Researcher]   TASK-ING-01, 02, 03 (song song, mỗi người shard riêng)
+├── [Members]      TASK-ING-01, 02, 03 (song song, mỗi người shard riêng)
 └── [Bạn] [x]      serving/repo/qdrant_repo.py
 
 Tuần 2 — Core serving [IN PROGRESS]
 ├── [Bạn] [x]      Skeleton files cho SRV-01..05, RNK-01..04
 ├── [Bạn] [x]      aggregation/ (sau khi có ≥1 shard xong)
 ├── [Bạn] [x]      indexing/ (sau aggregation)
-├── [Researcher A] TASK-SRV-01, 02, 03, 04
-└── [Researcher B] TASK-RNK-01, 02, 03
+├── [Member_1 & 2] TASK-SRV-01, 02, 03, 04
+└── [Member_3]     TASK-RNK-01, 02, 03
 
 Tuần 3 — TRAKE + eval
-├── [Researcher A] TASK-SRV-05 (event_splitter)
-├── [Researcher B] TASK-RNK-04 (temporal_aligner)
-├── [Researcher]   TASK-ING-04 (publish Kaggle Dataset)
+├── [Member_2]     TASK-SRV-05 (event_splitter)
+├── [Member_2]     TASK-RNK-04 (temporal_aligner)
+├── [Members]      TASK-ING-04 (publish Kaggle Dataset)
 ├── [Bạn]          serving/core/ — model singleton, lifespan
-└── [Researcher]   TASK-EVL-01, 02, 03
+└── [Member_4]     TASK-EVL-01, 02, 03
 
 Tuần 4 — Hardening
 ├── [Bạn]          infra/ — Docker, CI/CD, smoke test

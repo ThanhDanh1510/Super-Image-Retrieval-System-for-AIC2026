@@ -31,7 +31,7 @@ FOLDER STRUCTURE của --dataset-dir:
     ├── asr_vectors.npy          (N, 1536) float32 L2-normalized
     └── scene_ids.txt            (N lines — thứ tự scene_id tương ứng với rows trong .npy)
 
-ĐÃ IMPLEMENT ĐẦY ĐỦ bởi MLOps Lead.
+ĐÃ IMPLEMENT ĐẦY ĐỦ bởi Leader.
 """
 
 from __future__ import annotations

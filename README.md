@@ -135,6 +135,8 @@ Phiên bản chi tiết: xem [`configs/model_versions.yaml`](configs/model_versi
 
 | Vai trò | Trách nhiệm |
 |---|---|
-| **MLOps Lead** | Infrastructure, skeleton, review, deploy |
-| **Researcher A** | Retrieval pipeline implementation |
-| **Researcher B** | Reranker implementation |
+| **Leader** | Infrastructure, skeleton, review, deploy |
+| **Member_1** | Retrieval (Text/Image/Voice Query) implementation |
+| **Member_2** | Retrieval Pipeline & TRAKE (Event Splitter, Temporal Aligner) |
+| **Member_3** | Reranker (ViRanker, Jina Reranker, Fusion) |
+| **Member_4** | Evaluation (Metric calculation, Benchmark script) |

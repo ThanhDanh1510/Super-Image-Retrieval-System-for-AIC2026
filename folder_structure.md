@@ -4,7 +4,7 @@ Dự án vận hành theo **4 nhịp**: **ingestion theo shard** (mỗi member c
 
 ```
 project-root/
-├── AGENT_CONTEXT.md  # Project Context Block cho AI Agent — MLOps Lead viết và giữ, không delegate
+├── AGENT_CONTEXT.md  # Project Context Block cho AI Agent — Leader viết và giữ, không delegate
 ├── configs/          # Cấu hình tập trung (model versions, shard assignments, fusion weights)
 ├── ingestion/        # Mỗi member chạy full pipeline trên shard riêng (Kaggle Notebook)
 ├── aggregation/      # Gộp output của tất cả member thành 1 dataset thống nhất
@@ -225,8 +225,8 @@ tests/
 ## File gốc ở root
 
 ```
-AGENT_CONTEXT.md   # Project Context Block cho AI Agent — MLOps Lead viết và giữ
-                   # Researcher copy block này vào đầu prompt mỗi khi dùng Agent
+AGENT_CONTEXT.md   # Project Context Block cho AI Agent — Leader viết và giữ
+                   # Member copy block này vào đầu prompt mỗi khi dùng Agent
                    # Nội dung: pipeline overview, named vector spec, import rules, constraint cứng
 pyproject.toml     # Dependency, version Python, entry points
 Makefile           # make ingest-shard / make aggregate / make index / make serve / make benchmark
@@ -242,8 +242,8 @@ Makefile           # make ingest-shard / make aggregate / make index / make serv
 
 `indexing/` chỉ làm việc với 1 dataset thống nhất duy nhất (`aic2026-unified-v<n>`), không cần biết gì về việc dataset đó được gộp từ bao nhiêu shard — giữ logic upsert đơn giản, và việc thêm batch video mới sau này (dù từ 1 hay nhiều member) đều đi qua đúng 1 luồng `aggregation → indexing`.
 
-`skeletons/` trong mỗi module là ranh giới rõ ràng giữa **MLOps Lead** (viết skeleton) và **Researcher + AI Agent** (fill implementation). Skeleton chứa function signature, type hint, docstring với constraint cứng, và `raise NotImplementedError` — Agent đọc code tốt hơn đọc prose, nên skeleton chính là spec. Không commit implementation vào `skeletons/` — đó là nơi MLOps Lead đặt contract, không phải nơi chứa code chạy thật.
+`skeletons/` trong mỗi module là ranh giới rõ ràng giữa **Leader** (viết skeleton) và **Member + AI Agent** (fill implementation). Skeleton chứa function signature, type hint, docstring với constraint cứng, và `raise NotImplementedError` — Agent đọc code tốt hơn đọc prose, nên skeleton chính là spec. Không commit implementation vào `skeletons/` — đó là nơi Leader đặt contract, không phải nơi chứa code chạy thật.
 
-`AGENT_CONTEXT.md` ở root thay thế hoàn toàn cho ý tưởng tạo folder `agents/` riêng — Agent không phải thành phần của hệ thống, chỉ là công cụ viết code. File này chứa Project Context Block mà Researcher paste vào đầu mỗi prompt, giúp Agent hiểu constraint toàn hệ thống mà không cần giải thích miệng.
+`AGENT_CONTEXT.md` ở root thay thế hoàn toàn cho ý tưởng tạo folder `agents/` riêng — Agent không phải thành phần của hệ thống, chỉ là công cụ viết code. File này chứa Project Context Block mà Member paste vào đầu mỗi prompt, giúp Agent hiểu constraint toàn hệ thống mà không cần giải thích miệng.
 
 Nguyên tắc dữ liệu xuyên suốt: **video gốc không bao giờ rời khỏi máy/Kaggle account của member phụ trách**; thứ duy nhất di chuyển giữa người với người, và giữa các tầng trong hệ thống, là keyframe đã crop, metadata, và vector — vì đó là tất cả những gì retrieval cần.
