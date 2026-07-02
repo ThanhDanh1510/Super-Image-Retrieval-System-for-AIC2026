@@ -21,13 +21,11 @@ CONSTRAINTS (KHÔNG ĐƯỢC THAY ĐỔI):
     - Output encoding: UTF-8
 
 CÁCH CHẠY (Kaggle Notebook cell):
-    >>> from ingestion.skeletons.ingestion.skeletons.ingestion.skeletons.01b_text_extraction import run_text_extraction
-    >>> run_text_extraction(
-    ...     metadata_path='/kaggle/working/shard_output/scene_metadata.parquet',
-    ...     keyframe_dir='/kaggle/working/shard_output/keyframes',
-    ...     video_dir='/kaggle/input/aic2026-videos',
-    ...     output_dir='/kaggle/working/shard_output',
-    ... )
+    !python -m ingestion.skeletons.01b_text_extraction \
+        --metadata-path /kaggle/working/shard_output/scene_metadata.parquet \
+        --keyframe-dir /kaggle/working/shard_output/keyframes \
+        --video-dir /kaggle/input/aic2026-videos \
+        --output-dir /kaggle/working/shard_output
 """
 
 from __future__ import annotations
@@ -230,3 +228,24 @@ def process_text_extraction(
         FileNotFoundError: Nếu metadata_path không tồn tại.
     """
     raise NotImplementedError
+
+
+if __name__ == "__main__":
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="TASK-ING-02: Trích xuất text từ keyframes (OCR) và audio video (ASR).")
+    parser.add_argument("--metadata-path", required=True, help="Đường dẫn tới scene_metadata.parquet.")
+    parser.add_argument("--keyframe-dir", required=True, help="Thư mục chứa keyframe JPG.")
+    parser.add_argument("--video-dir", required=True, help="Thư mục chứa video gốc.")
+    parser.add_argument("--output-dir", default="/kaggle/working/shard_output", help="Thư mục lưu kết quả.")
+    parser.add_argument("--checkpoint-path", default=None, help="Đường dẫn file checkpoint.")
+    
+    args = parser.parse_args()
+    
+    process_text_extraction(
+        metadata_path=args.metadata_path,
+        keyframe_dir=args.keyframe_dir,
+        video_dir=args.video_dir,
+        output_dir=args.output_dir,
+        checkpoint_path=args.checkpoint_path,
+    )

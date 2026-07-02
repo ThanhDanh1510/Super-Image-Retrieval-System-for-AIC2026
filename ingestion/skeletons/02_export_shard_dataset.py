@@ -26,12 +26,10 @@ CONSTRAINTS (KHÔNG ĐƯỢC THAY ĐỔI):
     - Phải chạy validate_shard_output() TRƯỚC khi publish — nếu thiếu file → báo lỗi, không publish
 
 CÁCH CHẠY (Kaggle Notebook cell):
-    >>> from ingestion.skeletons import run_export  # noqa
-    >>> run_export(
-    ...     output_dir='/kaggle/working/shard_output',
-    ...     member='an',
-    ...     version=1,
-    ... )
+    !python -m ingestion.skeletons.02_export_shard_dataset \
+        --output-dir /kaggle/working/shard_output \
+        --member an \
+        --version 1
 """
 
 from __future__ import annotations
@@ -164,3 +162,20 @@ def run_export(
         RuntimeError: Nếu publish thất bại.
     """
     raise NotImplementedError
+
+
+if __name__ == "__main__":
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="TASK-ING-04: Đóng gói và publish shard dataset lên Kaggle.")
+    parser.add_argument("--output-dir", default="/kaggle/working/shard_output", help="Thư mục output của shard.")
+    parser.add_argument("--member", required=True, help="Tên thành viên chạy pipeline.")
+    parser.add_argument("--version", type=int, default=1, help="Số version của dataset.")
+    
+    args = parser.parse_args()
+    
+    run_export(
+        output_dir=args.output_dir,
+        member=args.member,
+        version=args.version,
+    )

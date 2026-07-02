@@ -29,14 +29,12 @@ CONSTRAINTS (KHÔNG ĐƯỢC THAY ĐỔI):
     - Thứ tự rows trong .npy PHẢI khớp với scene_ids.txt
 
 CÁCH CHẠY (Kaggle Notebook cell):
-    >>> from ingestion.skeletons import run_embedding_generation  # noqa
-    >>> run_embedding_generation(
-    ...     metadata_path='/kaggle/working/shard_output/scene_metadata.parquet',
-    ...     ocr_path='/kaggle/working/shard_output/ocr_text.parquet',
-    ...     asr_path='/kaggle/working/shard_output/asr_text.parquet',
-    ...     keyframe_dir='/kaggle/working/shard_output/keyframes',
-    ...     output_dir='/kaggle/working/shard_output',
-    ... )
+    !python -m ingestion.skeletons.01c_embedding_generation \
+        --metadata-path /kaggle/working/shard_output/scene_metadata.parquet \
+        --ocr-path /kaggle/working/shard_output/ocr_text.parquet \
+        --asr-path /kaggle/working/shard_output/asr_text.parquet \
+        --keyframe-dir /kaggle/working/shard_output/keyframes \
+        --output-dir /kaggle/working/shard_output
 """
 
 from __future__ import annotations
@@ -215,3 +213,26 @@ def run_embedding_generation(
         FileNotFoundError: Nếu metadata_path, ocr_path, hoặc asr_path không tồn tại.
     """
     raise NotImplementedError
+
+
+if __name__ == "__main__":
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="TASK-ING-03: Sinh vector embeddings cho ảnh và text.")
+    parser.add_argument("--metadata-path", required=True, help="Đường dẫn tới scene_metadata.parquet.")
+    parser.add_argument("--ocr-path", required=True, help="Đường dẫn tới ocr_text.parquet.")
+    parser.add_argument("--asr-path", required=True, help="Đường dẫn tới asr_text.parquet.")
+    parser.add_argument("--keyframe-dir", required=True, help="Thư mục chứa keyframe JPG.")
+    parser.add_argument("--output-dir", default="/kaggle/working/shard_output", help="Thư mục lưu kết quả.")
+    parser.add_argument("--device", default="cuda", help="Thiết bị chạy model (cuda hoặc cpu).")
+    
+    args = parser.parse_args()
+    
+    run_embedding_generation(
+        metadata_path=args.metadata_path,
+        ocr_path=args.ocr_path,
+        asr_path=args.asr_path,
+        keyframe_dir=args.keyframe_dir,
+        output_dir=args.output_dir,
+        device=args.device,
+    )

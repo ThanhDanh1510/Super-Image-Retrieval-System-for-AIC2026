@@ -31,12 +31,10 @@ CONSTRAINTS (KHÔNG ĐƯỢC THAY ĐỔI):
     - Point ID: sha256(video_id + "_" + scene_id)[:16] — xem shared/schemas/named_vector_spec.py
 
 CÁCH CHẠY (Kaggle Notebook cell):
-    >>> from ingestion.skeletons.ingestion.skeletons import run_keyframe_extraction
-    >>> run_keyframe_extraction(
-    ...     video_dir='/kaggle/input/aic2026-videos',
-    ...     output_dir='/kaggle/working/shard_output',
-    ...     member='an',
-    ... )
+    !python -m ingestion.skeletons.01a_keyframe_extraction \
+        --video-dir /kaggle/input/aic2026-videos \
+        --output-dir /kaggle/working/shard_output \
+        --member an
 """
 
 from __future__ import annotations
@@ -272,3 +270,22 @@ def run_keyframe_extraction(
         FileNotFoundError: Nếu video_dir không tồn tại.
     """
     raise NotImplementedError
+
+
+if __name__ == "__main__":
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="TASK-ING-01: Trích xuất Keyframe từ video.")
+    parser.add_argument("--video-dir", required=True, help="Thư mục chứa video gốc.")
+    parser.add_argument("--output-dir", default="/kaggle/working/shard_output", help="Thư mục lưu kết quả.")
+    parser.add_argument("--member", required=True, help="Tên thành viên chạy pipeline.")
+    parser.add_argument("--checkpoint-path", default=None, help="Đường dẫn file checkpoint.")
+    
+    args = parser.parse_args()
+    
+    run_keyframe_extraction(
+        video_dir=args.video_dir,
+        output_dir=args.output_dir,
+        member=args.member,
+        checkpoint_path=args.checkpoint_path,
+    )
