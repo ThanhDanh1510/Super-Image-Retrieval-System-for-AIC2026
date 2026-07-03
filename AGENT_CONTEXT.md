@@ -1,6 +1,6 @@
 # AGENT_CONTEXT.md — Project Context Block cho AI Agent
 
-> **Cách dùng:** Researcher copy toàn bộ nội dung file này → paste vào đầu prompt mỗi khi dùng AI Agent (Claude/Cursor) để implement code. Agent đọc được context toàn hệ thống và sinh code đúng constraint.
+> **Cách dùng:** Member copy toàn bộ nội dung file này → paste vào đầu prompt mỗi khi dùng AI Agent (Claude/Cursor) để implement code. Agent đọc được context toàn hệ thống và sinh code đúng constraint.
 
 ---
 
@@ -144,7 +144,7 @@ Mỗi point trong Qdrant có payload theo `KeyframePayload`:
 
 ## 11. Bổ sung thông tin Tuần 2
 
-### A. Reranker Constraints (Researcher B)
+### A. Reranker Constraints (Member_3)
 - Thư mục: `serving/api/service/reranker/skeletons/`
 - Gồm 3 tasks chính:
   1. `text_branch/viranker.py` (ViRanker): Đo độ tương thích của văn bản.

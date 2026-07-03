@@ -33,7 +33,7 @@ ingestion/
 │   ├── 01b_text_extraction.py         # [MLOps viết] Skeleton script
 │   ├── 01c_embedding_generation.py    # [MLOps viết] Skeleton script
 │   ├── 02_export_shard_dataset.py     # [MLOps viết] Skeleton script
-│   └── checkpoint_manifest.py         # [MLOps viết] Skeleton class — Researcher dùng Agent fill implementation
+│   └── checkpoint_manifest.py         # [MLOps viết] Skeleton class — Member dùng Agent fill implementation
 │                                      # (Chạy offline bằng CLI / notebook nháp trên Kaggle, không commit file .ipynb)
 │
 ├── kaggle_utils/
@@ -103,7 +103,7 @@ serving/
     │                            # khi truyền tiếp vào retrieval_service, không tạo route riêng cho voice
     ├── service/
     │   ├── retrieval/
-    │   │   ├── skeletons/              # [MLOps viết] Skeleton files cho Researcher A — function signatures, constraints nhúng sẵn
+    │   │   ├── skeletons/              # [MLOps viết] Skeleton files cho Member_1 & Member_2 — function signatures, constraints nhúng sẵn
     │   │   │   ├── text_query.py
     │   │   │   ├── image_query.py
     │   │   │   ├── voice_query.py
@@ -114,7 +114,7 @@ serving/
     │   │   └── retrieval_pipeline.py   # Orchestrator: nhận query đầu vào, điều hướng, trả về danh sách candidates thô
     │   ├── temporal_aligner.py         # Căn chỉnh thời gian (TRAKE) sau khi đã retrieve candidates
     │   └── reranker/
-    │       ├── skeletons/              # [MLOps viết] Skeleton files cho Researcher B
+    │       ├── skeletons/              # [MLOps viết] Skeleton files cho Member_3
     │       │   ├── text_branch/viranker.py
     │       │   ├── crossmodal_branch/jina_reranker_m0.py
     │       │   └── fusion_score.py

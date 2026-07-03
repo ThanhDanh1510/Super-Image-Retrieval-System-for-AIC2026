@@ -10,7 +10,7 @@
 | **Member_3** | Research, model selection, thực nghiệm | AI Agent (Claude/Cursor) |
 | **Member_4** | Research, model selection, thực nghiệm | AI Agent (Claude/Cursor) |
 
-**Nguyên tắc quản lý:** AI Agent của researcher cần spec đủ chi tiết để sinh code đúng — không giao miệng, không giải thích sau. Nhiệm vụ của bạn là **viết skeleton + spec trước**, researcher dùng Agent để fill vào, bạn **review/merge**.
+**Nguyên tắc quản lý:** AI Agent của member cần spec đủ chi tiết để sinh code đúng — không giao miệng, không giải thích sau. Nhiệm vụ của bạn là **viết skeleton + spec trước**, member dùng Agent để fill vào, bạn **review/merge**.
 
 ---
 
@@ -20,9 +20,9 @@ AI Agent hoạt động tốt nhất khi đọc code, không đọc prose. Quy t
 
 ```
 1. [Bạn] Viết skeleton file — function signature, docstring, type hint, raise NotImplementedError
-2. [Researcher] Mở AGENT_CONTEXT.md → copy Project Context Block → paste vào đầu prompt Agent
+2. [Member] Mở AGENT_CONTEXT.md → copy Project Context Block → paste vào đầu prompt Agent
 3. [Agent] Đọc skeleton + context → fill implementation
-4. [Researcher] Tạo PR theo branch naming convention
+4. [Member] Tạo PR theo branch naming convention
 5. [Bạn] Review → merge
 ```
 
@@ -263,4 +263,4 @@ Tuần 4 — Hardening
 
 ---
 
-*File này là source of truth cho phân công. Khi có task mới: bạn viết skeleton trước → thêm task vào đây → giao cho Researcher. Không giao miệng.*
+*File này là source of truth cho phân công. Khi có task mới: bạn viết skeleton trước → thêm task vào đây → giao cho Member. Không giao miệng.*

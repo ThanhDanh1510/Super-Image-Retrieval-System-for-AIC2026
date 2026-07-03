@@ -229,7 +229,7 @@ async def search_trake(
         )
 
         # Mock gom nhóm candidates thành các chuỗi sự kiện cho Tuần 1.
-        # Ở Tuần 3, Researcher B sẽ cài đặt thuật toán temporal_aligner thực tế.
+        # Ở Tuần 3, Member_2 sẽ cài đặt thuật toán temporal_aligner thực tế.
         results = []
         candidates = pipeline_res.candidates
         n = request.num_events

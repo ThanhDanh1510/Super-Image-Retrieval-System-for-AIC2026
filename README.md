@@ -85,7 +85,7 @@ project-root/
 ├── infra/                # Docker, CI/CD, monitoring
 ├── data/                 # Local, KHÔNG commit git
 ├── tests/
-├── AGENT_CONTEXT.md      # Context cho AI Agent (Researcher paste vào prompt)
+├── AGENT_CONTEXT.md      # Context cho AI Agent (Member paste vào prompt)
 ├── pyproject.toml
 ├── Makefile
 └── .env.example
