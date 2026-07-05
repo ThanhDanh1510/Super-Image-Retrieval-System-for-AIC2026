@@ -35,6 +35,9 @@ from qdrant_client.models import (
     CollectionStatus,
     OptimizersConfigDiff,
     HnswConfigDiff,
+    ScalarQuantization,
+    ScalarQuantizationConfig,
+    ScalarType,
 )
 
 from shared.schemas.named_vector_spec import (
@@ -166,6 +169,14 @@ def create_collection(
         # Optimizer config
         optimizers_config=OptimizersConfigDiff(
             indexing_threshold=20000,   # Bắt đầu index khi có >= 20k points
+        ),
+        # Lượng tử hóa Scalar Quantization (Kích hoạt thuật toán Turbo Quant siêu nhanh của Qdrant)
+        quantization_config=ScalarQuantization(
+            scalar=ScalarQuantizationConfig(
+                type=ScalarType.INT8,
+                always_ram=True,
+                quantile=0.99,
+            )
         ),
     )
 
