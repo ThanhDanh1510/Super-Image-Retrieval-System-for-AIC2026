@@ -157,9 +157,23 @@ def detect_scenes(
     try:
         import tensorflow as tf
         
-        model_path = model_cfg.get("shot_detection", {}).get("model_path", "/kaggle/input/transnetv2/transnetv2-savedmodel")
-        if not Path(model_path).exists():
-            model_path = "./transnetv2-savedmodel"
+        model_path = model_cfg.get("shot_detection", {}).get("model_path", "./transnetv2-savedmodel")
+        path_obj = Path(model_path)
+        
+        # Nếu chưa có weights ở local/Kaggle dataset, tự động tải từ HuggingFace
+        if not path_obj.exists() or not (path_obj / "saved_model.pb").exists():
+            logger.info("Chưa tìm thấy weights TransNetV2. Đang tự động tải từ HuggingFace Hub (Sn4kehead/TransNetV2)...")
+            try:
+                from huggingface_hub import snapshot_download
+                snapshot_download(
+                    repo_id="Sn4kehead/TransNetV2",
+                    local_dir="./transnetv2-savedmodel",
+                    local_dir_use_symlinks=False
+                )
+                model_path = "./transnetv2-savedmodel"
+                logger.info("✅ Tải weights TransNetV2 từ HuggingFace thành công!")
+            except Exception as download_err:
+                logger.warning(f"Không thể tự động tải weights từ HuggingFace: {download_err}")
 
         logger.info(f"Đang tải mô hình TransNetV2 từ: {model_path}")
         model = tf.saved_model.load(model_path)
