@@ -3,8 +3,6 @@ ingestion/skeletons/checkpoint_manifest.py
 ============================================
 TASK-ING-05: Checkpoint để resume pipeline khi Kaggle session bị ngắt.
 
-SKELETON: Implement class CheckpointManifest.
-
 MỤC ĐÍCH:
     Kaggle Notebook session có thể bị ngắt bất kỳ lúc nào (timeout, disconnect...).
     CheckpointManifest giúp pipeline biết đã xử lý đến đâu để resume mà không cần chạy lại từ đầu.
@@ -68,36 +66,38 @@ class CheckpointManifest:
         """
         Khởi tạo CheckpointManifest. Load từ file nếu đã tồn tại.
 
-        Gợi ý implementation:
-            self.checkpoint_path = Path(checkpoint_path)
-            self._data = {
-                'version': '1.0',
-                'created_at': datetime.now().isoformat(),
-                'updated_at': datetime.now().isoformat(),
-                'steps': {step: [] for step in VALID_STEPS},
-            }
-            if self.checkpoint_path.exists():
-                with open(self.checkpoint_path, 'r', encoding='utf-8') as f:
-                    self._data = json.load(f)
-                logger.info(f'Loaded checkpoint: {checkpoint_path}')
-            else:
-                logger.info(f'New checkpoint: {checkpoint_path}')
-
         Args:
             checkpoint_path: Đường dẫn tới file checkpoint.json.
         """
-        raise NotImplementedError
+        self.checkpoint_path = Path(checkpoint_path)
+        self._data = {
+            "version": "1.0",
+            "created_at": datetime.now().isoformat(),
+            "updated_at": datetime.now().isoformat(),
+            "steps": {step: [] for step in VALID_STEPS},
+        }
+        if self.checkpoint_path.exists():
+            try:
+                with open(self.checkpoint_path, "r", encoding="utf-8") as f:
+                    loaded_data = json.load(f)
+                    # Validate loaded data structure
+                    if isinstance(loaded_data, dict) and "steps" in loaded_data:
+                        self._data.update(loaded_data)
+                        # Đảm bảo có đủ các step
+                        for step in VALID_STEPS:
+                            if step not in self._data["steps"]:
+                                self._data["steps"][step] = []
+                        logger.info(f"Loaded checkpoint: {checkpoint_path}")
+                    else:
+                        logger.warning(f"Invalid checkpoint format in {checkpoint_path}. Starting new one.")
+            except Exception as e:
+                logger.error(f"Error loading checkpoint {checkpoint_path}: {e}. Starting new one.")
+        else:
+            logger.info(f"Created new checkpoint manifest: {checkpoint_path}")
 
     def mark_done(self, scene_id: str, step: str) -> None:
         """
         Đánh dấu một scene đã hoàn thành ở một step nhất định.
-
-        Gợi ý implementation:
-            if step not in VALID_STEPS:
-                raise ValueError(f'Invalid step: {step}. Valid: {VALID_STEPS}')
-            if scene_id not in self._data['steps'][step]:
-                self._data['steps'][step].append(scene_id)
-                self._data['updated_at'] = datetime.now().isoformat()
 
         Args:
             scene_id: ID scene đã hoàn thành (ví dụ: 'L01_V001_S003').
@@ -106,16 +106,16 @@ class CheckpointManifest:
         Raises:
             ValueError: Nếu step không hợp lệ.
         """
-        raise NotImplementedError
+        if step not in VALID_STEPS:
+            raise ValueError(f"Invalid step: {step}. Valid steps: {VALID_STEPS}")
+        
+        if scene_id not in self._data["steps"][step]:
+            self._data["steps"][step].append(scene_id)
+            self._data["updated_at"] = datetime.now().isoformat()
 
     def is_done(self, scene_id: str, step: str) -> bool:
         """
         Kiểm tra xem một scene đã hoàn thành step chỉ định chưa.
-
-        Gợi ý implementation:
-            if step not in VALID_STEPS:
-                raise ValueError(f'Invalid step: {step}')
-            return scene_id in self._data['steps'][step]
 
         Args:
             scene_id: ID scene cần kiểm tra.
@@ -127,18 +127,13 @@ class CheckpointManifest:
         Raises:
             ValueError: Nếu step không hợp lệ.
         """
-        raise NotImplementedError
+        if step not in VALID_STEPS:
+            raise ValueError(f"Invalid step: {step}. Valid steps: {VALID_STEPS}")
+        return scene_id in self._data["steps"][step]
 
     def get_remaining(self, all_scene_ids: list[str], step: str) -> list[str]:
         """
         Trả về danh sách scene_id chưa hoàn thành ở step chỉ định.
-
-        Gợi ý implementation:
-            done = set(self._data['steps'].get(step, []))
-            remaining = [sid for sid in all_scene_ids if sid not in done]
-            total = len(all_scene_ids)
-            logger.info(f'Step [{step}]: {total - len(remaining)}/{total} done, {len(remaining)} remaining')
-            return remaining
 
         Args:
             all_scene_ids: Toàn bộ scene_id cần xử lý trong shard.
@@ -150,7 +145,13 @@ class CheckpointManifest:
         Raises:
             ValueError: Nếu step không hợp lệ.
         """
-        raise NotImplementedError
+        if step not in VALID_STEPS:
+            raise ValueError(f"Invalid step: {step}. Valid steps: {VALID_STEPS}")
+        done = set(self._data["steps"].get(step, []))
+        remaining = [sid for sid in all_scene_ids if sid not in done]
+        total = len(all_scene_ids)
+        logger.info(f"Step [{step}]: {total - len(remaining)}/{total} done, {len(remaining)} remaining")
+        return remaining
 
     def save(self) -> None:
         """
@@ -158,24 +159,25 @@ class CheckpointManifest:
 
         Nên gọi sau mỗi scene để đảm bảo không mất tiến độ.
 
-        Gợi ý implementation:
-            self._data['updated_at'] = datetime.now().isoformat()
-            self.checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(self.checkpoint_path, 'w', encoding='utf-8') as f:
-                json.dump(self._data, f, ensure_ascii=False, indent=2)
-
         Raises:
             OSError: Nếu không ghi được file (hết đĩa, không có quyền...).
         """
-        raise NotImplementedError
+        try:
+            self._data["updated_at"] = datetime.now().isoformat()
+            self.checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+            # Viết ra file tạm trước rồi rename để chống corrupt file nếu bị tắt nguồn đột ngột
+            temp_path = self.checkpoint_path.with_suffix(".tmp")
+            with open(temp_path, "w", encoding="utf-8") as f:
+                json.dump(self._data, f, ensure_ascii=False, indent=2)
+            temp_path.replace(self.checkpoint_path)
+        except OSError as e:
+            logger.error(f"Failed to write checkpoint to {self.checkpoint_path}: {e}")
+            raise
 
     @classmethod
-    def load(cls, checkpoint_path: str) -> "CheckpointManifest":
+    def load(cls, checkpoint_path: str) -> CheckpointManifest:
         """
         Class method để load CheckpointManifest từ file đã tồn tại.
-
-        Gợi ý implementation:
-            return cls(checkpoint_path)
 
         Args:
             checkpoint_path: Đường dẫn tới file checkpoint.json.
@@ -186,7 +188,10 @@ class CheckpointManifest:
         Raises:
             FileNotFoundError: Nếu checkpoint_path không tồn tại.
         """
-        raise NotImplementedError
+        path = Path(checkpoint_path)
+        if not path.exists():
+            raise FileNotFoundError(f"Checkpoint file not found: {checkpoint_path}")
+        return cls(checkpoint_path)
 
     def summary(self) -> dict[str, int]:
         """
@@ -196,4 +201,4 @@ class CheckpointManifest:
             Dict: {step_name: count_done}
             Ví dụ: {'keyframe': 500, 'ocr': 480, 'asr': 450, ...}
         """
-        raise NotImplementedError
+        return {step: len(self._data["steps"][step]) for step in VALID_STEPS}
