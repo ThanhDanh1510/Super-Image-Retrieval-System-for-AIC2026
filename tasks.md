@@ -1,264 +1,75 @@
-# AIC2026 — Task Breakdown & Team Workflow
+# AIC2026 — Project Task List & Member Assignments
 
-## Bối cảnh team
-
-| Vai trò | Thế mạnh | Công cụ |
-|---|---|---|
-| **Leader** (bạn) | Infrastructure, pipeline, code quality | Toàn bộ |
-| **Member_1** | Research, model selection, thực nghiệm | AI Agent (Claude/Cursor) |
-| **Member_2** | Research, model selection, thực nghiệm | AI Agent (Claude/Cursor) |
-| **Member_3** | Research, model selection, thực nghiệm | AI Agent (Claude/Cursor) |
-| **Member_4** | Research, model selection, thực nghiệm | AI Agent (Claude/Cursor) |
-
-**Nguyên tắc quản lý:** AI Agent của member cần spec đủ chi tiết để sinh code đúng — không giao miệng, không giải thích sau. Nhiệm vụ của bạn là **viết skeleton + spec trước**, member dùng Agent để fill vào, bạn **review/merge**.
+> **Source of Truth**: Danh sách toàn bộ nhiệm vụ của hệ thống. 
+> Các task đã hoàn thành `[x]` sẽ **không xuất hiện** trong bảng phân công ở cuối file để các thành viên tập trung làm các công việc còn lại.
 
 ---
 
-## Cách giao việc cho AI Agent
+## 📑 I. Danh Sách Nhiệm Vụ Toàn Hệ Thống
 
-AI Agent hoạt động tốt nhất khi đọc code, không đọc prose. Quy trình chuẩn:
+### 1. Module Ingestion (Xử lý Dữ liệu trên Kaggle)
+- `[x]` **TASK-ING-01**: Trích xuất Keyframe từ video (`ingestion/skeletons/01a_keyframe_extraction.py`) — *Đã xong*
+- `[ ]` **TASK-ING-02a**: Trích xuất Text - OCR từ keyframe bằng PaddleOCR v6 (`ingestion/skeletons/01b_text_extraction.py`)
+- `[ ]` **TASK-ING-02b**: Trích xuất Text - ASR giọng nói bằng PhoWhisper (`ingestion/skeletons/01b_text_extraction.py`)
+- `[ ]` **TASK-ING-03a**: Sinh Vector Embedding Ảnh bằng BEiT3 + CLIP ViT-L/14 (`ingestion/skeletons/01c_embedding_generation.py`)
+- `[ ]` **TASK-ING-03b**: Sinh Vector Embedding Text bằng gte-Qwen2-1.5B (`ingestion/skeletons/01c_embedding_generation.py`)
+- `[x]` **TASK-ING-04**: Validate & Export Shard Dataset lên Kaggle (`ingestion/skeletons/02_export_shard_dataset.py`) — *Đã xong*
+- `[x]` **TASK-ING-05**: Checkpoint Manifest quản lý trạng thái (`ingestion/skeletons/checkpoint_manifest.py`) — *Đã xong*
 
-```
-1. [Bạn] Viết skeleton file — function signature, docstring, type hint, raise NotImplementedError
-2. [Member] Mở AGENT_CONTEXT.md → copy Project Context Block → paste vào đầu prompt Agent
-3. [Agent] Đọc skeleton + context → fill implementation
-4. [Member] Tạo PR theo branch naming convention
-5. [Bạn] Review → merge
-```
+### 2. Module Retrieval Serving (Truy vấn Tìm kiếm Real-time)
+- `[ ]` **TASK-SRV-01**: Text Query Retrieval 5 nhánh vectors (`serving/service/retrieval/skeletons/text_query.py`)
+- `[ ]` **TASK-SRV-02**: Image-to-Image Query Retrieval (`serving/service/retrieval/skeletons/image_query.py`)
+- `[ ]` **TASK-SRV-03**: Voice Query Retrieval (`serving/service/retrieval/skeletons/voice_query.py`)
+- `[ ]` **TASK-SRV-04**: Retrieval Pipeline Orchestrator (`serving/service/retrieval/skeletons/retrieval_pipeline.py`)
+- `[ ]` **TASK-SRV-05**: Tách chuỗi sự kiện TRAKE multi-event (`serving/service/retrieval/skeletons/text_query.py`)
 
-Skeleton là spec ở dạng máy đọc được — Agent bám vào đó tốt hơn bám vào mô tả bằng lời. File `AGENT_CONTEXT.md` ở root chứa Project Context Block dùng chung, không cần folder riêng cho Agent.
+### 3. Module Reranker & Temporal Alignment (Xếp hạng & Căn chỉnh)
+- `[ ]` **TASK-RNK-01**: ViRanker Text Reranker (`serving/service/reranker/skeletons/text_branch/viranker.py`)
+- `[ ]` **TASK-RNK-02**: Jina Reranker M0 Cross-modal (`serving/service/reranker/skeletons/crossmodal_branch/jina_reranker_m0.py`)
+- `[ ]` **TASK-RNK-03**: Fusion Score Integration (`serving/service/reranker/skeletons/fusion_score.py`)
+- `[ ]` **TASK-RNK-04**: Temporal Aligner cho sự kiện TRAKE (`serving/service/temporal_aligner.py`)
 
-**Skeleton trông như thế nào:**
-```python
-# serving/service/retrieval/text_query.py  ← bạn tạo file này trước
-from serving.api.schema import CandidateResult
-from serving.repo import qdrant_repo
-# KHÔNG import model trực tiếp — dùng dependency injection
+### 4. Module Evaluation & Benchmark (Đo đạc Đánh giá)
+- `[ ]` **TASK-EVL-01**: Tính chỉ số r_score cho KIS/VQA/TRAKE (`eval/skeletons/metrics/r_score.py`)
+- `[ ]` **TASK-EVL-02**: Tính điểm tổng hợp Final Score R@{1,5,20,50,100} (`eval/skeletons/metrics/final_score.py`)
+- `[ ]` **TASK-EVL-03**: Script chạy Benchmark thử nghiệm (`eval/skeletons/run_benchmark.py`)
 
-async def query_by_text(
-    query: str,
-    encoder,  # injected từ dependencies.py
-    top_k: int = 100,
-) -> list[CandidateResult]:
-    """
-    Encode query text → dense vector → truy vấn Qdrant → trả về candidates.
-
-    KHÔNG dịch thuật trong hàm này.
-    KHÔNG gọi Qdrant trực tiếp — dùng qdrant_repo.search_by_text().
-    KHÔNG khởi tạo model trong hàm này.
-    """
-    raise NotImplementedError
-
-
-def split_trake_events(query: str) -> list[str]:
-    """
-    Tách multi-event TRAKE query thành list sự kiện riêng biệt.
-    Ví dụ: "người đứng dậy, sau đó chạy ra cửa" → ["người đứng dậy", "chạy ra cửa"]
-    """
-    raise NotImplementedError
-```
-
-Agent đọc file này → hiểu ngay import path, interface, constraint — không cần bạn giải thích thêm.
+### 5. Module Unit Testing (Kiểm thử Tự động)
+- `[x]` **TASK-TST-03**: Test API Request/Response Schemas (`tests/test_api_schema.py`) — *Đã xong*
+- `[x]` **TASK-TST-04**: Test Verification & Merge Shards (`tests/test_merge_shards.py`) — *Đã xong*
+- `[x]` **TASK-TST-06**: Test Keyframe Extraction & Checkpoint (`tests/test_keyframe_extraction.py`) — *Đã xong*
+- `[x]` **TASK-TST-07**: Test Export Shard Dataset & Validation (`tests/test_export_shard_dataset.py`) — *Đã xong*
+- `[ ]` **TASK-TST-01**: Test Fusion Score Reranking (`tests/test_fusion_score.py`)
+- `[ ]` **TASK-TST-02**: Test Query Parsing & TRAKE Alignment (`tests/test_query_parsing.py`)
+- `[ ]` **TASK-TST-05**: Test Evaluation R-Score Metrics (`tests/test_r_score.py`)
 
 ---
 
-## Phân chia trách nhiệm theo module
+## 🎯 II. Bảng Phân Công Nhiệm Vụ (Chỉ chứa các Task CẦN LÀM)
 
-### 🔴 Bạn phụ trách (Leader) — KHÔNG delegate
+> Các công việc dưới đây được phân chia cho từng thành viên. Mỗi thành viên mở file skeleton tương ứng, copy `AGENT_CONTEXT.md` và nhờ AI Agent (Claude/Cursor) điền mã nguồn hoàn chỉnh.
 
-Sai một chỗ → cả team bị block, hoặc cần hiểu hệ thống toàn cục mới làm đúng.
-
-| Module | File/Component | Lý do giữ lại |
-|---|---|---|
-| `configs/` | `shard_assignment.yaml`, `model_versions.yaml`, `fusion_config.yaml` | Ghim version sai → toàn bộ vector không tương thích |
-| `aggregation/` | Toàn bộ | Logic verify/merge cross-shard, dễ sinh bug lặng lẽ |
-| `indexing/` | `collection_schema.py`, `collection_alias.py`, `run_index.py` | Schema Qdrant sai → phải re-index lại toàn bộ |
-| `serving/core/` | `config.py`, `dependencies.py`, `lifespan.py` | Model singleton, startup/shutdown — sai là crash |
-| `serving/repo/` | `qdrant_repo.py` | Query logic RRF/prefetch, ảnh hưởng trực tiếp recall |
-| `infra/` | Docker, compose, CI/CD, monitoring | Deploy sai → mất điểm lúc thi |
-| `shared/schemas/` | `named_vector_spec.py` | Contract giữa ingestion và serving — sai là không load được |
-| `pyproject.toml`, `Makefile` | — | Dependency và entry point toàn hệ thống |
-| `AGENT_CONTEXT.md` | — | Project Context Block cho AI Agent — bạn viết, không delegate |
-
----
-
-### 🟡 Bạn viết skeleton + spec → Members dùng Agent implement
-
-#### Module 1 — `ingestion/` (mỗi Member phụ trách shard của mình và đóng góp xây dựng 1 phần tool)
-
-Mỗi người tự chạy toàn bộ pipeline trên Kaggle Notebook của mình. Skeleton nằm tại `ingestion/skeletons/`.
-
-| Task | Skeleton file | Output cần đạt | Người phụ trách | Trạng thái |
-|---|---|---|---|---|
-| **TASK-ING-01** | `01a_keyframe_extraction.py` | Keyframe JPG + `scene_metadata.parquet` (scene_id, video_id, start_frame, end_frame, fps) | Member_1 | `[x]` (Đã implement + Unit tests) |
-| **TASK-ING-02** | `01b_text_extraction.py` | `ocr_text.parquet` (scene_id, ocr_text), `asr_text.parquet` (scene_id, asr_text) | Member_2 | Skeleton |
-| **TASK-ING-03** | `01c_embedding_generation.py` | `image_vectors.npy`, `ocr_vectors.npy`, `asr_vectors.npy` — shape `(N, D)`, cùng thứ tự scene_id | Member_3 | Skeleton |
-| **TASK-ING-04** | `02_export_shard_dataset.py` | Kaggle Dataset `aic2026-shard-<member>-v<n>` publish public | Member_4 | `[x]` (Đã implement + Unit tests) |
-| **TASK-ING-05** | `checkpoint_manifest.py` | Class ghi/đọc `checkpoint.json` — track scene_id đã xong, resume khi session Kaggle bị ngắt | Member_4 | `[x]` (Đã implement + Unit tests) |
-
-**Constraints bắt buộc (đã nhúng trong skeleton, Agent không được override):**
-```
-- Model OCR: PaddleOCR v6 — version đọc từ configs/model_versions.yaml, không hardcode
-- Model ASR: PhoWhisper — version đọc từ configs/model_versions.yaml, không hardcode
-- Model text embedding: gte-Qwen2-1.5B — dùng chung cho cả OCR lẫn ASR text
-- Model image embedding: BEiT3+CLIP — import từ shared/models/image_embedding_wrapper.py
-- Point ID: sha256(video_id + "_" + scene_id)[:16] — KHÔNG random, KHÔNG uuid
-- Output path: /kaggle/working/shard_output/ — KHÔNG hardcode path khác
-- Checkpoint granularity: scene-level (không phải video-level)
-```
-
----
-
-#### Module 2 — `serving/service/retrieval/` (Cả 4 Members cùng tham gia)
-
-Skeleton nằm tại `serving/service/retrieval/skeletons/`. Các Members cùng đóng góp xây dựng từng phần của pipeline, bạn review interface contract với repo.
-
-| Task | Skeleton file | Interface | Người phụ trách |
+| Thành viên | Mã Task | File Skeleton cần làm | Chi tiết công việc |
 |---|---|---|---|
-| **TASK-SRV-01** | `text_query.py` | `async def query_by_text(query: str, encoder=Depends(get_text_encoder)) -> list[CandidateResult]` | Member_1 |
-| **TASK-SRV-02** | `image_query.py` | `async def query_by_image(image_bytes: bytes, encoder=Depends(get_image_encoder)) -> list[CandidateResult]` | Member_2 |
-| **TASK-SRV-03** | `voice_query.py` | `async def query_by_voice(audio_bytes: bytes) -> list[CandidateResult]` — transcribe rồi gọi lại `text_query`, không tạo luồng riêng | Member_3 |
-| **TASK-SRV-04** | `retrieval_pipeline.py` | `async def retrieve(request: RetrievalRequest) -> list[CandidateResult]` — orchestrator phân loại input type | Member_4 |
-| **TASK-SRV-05** | `text_query.py` (bổ sung) | `def split_trake_events(query: str) -> list[str]` — tách multi-event query thành N sự kiện | Member_3 |
-
-**Constraints bắt buộc (đã nhúng trong skeleton):**
-```python
-# KHÔNG khởi tạo model trong function body hay module level
-# PHẢI dùng dependency injection: Depends(get_text_encoder), Depends(get_image_encoder)
-# KHÔNG gọi Qdrant trực tiếp — chỉ gọi qua qdrant_repo (import từ serving/repo/)
-# KHÔNG import từ controller/ — luồng chỉ đi một chiều: controller → service → repo
-```
-
----
-
-#### Module 3 — `serving/service/reranker/` (Cả 4 Members cùng tham gia)
-
-Skeleton nằm tại `serving/service/reranker/skeletons/`. Các Members cùng đóng góp xây dựng thuật toán rerank và alignment, bạn review `fusion_score.py` và edge cases TRAKE.
-
-| Task | Skeleton file | Interface | Người phụ trách |
+| **Member_1** | `TASK-ING-02a` | `ingestion/skeletons/01b_text_extraction.py` | Implement hàm `run_ocr()` dùng PaddleOCR v6 |
+| | `TASK-SRV-01` | `serving/service/retrieval/skeletons/text_query.py` | Implement `query_by_text()` truy vấn 5 vectors trên Qdrant |
+| | `TASK-RNK-01` | `serving/service/reranker/skeletons/text_branch/viranker.py` | Implement ViRanker text reranking |
+| | `TASK-EVL-01` | `eval/skeletons/metrics/r_score.py` | Implement công thức tính `r_score` cho KIS/VQA/TRAKE |
+| | `TASK-TST-05` | `tests/test_r_score.py` | Viết unit tests kiểm thử r_score |
 |---|---|---|---|
-| **TASK-RNK-01** | `text_branch/viranker.py` | `def score(query: str, candidates: list[CandidateResult]) -> list[float]` — ViRanker (BGE-M3 + BPT, MMARCO-VI) | Member_1 |
-| **TASK-RNK-02** | `crossmodal_branch/jina_reranker_m0.py` | `def score(query: str, candidates: list[CandidateResult]) -> list[float]` — Jina Reranker M0, cross-modal | Member_2 |
-| **TASK-RNK-03** | `fusion_score.py` | `def fuse(text_scores: list[float], crossmodal_scores: list[float], alpha: float) -> list[float]` — alpha đọc từ fusion_config.yaml | Member_3 |
-| **TASK-RNK-04** | `../temporal_aligner.py` | `def align(event_candidates: list[list[CandidateResult]]) -> list[CandidateResult]` — TRAKE, 1 result per event, đảm bảo cùng video + thứ tự thời gian | Member_4 |
-
-**Constraints bắt buộc (đã nhúng trong skeleton):**
-```python
-# Lazy load: khởi tạo model lần đầu gọi, cache lại — KHÔNG load ở module level (OOM khi import)
-# Batch inference: xử lý toàn bộ candidates trong 1 forward pass — KHÔNG loop từng candidate
-# TASK-RNK-04: ưu tiên video có nhiều events khớp nhất, sau đó mới tối ưu frame trong video đó
-```
-
----
-
-#### Module 4 — `eval/` (Các Members cùng tham gia)
-
-Skeleton nằm tại `eval/skeletons/`. Members đóng góp xây dựng bộ đo đạc chất lượng.
-
-| Task | Skeleton file | Interface | Người phụ trách |
+| **Member_2** | `TASK-ING-02b` | `ingestion/skeletons/01b_text_extraction.py` | Implement hàm `run_asr()` dùng PhoWhisper |
+| | `TASK-SRV-02` | `serving/service/retrieval/skeletons/image_query.py` | Implement `query_by_image()` tìm kiếm theo ảnh |
+| | `TASK-RNK-02` | `serving/service/reranker/skeletons/crossmodal_branch/jina_reranker_m0.py` | Implement Jina Reranker M0 cross-modal |
+| | `TASK-EVL-02` | `eval/skeletons/metrics/final_score.py` | Implement công thức `final_score` mean R@k |
 |---|---|---|---|
-| **TASK-EVL-01** | `metrics/r_score.py` | `def r_score(prediction: Prediction, ground_truth: GroundTruth, task_type: Literal["KIS","VQA","TRAKE"]) -> float` | Member_1 |
-| **TASK-EVL-02** | `metrics/final_score.py` | `def final_score(ranked_list: list[Prediction], ground_truth: GroundTruth) -> float` — trung bình R@{1,5,20,50,100} | Member_2 |
-| **TASK-EVL-03** | `run_benchmark.py` | Script so sánh cấu hình: đổi fusion weight, bật/tắt reranker — in bảng kết quả | Member_3 |
-
-**Constraints (đã nhúng trong skeleton):**
-```
-Công thức r_score — KHÔNG được suy diễn, implement đúng theo đây:
-  KIS:   1.0 nếu (video_id == GT_v) AND (frame_id in [s, e]) else 0.0
-  VQA:   1.0 nếu cả 3 đúng: video_id, frame_id in [s,e], answer == GT_a; else 0.0
-  TRAKE: 0.0 nếu sai video; nếu đúng video → (1/N) * Σ 1[frame_j in [s_j, e_j]]
-
-final_score = mean([R@1, R@5, R@20, R@50, R@100])
-R@k = max(r_score(pred) for pred in ranked_list[:k])
-```
-
----
-
-#### Module 5 — `tests/` (ai implement feature thì viết test cho feature đó)
-
-| Task | File | Người viết | Gắn với task |
+| **Member_3** | `TASK-ING-03a` | `ingestion/skeletons/01c_embedding_generation.py` | Implement `generate_image_embeddings()` dùng BEiT3 + CLIP |
+| | `TASK-SRV-03` | `serving/service/retrieval/skeletons/voice_query.py` | Implement `query_by_voice()` xử lý audio query |
+| | `TASK-SRV-05` | `serving/service/retrieval/skeletons/text_query.py` | Implement `split_trake_events()` tách sự kiện TRAKE |
+| | `TASK-RNK-03` | `serving/service/reranker/skeletons/fusion_score.py` | Implement `fuse()` kết hợp điểm từ 2 nhánh rerank |
+| | `TASK-EVL-03` | `eval/skeletons/run_benchmark.py` | Implement script chạy benchmark thử nghiệm |
+| | `TASK-TST-01` | `tests/test_fusion_score.py` | Viết unit tests cho Fusion Score |
 |---|---|---|---|
-| **TASK-TST-01** | `test_fusion_score.py` | Member_3 | Cùng lúc với TASK-RNK-03 |
-| **TASK-TST-02** | `test_query_parsing.py` | Member_4 | Cùng lúc với TASK-SRV-04 / TASK-RNK-04 |
-| **TASK-TST-03** | `test_api_schema.py` | Bạn (Leader) | Khi viết `serving/api/schema/` |
-| **TASK-TST-04** | `test_merge_shards.py` | Bạn (Leader) | Cùng lúc với `aggregation/verify_shards.py` |
-| **TASK-TST-05** | `test_r_score.py` | Member_1 | Cùng lúc với TASK-EVL-01 — test edge cases mỗi task type |
-
----
-
-## Workflow Git
-
-### Branch naming
-```
-feature/<TASK-ID>-<slug>    # ví dụ: feature/TASK-SRV-01-text-query
-fix/<TASK-ID>-<slug>        # ví dụ: fix/TASK-RNK-02-batch-inference
-```
-
-### PR Checklist (AI Agent tự điền trước khi tạo PR)
-```markdown
-## PR Checklist
-- [ ] Code chạy được, không chỉ "trông có vẻ đúng" (paste output hoặc log vào PR description)
-- [ ] Không import từ layer cao hơn (controller không import repo, service không import controller)
-- [ ] Model không khởi tạo ở module level
-- [ ] Point ID dùng hash deterministic — không random, không uuid
-- [ ] Không hardcode path hay version model — đọc từ config
-- [ ] Không tạo file ngoài file được yêu cầu trong skeleton
-- [ ] Test đi kèm (nếu task yêu cầu)
-```
-
-### Review ownership
-| PR thuộc module | Reviewer | Focus điểm |
-|---|---|---|
-| `ingestion/`, `aggregation/`, `indexing/`, `infra/`, `shared/` | **Bạn** | Toàn bộ |
-| `serving/service/retrieval/` | **Bạn** | Interface contract với `qdrant_repo` |
-| `serving/service/reranker/` | **Bạn** | `fusion_score.py` và edge cases TRAKE |
-| `eval/metrics/` | **Bạn** | Verify công thức theo `contest_info.md` |
-| `ingestion/` (nội bộ shard) | Members tự review | Bạn chỉ review TASK-ING-04 (publish step) |
-
----
-
-## Critical Path
-
-```
-Tuần 1 — Foundation (bạn unblock mọi người) [DONE]
-├── [Bạn] [x]      configs/ — shard_assignment + model_versions + fusion_config
-├── [Bạn] [x]      shared/schemas/named_vector_spec.py
-├── [Bạn] [x]      serving/api/schema/ — Pydantic models (CandidateResult, RetrievalRequest...)
-├── [Bạn] [x]      AGENT_CONTEXT.md + skeleton files cho ING-01..05
-├── [Bạn & Members] [x] Module Ingestion (ING-01, ING-04, ING-05 đã implement hoàn chỉnh + Unit tests)
-└── [Bạn] [x]      serving/repo/qdrant_repo.py
-
-Tuần 2 — Core serving [IN PROGRESS]
-├── [Bạn] [x]      Skeleton files cho SRV-01..05, RNK-01..04
-├── [Bạn] [x]      aggregation/ (sau khi có ≥1 shard xong)
-├── [Bạn] [x]      indexing/ (sau aggregation)
-├── [M1 & M2 & M3 & M4] Phát triển song song Module Retrieval (M1: SRV-01, M2: SRV-02, M3: SRV-03 & 05, M4: SRV-04)
-└── [M1 & M2 & M3 & M4] Phát triển song song Module Reranker (M1: RNK-01, M2: RNK-02, M3: RNK-03, M4: RNK-04)
-
-Tuần 3 — TRAKE + eval
-├── [Members]      Chạy ingestion offline theo shard riêng của mình
-├── [Members]      Phát triển song song Module Evaluation (M1: EVL-01, M2: EVL-02, M3: EVL-03)
-└── [Bạn]          serving/core/ — model singleton, lifespan
-
-Tuần 4 — Hardening
-├── [Bạn]          infra/ — Docker, CI/CD, smoke test
-├── [Team]         Integration test end-to-end
-└── [Bạn]          Collection alias + rollback plan trước ngày thi
-```
-
----
-
-## Quy ước đặt tên
-
-| Thứ | Quy ước |
-|---|---|
-| Kaggle Dataset | `aic2026-shard-<tên_member>-v<n>` và `aic2026-unified-v<n>` |
-| Qdrant collection | `collection_v<n>` — alias `production` trỏ vào version mới nhất |
-| Point ID | `sha256(video_id + "_" + scene_id)[:16]` — không random |
-| Branch | `feature/<TASK-ID>-<slug>` |
-| Parquet schema | Luôn có cột `scene_id` (str) và `video_id` (str) làm key join |
-| Skeleton file | Đặt trong `<module>/skeletons/` — bạn viết, không commit implementation vào đây |
-
----
-
-*File này là source of truth cho phân công. Khi có task mới: bạn viết skeleton trước → thêm task vào đây → giao cho Member. Không giao miệng.*
+| **Member_4** | `TASK-ING-03b` | `ingestion/skeletons/01c_embedding_generation.py` | Implement `generate_text_embeddings()` dùng gte-Qwen2-1.5B |
+| | `TASK-SRV-04` | `serving/service/retrieval/skeletons/retrieval_pipeline.py` | Implement `retrieve()` orchestrator |
+| | `TASK-RNK-04` | `serving/service/temporal_aligner.py` | Implement `align()` căn chỉnh thứ tự thời gian cho TRAKE |
+| | `TASK-TST-02` | `tests/test_query_parsing.py` | Viết unit tests cho query parsing & TRAKE alignment |
