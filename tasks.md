@@ -88,13 +88,13 @@ Sai một chỗ → cả team bị block, hoặc cần hiểu hệ thống toàn
 
 Mỗi người tự chạy toàn bộ pipeline trên Kaggle Notebook của mình. Skeleton nằm tại `ingestion/skeletons/`.
 
-| Task | Skeleton file | Output cần đạt | Người phụ trách |
-|---|---|---|---|
-| **TASK-ING-01** | `01a_keyframe_extraction.py` | Keyframe JPG + `scene_metadata.parquet` (scene_id, video_id, start_frame, end_frame, fps) | Member_1 |
-| **TASK-ING-02** | `01b_text_extraction.py` | `ocr_text.parquet` (scene_id, ocr_text), `asr_text.parquet` (scene_id, asr_text) | Member_2 |
-| **TASK-ING-03** | `01c_embedding_generation.py` | `image_vectors.npy`, `ocr_vectors.npy`, `asr_vectors.npy` — shape `(N, D)`, cùng thứ tự scene_id | Member_3 |
-| **TASK-ING-04** | `02_export_shard_dataset.py` | Kaggle Dataset `aic2026-shard-<member>-v<n>` publish public | Member_4 |
-| **TASK-ING-05** | `kaggle_utils/checkpoint_manifest.py` | Class ghi/đọc `checkpoint.json` — track scene_id đã xong, resume khi session Kaggle bị ngắt | Member_4 |
+| Task | Skeleton file | Output cần đạt | Người phụ trách | Trạng thái |
+|---|---|---|---|---|
+| **TASK-ING-01** | `01a_keyframe_extraction.py` | Keyframe JPG + `scene_metadata.parquet` (scene_id, video_id, start_frame, end_frame, fps) | Member_1 | `[x]` (Đã implement + Unit tests) |
+| **TASK-ING-02** | `01b_text_extraction.py` | `ocr_text.parquet` (scene_id, ocr_text), `asr_text.parquet` (scene_id, asr_text) | Member_2 | Skeleton |
+| **TASK-ING-03** | `01c_embedding_generation.py` | `image_vectors.npy`, `ocr_vectors.npy`, `asr_vectors.npy` — shape `(N, D)`, cùng thứ tự scene_id | Member_3 | Skeleton |
+| **TASK-ING-04** | `02_export_shard_dataset.py` | Kaggle Dataset `aic2026-shard-<member>-v<n>` publish public | Member_4 | `[x]` (Đã implement + Unit tests) |
+| **TASK-ING-05** | `checkpoint_manifest.py` | Class ghi/đọc `checkpoint.json` — track scene_id đã xong, resume khi session Kaggle bị ngắt | Member_4 | `[x]` (Đã implement + Unit tests) |
 
 **Constraints bắt buộc (đã nhúng trong skeleton, Agent không được override):**
 ```
@@ -225,7 +225,7 @@ Tuần 1 — Foundation (bạn unblock mọi người) [DONE]
 ├── [Bạn] [x]      shared/schemas/named_vector_spec.py
 ├── [Bạn] [x]      serving/api/schema/ — Pydantic models (CandidateResult, RetrievalRequest...)
 ├── [Bạn] [x]      AGENT_CONTEXT.md + skeleton files cho ING-01..05
-├── [Members]      Xây dựng module Ingestion (M1: ING-01, M2: ING-02, M3: ING-03, M4: ING-04, 05)
+├── [Bạn & Members] [x] Module Ingestion (ING-01, ING-04, ING-05 đã implement hoàn chỉnh + Unit tests)
 └── [Bạn] [x]      serving/repo/qdrant_repo.py
 
 Tuần 2 — Core serving [IN PROGRESS]
