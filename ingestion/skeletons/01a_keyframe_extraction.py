@@ -11,7 +11,7 @@ INPUT:
     - configs/model_versions.yaml (đọc qua shared.utils.config_loader).
 
 OUTPUT:
-    - Keyframe JPG files tại: output_dir/keyframes/{video_id}/{scene_id}.jpg
+    - Keyframe JPG files tại: output_dir/keyframes/{video_id}/{scene_id}_{frame_id:06d}.jpg
     - scene_metadata.parquet với schema:
         scene_id       (str)  — format: {video_id}_S{scene_idx:03d}
         video_id       (str)  — ví dụ: 'L01_V001'
@@ -20,7 +20,7 @@ OUTPUT:
         timestamp_end   (float) — giây kết thúc scene
         timestamp_mid   (float) — giây của keyframe (= frame_id / fps)
         fps            (float) — FPS của video gốc
-        keyframe_path  (str)  — đường dẫn tương đối từ output_dir/keyframes/
+        keyframe_path  (str)  — đường dẫn tương đối từ output_dir/keyframes/ (chứa frame_id)
 
 CONSTRAINTS (KHÔNG ĐƯỢC THAY ĐỔI):
     - Model shot detection: TransNetV2 — version đọc từ configs/model_versions.yaml
@@ -159,10 +159,20 @@ def extract_keyframe(
     Strategy đọc từ configs/model_versions.yaml::keyframe.strategy.
     Hiện tại chỉ hỗ trợ 'middle_frame' — lấy frame ở giữa scene.
 
-    Gợi ý implementation (middle_frame):
-        mid_idx = (start_frame + end_frame) // 2
-        keyframe = frames[mid_idx]  # shape (H, W, 3)
-        return keyframe, mid_idx
+    RÀNG BUỘC CỦA LEADER (LỌC FRAME ĐƠN SẮC/THIẾU THÔNG TIN):
+        - Phải tích hợp logic lọc các frame đơn sắc (như frame đen hoàn toàn, xám xịt, nhiễu).
+        - Ngưỡng Grayscale Standard Deviation (độ lệch chuẩn độ sáng): 12.0.
+        - Nếu frame giữa (middle frame) có std < 12.0:
+            1. Quét rộng dần ra xung quanh (từ mid_idx tịnh tiến dần ra start_frame và end_frame)
+               để tìm frame nào có std >= 12.0 (hoặc có std lớn nhất trong scene).
+            2. Nếu toàn bộ scene đều có std < 12.0 (cảnh tối đen/mất tín hiệu hoàn toàn),
+               trả về (None, -1) để skip scene này khỏi database, tránh làm nhiễu dữ liệu.
+
+    Gợi ý implementation:
+        import cv2
+        # Tính mid_idx = (start_frame + end_frame) // 2
+        # Chuyển frame sang Grayscale và tính std: np.std(cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY))
+        # Quét tìm frame tối ưu nhất thỏa mãn điều kiện.
 
     Args:
         frames: np.ndarray, shape (T, H, W, 3).
@@ -172,8 +182,8 @@ def extract_keyframe(
 
     Returns:
         Tuple (keyframe_image, frame_id):
-            - keyframe_image: np.ndarray shape (H, W, 3), RGB.
-            - frame_id: int — frame number trong video gốc (dùng để tính timestamp).
+            - keyframe_image: np.ndarray shape (H, W, 3), RGB. Hoặc None nếu bị lọc bỏ hoàn toàn.
+            - frame_id: int — frame number trong video gốc. Hoặc -1 nếu bị lọc bỏ hoàn toàn.
 
     Raises:
         ValueError: Nếu strategy không được hỗ trợ.
@@ -188,14 +198,14 @@ def build_scene_metadata(
     keyframe_dir: str,
 ) -> pd.DataFrame:
     """
-    Xây dựng bảng metadata cho tất cả scene trong một video.
+    Xây dựng bảng metadata cho tất cả scene hợp lệ trong một video.
 
     Args:
         video_id: ID video, ví dụ 'L01_V001'.
         scenes: List (start_frame, end_frame) từ detect_scenes().
         fps: FPS của video gốc.
         keyframe_dir: Thư mục chứa file JPG keyframe đã lưu.
-            Format tên file: {scene_id}.jpg
+            Format tên file bắt buộc: {scene_id}_{frame_id:06d}.jpg
 
     Returns:
         pd.DataFrame với các cột bắt buộc:
@@ -204,7 +214,7 @@ def build_scene_metadata(
             timestamp_mid (float), fps (float), keyframe_path (str)
 
         keyframe_path là đường dẫn tương đối từ root output_dir/keyframes/.
-        Ví dụ: 'L01_V001/L01_V001_S003.jpg'
+        Ví dụ: 'L01_V001/L01_V001_S003_001500.jpg'
 
     Raises:
         ValueError: Nếu scenes rỗng.
