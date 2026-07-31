@@ -143,30 +143,34 @@ Mỗi point trong Qdrant có payload theo `KeyframePayload`:
 ---
 
 ## 11. Bổ sung thông tin Tuần 2
-
-### A. Reranker Constraints (Member_3)
+ 
+### A. Reranker Constraints (Phát triển bởi các Members)
 - Thư mục: `serving/api/service/reranker/skeletons/`
 - Gồm 3 tasks chính:
-  1. `text_branch/viranker.py` (ViRanker): Đo độ tương thích của văn bản.
-  2. `crossmodal_branch/jina_reranker_m0.py` (Jina Reranker): Đối chiếu text query với ảnh keyframe thật.
-  3. `fusion_score.py`: Hợp nhất điểm số 2 nhánh theo linear/RRF với `alpha` cấu hình trong `configs/fusion_config.yaml`.
+  1. `text_branch/viranker.py` (ViRanker) [Member_1]: Đo độ tương thích của văn bản.
+  2. `crossmodal_branch/jina_reranker_m0.py` (Jina Reranker) [Member_2]: Đối chiếu text query với ảnh keyframe thật.
+  3. `fusion_score.py` [Member_3]: Hợp nhất điểm số 2 nhánh theo linear/RRF với `alpha` cấu hình trong `configs/fusion_config.yaml`.
 - **Ràng buộc**:
   - **Lazy load**: Khởi tạo model khi được gọi lần đầu, cache lại model instance để tránh OOM khi import.
   - **Batch inference**: Thực hiện dự đoán song song cho toàn bộ candidates trong 1 forward pass. KHÔNG dùng loop từng candidate.
-
-### B. Temporal Aligner cho TRAKE (Member_2)
+ 
+### B. Temporal Aligner cho TRAKE (Member_4)
 - File: `serving/api/service/temporal_aligner.py`
 - **Quy tắc**:
   - Lọc ra chuỗi các keyframes đại diện thỏa mãn: Cùng `video_id`, thứ tự thời gian tăng dần (`timestamp_mid` tăng dần).
   - Ưu tiên video có số lượng events matched nhiều nhất, sau đó mới tối ưu hóa điểm số.
- 
+  
 ### C. Aggregation Flow (Leader)
 - Thư mục: `aggregation/`
 - Luồng chạy:
   `pull_shards` (tải data từ Kaggle) → `verify_shards` (xác thực tính nhất quán và trùng lặp) → `merge_datasets` (gộp metadata, vectors, copy keyframes) → `publish_unified` (publish unified dataset lên Kaggle).
- 
-### D. Evaluation (Member_4)
+  
+### D. Evaluation (Phát triển bởi các Members)
 - Thư mục: `eval/skeletons/`
+- Phân công:
+  - `metrics/r_score.py` [Member_1]
+  - `metrics/final_score.py` [Member_2]
+  - `run_benchmark.py` [Member_3]
 - Công thức `r_score`:
   - KIS: `1.0` nếu đúng video_id và timestamp trong khoảng ground truth, ngược lại `0.0`.
   - VQA: `1.0` nếu đúng video_id, timestamp và đúng answer, ngược lại `0.0`.

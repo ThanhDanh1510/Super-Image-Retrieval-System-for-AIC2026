@@ -84,17 +84,17 @@ Sai một chỗ → cả team bị block, hoặc cần hiểu hệ thống toàn
 
 ### 🟡 Bạn viết skeleton + spec → Members dùng Agent implement
 
-#### Module 1 — `ingestion/` (mỗi Member phụ trách shard của mình)
+#### Module 1 — `ingestion/` (mỗi Member phụ trách shard của mình và đóng góp xây dựng 1 phần tool)
 
 Mỗi người tự chạy toàn bộ pipeline trên Kaggle Notebook của mình. Skeleton nằm tại `ingestion/skeletons/`.
 
-| Task | Skeleton file | Output cần đạt |
-|---|---|---|
-| **TASK-ING-01** | `01a_keyframe_extraction.py` | Keyframe JPG + `scene_metadata.parquet` (scene_id, video_id, start_frame, end_frame, fps) |
-| **TASK-ING-02** | `01b_text_extraction.py` | `ocr_text.parquet` (scene_id, ocr_text), `asr_text.parquet` (scene_id, asr_text) |
-| **TASK-ING-03** | `01c_embedding_generation.py` | `image_vectors.npy`, `ocr_vectors.npy`, `asr_vectors.npy` — shape `(N, D)`, cùng thứ tự scene_id |
-| **TASK-ING-04** | `02_export_shard_dataset.py` | Kaggle Dataset `aic2026-shard-<member>-v<n>` publish public |
-| **TASK-ING-05** | `kaggle_utils/checkpoint_manifest.py` | Class ghi/đọc `checkpoint.json` — track scene_id đã xong, resume khi session Kaggle bị ngắt |
+| Task | Skeleton file | Output cần đạt | Người phụ trách |
+|---|---|---|---|
+| **TASK-ING-01** | `01a_keyframe_extraction.py` | Keyframe JPG + `scene_metadata.parquet` (scene_id, video_id, start_frame, end_frame, fps) | Member_1 |
+| **TASK-ING-02** | `01b_text_extraction.py` | `ocr_text.parquet` (scene_id, ocr_text), `asr_text.parquet` (scene_id, asr_text) | Member_2 |
+| **TASK-ING-03** | `01c_embedding_generation.py` | `image_vectors.npy`, `ocr_vectors.npy`, `asr_vectors.npy` — shape `(N, D)`, cùng thứ tự scene_id | Member_3 |
+| **TASK-ING-04** | `02_export_shard_dataset.py` | Kaggle Dataset `aic2026-shard-<member>-v<n>` publish public | Member_4 |
+| **TASK-ING-05** | `kaggle_utils/checkpoint_manifest.py` | Class ghi/đọc `checkpoint.json` — track scene_id đã xong, resume khi session Kaggle bị ngắt | Member_4 |
 
 **Constraints bắt buộc (đã nhúng trong skeleton, Agent không được override):**
 ```
@@ -109,17 +109,17 @@ Mỗi người tự chạy toàn bộ pipeline trên Kaggle Notebook của mình
 
 ---
 
-#### Module 2 — `serving/service/retrieval/` (Member_1 & Member_2)
+#### Module 2 — `serving/service/retrieval/` (Cả 4 Members cùng tham gia)
 
-Skeleton nằm tại `serving/service/retrieval/skeletons/`. Member_1 & Member_2 fill implementation, bạn review interface contract với repo.
+Skeleton nằm tại `serving/service/retrieval/skeletons/`. Các Members cùng đóng góp xây dựng từng phần của pipeline, bạn review interface contract với repo.
 
 | Task | Skeleton file | Interface | Người phụ trách |
 |---|---|---|---|
 | **TASK-SRV-01** | `text_query.py` | `async def query_by_text(query: str, encoder=Depends(get_text_encoder)) -> list[CandidateResult]` | Member_1 |
-| **TASK-SRV-02** | `image_query.py` | `async def query_by_image(image_bytes: bytes, encoder=Depends(get_image_encoder)) -> list[CandidateResult]` | Member_1 |
-| **TASK-SRV-03** | `voice_query.py` | `async def query_by_voice(audio_bytes: bytes) -> list[CandidateResult]` — transcribe rồi gọi lại `text_query`, không tạo luồng riêng | Member_1 |
-| **TASK-SRV-04** | `retrieval_pipeline.py` | `async def retrieve(request: RetrievalRequest) -> list[CandidateResult]` — orchestrator phân loại input type | Member_2 |
-| **TASK-SRV-05** | `text_query.py` (bổ sung) | `def split_trake_events(query: str) -> list[str]` — tách multi-event query thành N sự kiện | Member_2 |
+| **TASK-SRV-02** | `image_query.py` | `async def query_by_image(image_bytes: bytes, encoder=Depends(get_image_encoder)) -> list[CandidateResult]` | Member_2 |
+| **TASK-SRV-03** | `voice_query.py` | `async def query_by_voice(audio_bytes: bytes) -> list[CandidateResult]` — transcribe rồi gọi lại `text_query`, không tạo luồng riêng | Member_3 |
+| **TASK-SRV-04** | `retrieval_pipeline.py` | `async def retrieve(request: RetrievalRequest) -> list[CandidateResult]` — orchestrator phân loại input type | Member_4 |
+| **TASK-SRV-05** | `text_query.py` (bổ sung) | `def split_trake_events(query: str) -> list[str]` — tách multi-event query thành N sự kiện | Member_3 |
 
 **Constraints bắt buộc (đã nhúng trong skeleton):**
 ```python
@@ -131,16 +131,16 @@ Skeleton nằm tại `serving/service/retrieval/skeletons/`. Member_1 & Member_2
 
 ---
 
-#### Module 3 — `serving/service/reranker/` (Member_2 & Member_3)
+#### Module 3 — `serving/service/reranker/` (Cả 4 Members cùng tham gia)
 
-Skeleton nằm tại `serving/service/reranker/skeletons/`. Member_2 & Member_3 fill implementation, bạn review `fusion_score.py` và edge cases TRAKE.
+Skeleton nằm tại `serving/service/reranker/skeletons/`. Các Members cùng đóng góp xây dựng thuật toán rerank và alignment, bạn review `fusion_score.py` và edge cases TRAKE.
 
 | Task | Skeleton file | Interface | Người phụ trách |
 |---|---|---|---|
-| **TASK-RNK-01** | `text_branch/viranker.py` | `def score(query: str, candidates: list[CandidateResult]) -> list[float]` — ViRanker (BGE-M3 + BPT, MMARCO-VI) | Member_3 |
-| **TASK-RNK-02** | `crossmodal_branch/jina_reranker_m0.py` | `def score(query: str, candidates: list[CandidateResult]) -> list[float]` — Jina Reranker M0, cross-modal | Member_3 |
+| **TASK-RNK-01** | `text_branch/viranker.py` | `def score(query: str, candidates: list[CandidateResult]) -> list[float]` — ViRanker (BGE-M3 + BPT, MMARCO-VI) | Member_1 |
+| **TASK-RNK-02** | `crossmodal_branch/jina_reranker_m0.py` | `def score(query: str, candidates: list[CandidateResult]) -> list[float]` — Jina Reranker M0, cross-modal | Member_2 |
 | **TASK-RNK-03** | `fusion_score.py` | `def fuse(text_scores: list[float], crossmodal_scores: list[float], alpha: float) -> list[float]` — alpha đọc từ fusion_config.yaml | Member_3 |
-| **TASK-RNK-04** | `../temporal_aligner.py` | `def align(event_candidates: list[list[CandidateResult]]) -> list[CandidateResult]` — TRAKE, 1 result per event, đảm bảo cùng video + thứ tự thời gian | Member_2 |
+| **TASK-RNK-04** | `../temporal_aligner.py` | `def align(event_candidates: list[list[CandidateResult]]) -> list[CandidateResult]` — TRAKE, 1 result per event, đảm bảo cùng video + thứ tự thời gian | Member_4 |
 
 **Constraints bắt buộc (đã nhúng trong skeleton):**
 ```python
@@ -151,15 +151,15 @@ Skeleton nằm tại `serving/service/reranker/skeletons/`. Member_2 & Member_3 
 
 ---
 
-#### Module 4 — `eval/` (Member_4)
+#### Module 4 — `eval/` (Các Members cùng tham gia)
 
-Skeleton nằm tại `eval/skeletons/`. Member_4 fill implementation.
+Skeleton nằm tại `eval/skeletons/`. Members đóng góp xây dựng bộ đo đạc chất lượng.
 
 | Task | Skeleton file | Interface | Người phụ trách |
 |---|---|---|---|
-| **TASK-EVL-01** | `metrics/r_score.py` | `def r_score(prediction: Prediction, ground_truth: GroundTruth, task_type: Literal["KIS","VQA","TRAKE"]) -> float` | Member_4 |
-| **TASK-EVL-02** | `metrics/final_score.py` | `def final_score(ranked_list: list[Prediction], ground_truth: GroundTruth) -> float` — trung bình R@{1,5,20,50,100} | Member_4 |
-| **TASK-EVL-03** | `run_benchmark.py` | Script so sánh cấu hình: đổi fusion weight, bật/tắt reranker — in bảng kết quả | Member_4 |
+| **TASK-EVL-01** | `metrics/r_score.py` | `def r_score(prediction: Prediction, ground_truth: GroundTruth, task_type: Literal["KIS","VQA","TRAKE"]) -> float` | Member_1 |
+| **TASK-EVL-02** | `metrics/final_score.py` | `def final_score(ranked_list: list[Prediction], ground_truth: GroundTruth) -> float` — trung bình R@{1,5,20,50,100} | Member_2 |
+| **TASK-EVL-03** | `run_benchmark.py` | Script so sánh cấu hình: đổi fusion weight, bật/tắt reranker — in bảng kết quả | Member_3 |
 
 **Constraints (đã nhúng trong skeleton):**
 ```
@@ -179,10 +179,10 @@ R@k = max(r_score(pred) for pred in ranked_list[:k])
 | Task | File | Người viết | Gắn với task |
 |---|---|---|---|
 | **TASK-TST-01** | `test_fusion_score.py` | Member_3 | Cùng lúc với TASK-RNK-03 |
-| **TASK-TST-02** | `test_query_parsing.py` | Member_2 | Cùng lúc với TASK-SRV-05 |
+| **TASK-TST-02** | `test_query_parsing.py` | Member_4 | Cùng lúc với TASK-SRV-04 / TASK-RNK-04 |
 | **TASK-TST-03** | `test_api_schema.py` | Bạn (Leader) | Khi viết `serving/api/schema/` |
 | **TASK-TST-04** | `test_merge_shards.py` | Bạn (Leader) | Cùng lúc với `aggregation/verify_shards.py` |
-| **TASK-TST-05** | `test_r_score.py` | Member_4 | Cùng lúc với TASK-EVL-01 — test edge cases mỗi task type |
+| **TASK-TST-05** | `test_r_score.py` | Member_1 | Cùng lúc với TASK-EVL-01 — test edge cases mỗi task type |
 
 ---
 
@@ -225,22 +225,20 @@ Tuần 1 — Foundation (bạn unblock mọi người) [DONE]
 ├── [Bạn] [x]      shared/schemas/named_vector_spec.py
 ├── [Bạn] [x]      serving/api/schema/ — Pydantic models (CandidateResult, RetrievalRequest...)
 ├── [Bạn] [x]      AGENT_CONTEXT.md + skeleton files cho ING-01..05
-├── [Members]      TASK-ING-01, 02, 03 (song song, mỗi người shard riêng)
+├── [Members]      Xây dựng module Ingestion (M1: ING-01, M2: ING-02, M3: ING-03, M4: ING-04, 05)
 └── [Bạn] [x]      serving/repo/qdrant_repo.py
 
 Tuần 2 — Core serving [IN PROGRESS]
 ├── [Bạn] [x]      Skeleton files cho SRV-01..05, RNK-01..04
 ├── [Bạn] [x]      aggregation/ (sau khi có ≥1 shard xong)
 ├── [Bạn] [x]      indexing/ (sau aggregation)
-├── [Member_1 & 2] TASK-SRV-01, 02, 03, 04
-└── [Member_3]     TASK-RNK-01, 02, 03
+├── [M1 & M2 & M3 & M4] Phát triển song song Module Retrieval (M1: SRV-01, M2: SRV-02, M3: SRV-03 & 05, M4: SRV-04)
+└── [M1 & M2 & M3 & M4] Phát triển song song Module Reranker (M1: RNK-01, M2: RNK-02, M3: RNK-03, M4: RNK-04)
 
 Tuần 3 — TRAKE + eval
-├── [Member_2]     TASK-SRV-05 (event_splitter)
-├── [Member_2]     TASK-RNK-04 (temporal_aligner)
-├── [Members]      TASK-ING-04 (publish Kaggle Dataset)
-├── [Bạn]          serving/core/ — model singleton, lifespan
-└── [Member_4]     TASK-EVL-01, 02, 03
+├── [Members]      Chạy ingestion offline theo shard riêng của mình
+├── [Members]      Phát triển song song Module Evaluation (M1: EVL-01, M2: EVL-02, M3: EVL-03)
+└── [Bạn]          serving/core/ — model singleton, lifespan
 
 Tuần 4 — Hardening
 ├── [Bạn]          infra/ — Docker, CI/CD, smoke test
