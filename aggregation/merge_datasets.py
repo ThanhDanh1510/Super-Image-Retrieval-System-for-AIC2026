@@ -124,15 +124,6 @@ def merge_all(shards_dir: str, output_dir: str, keyframes_dir: str, partial: boo
             if (shard_path / "asr_vectors.npy").exists():
                 asr_vectors_list.append(np.load(shard_path / "asr_vectors.npy"))
                 
-        # 4. Copy keyframes
-        shard_keys_dir = shard_path / "keyframes"
-        if not shard_keys_dir.exists():
-            shard_keys_dir = shard_path
-            
-        copied = copy_keyframes(shard_keys_dir, keys_path)
-        total_keyframes_copied += copied
-        logger.info(f"  - Đã sao chép {copied} ảnh keyframes từ {shard_path.name}")
-
     # Gộp metadata parquet
     logger.info("Đang hợp nhất Parquet DataFrames...")
     if metadata_dfs:
@@ -141,7 +132,32 @@ def merge_all(shards_dir: str, output_dir: str, keyframes_dir: str, partial: boo
         if "scene_id" in final_meta.columns:
             final_meta = final_meta.drop_duplicates(subset=["scene_id"], keep="first")
         final_meta.to_parquet(out_path / "scene_metadata.parquet", index=False)
-        logger.info(f"✅ Đã lưu {len(final_meta)} rows vào scene_metadata.parquet")
+        logger.info(f"✅ Đã lưu {len(final_meta)} rows chuẩn vào scene_metadata.parquet")
+
+        # Copy CHÍNH XÁC các ảnh keyframe có tên trong scene_metadata.parquet (loại bỏ ảnh rác)
+        logger.info("Đang sao chép đúng các ảnh keyframes có trong metadata...")
+        for row in final_meta.itertuples():
+            rel_path = getattr(row, "keyframe_path", None)
+            if not rel_path:
+                continue
+                
+            # Tìm file ảnh tương ứng trong các raw_shards
+            found = False
+            for shard_path in shard_paths:
+                possible_src = shard_path / "keyframes" / rel_path
+                if not possible_src.exists():
+                    possible_src = shard_path / rel_path
+                    
+                if possible_src.exists():
+                    dest_path = keys_path / rel_path
+                    dest_path.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(possible_src, dest_path)
+                    total_keyframes_copied += 1
+                    found = True
+                    break
+                    
+            if not found:
+                logger.warning(f"Không tìm thấy file ảnh nguồn cho: {rel_path}")
 
     if not partial:
         if ocr_dfs:
