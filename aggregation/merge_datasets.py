@@ -47,7 +47,7 @@ def copy_keyframes(shard_keyframes_dir: Path, target_keyframes_dir: Path) -> int
         
     return count
 
-def merge_all(shards_dir: str, output_dir: str, keyframes_dir: str) -> bool:
+def merge_all(shards_dir: str, output_dir: str, keyframes_dir: str, partial: bool = False) -> bool:
     """Gộp toàn bộ shards."""
     shards_path = Path(shards_dir)
     out_path = Path(output_dir)
@@ -56,114 +56,120 @@ def merge_all(shards_dir: str, output_dir: str, keyframes_dir: str) -> bool:
     out_path.mkdir(parents=True, exist_ok=True)
     keys_path.mkdir(parents=True, exist_ok=True)
     
-    try:
-        shard_cfg = load_shard_assignment()
-    except Exception as e:
-        logger.error(f"Không thể load shard_assignment.yaml: {e}")
-        return False
-        
-    members = shard_cfg.get("members", {})
-    
-    # Danh sách để chứa các dataframe
     metadata_dfs = []
     ocr_dfs = []
     asr_dfs = []
     
-    # Danh sách để chứa các vectors
     image_vectors_list = []
     ocr_vectors_list = []
     asr_vectors_list = []
     
-    # Danh sách scene_ids tổng hợp
     total_scene_ids = []
-    
     total_keyframes_copied = 0
     
-    for member_name, info in members.items():
-        dataset_name = info.get("dataset_name")
-        if not dataset_name:
-            continue
-            
-        shard_path = shards_path / dataset_name
-        if not shard_path.exists():
-            logger.error(f"Thư mục shard của {member_name} không tồn tại: {dataset_name}. Vui lòng chạy pull_shards trước.")
-            return False
-            
-        logger.info(f"Đang xử lý shard: {dataset_name} ({member_name})")
+    # Lấy danh sách shard directories
+    if partial:
+        shard_paths = [d for d in shards_path.iterdir() if d.is_dir()]
+    else:
+        try:
+            shard_cfg = load_shard_assignment()
+            members = shard_cfg.get("members", {})
+            shard_paths = []
+            for member_name, info in members.items():
+                dataset_name = info.get("dataset_name")
+                if dataset_name and (shards_path / dataset_name).exists():
+                    shard_paths.append(shards_path / dataset_name)
+        except Exception as e:
+            logger.error(f"Không thể load shard_assignment.yaml: {e}")
+            shard_paths = [d for d in shards_path.iterdir() if d.is_dir()]
+
+    if not shard_paths:
+        logger.error(f"Không tìm thấy shard nào để gộp trong: {shards_dir}")
+        return False
+
+    for shard_path in shard_paths:
+        logger.info(f"Đang xử lý shard: {shard_path.name}")
         
-        # 1. Đọc parquets
-        meta_df = pd.read_parquet(shard_path / "scene_metadata.parquet")
-        ocr_df = pd.read_parquet(shard_path / "ocr_text.parquet")
-        asr_df = pd.read_parquet(shard_path / "asr_text.parquet")
-        
-        # Thêm thông tin member và version vào metadata phục vụ truy vết
-        meta_df["member"] = member_name
-        meta_df["ingestion_version"] = info.get("dataset_name", "v1").split("-")[-1]
-        
+        # 1. Đọc scene_metadata.parquet
+        meta_file = shard_path / "scene_metadata.parquet"
+        if not meta_file.exists():
+            # Dự phòng nếu file nằm ở subfolder
+            possible = list(shard_path.rglob("scene_metadata.parquet"))
+            if possible:
+                meta_file = possible[0]
+            else:
+                logger.warning(f"Bỏ qua {shard_path.name}: Không tìm thấy scene_metadata.parquet")
+                continue
+
+        meta_df = pd.read_parquet(meta_file)
         metadata_dfs.append(meta_df)
-        ocr_dfs.append(ocr_df)
-        asr_dfs.append(asr_df)
         
-        # 2. Đọc scene_ids
-        with open(shard_path / "scene_ids.txt", "r", encoding="utf-8") as f:
-            sids = [line.strip() for line in f if line.strip()]
-        total_scene_ids.extend(sids)
-        
-        # 3. Đọc vectors
-        image_vecs = np.load(shard_path / "image_vectors.npy")
-        ocr_vecs = np.load(shard_path / "ocr_vectors.npy")
-        asr_vecs = np.load(shard_path / "asr_vectors.npy")
-        
-        image_vectors_list.append(image_vecs)
-        ocr_vectors_list.append(ocr_vecs)
-        asr_vectors_list.append(asr_vecs)
-        
+        if "scene_id" in meta_df.columns:
+            total_scene_ids.extend(meta_df["scene_id"].tolist())
+
+        # 2. Đọc OCR / ASR parquets nếu không phải partial mode
+        if not partial:
+            ocr_file = shard_path / "ocr_text.parquet"
+            if ocr_file.exists():
+                ocr_dfs.append(pd.read_parquet(ocr_file))
+            asr_file = shard_path / "asr_text.parquet"
+            if asr_file.exists():
+                asr_dfs.append(pd.read_parquet(asr_file))
+
+            # 3. Đọc vectors nếu có
+            if (shard_path / "image_vectors.npy").exists():
+                image_vectors_list.append(np.load(shard_path / "image_vectors.npy"))
+            if (shard_path / "ocr_vectors.npy").exists():
+                ocr_vectors_list.append(np.load(shard_path / "ocr_vectors.npy"))
+            if (shard_path / "asr_vectors.npy").exists():
+                asr_vectors_list.append(np.load(shard_path / "asr_vectors.npy"))
+                
         # 4. Copy keyframes
-        # Cấu trúc của shard: dataset_name/keyframes/
-        # Một số member có thể lưu dataset_name/keyframes/ hoặc dataset_name/keyframes/{video_id}/...
-        # Chúng ta tìm thư mục keyframes
         shard_keys_dir = shard_path / "keyframes"
         if not shard_keys_dir.exists():
-            # Dự phòng nếu không có folder keyframes trực tiếp mà keyframes nằm ở root của shard
-            # (Thường keyframes_path trong metadata trỏ tương đối)
             shard_keys_dir = shard_path
             
         copied = copy_keyframes(shard_keys_dir, keys_path)
         total_keyframes_copied += copied
-        logger.info(f"  - Đã sao chép {copied} ảnh keyframes từ {dataset_name}")
+        logger.info(f"  - Đã sao chép {copied} ảnh keyframes từ {shard_path.name}")
 
-    # Gộp parquets
+    # Gộp metadata parquet
     logger.info("Đang hợp nhất Parquet DataFrames...")
-    final_meta = pd.concat(metadata_dfs, ignore_index=True)
-    final_ocr = pd.concat(ocr_dfs, ignore_index=True)
-    final_asr = pd.concat(asr_dfs, ignore_index=True)
-    
-    # Gộp vectors
-    logger.info("Đang hợp nhất numpy vectors...")
-    final_image_vecs = np.concatenate(image_vectors_list, axis=0)
-    final_ocr_vecs = np.concatenate(ocr_vectors_list, axis=0)
-    final_asr_vecs = np.concatenate(asr_vectors_list, axis=0)
-    
-    # 5. Ghi dữ liệu gộp ra output
-    logger.info(f"Đang ghi kết quả gộp ra: {out_path}")
-    final_meta.to_parquet(out_path / "scene_metadata.parquet")
-    final_ocr.to_parquet(out_path / "ocr_text.parquet")
-    final_asr.to_parquet(out_path / "asr_text.parquet")
-    
-    np.save(out_path / "image_vectors.npy", final_image_vecs)
-    np.save(out_path / "ocr_vectors.npy", final_ocr_vecs)
-    np.save(out_path / "asr_vectors.npy", final_asr_vecs)
-    
-    with open(out_path / "scene_ids.txt", "w", encoding="utf-8") as f:
-        for sid in total_scene_ids:
-            f.write(f"{sid}\n")
+    if metadata_dfs:
+        final_meta = pd.concat(metadata_dfs, ignore_index=True)
+        # Bỏ duplicate scene_id nếu có
+        if "scene_id" in final_meta.columns:
+            final_meta = final_meta.drop_duplicates(subset=["scene_id"], keep="first")
+        final_meta.to_parquet(out_path / "scene_metadata.parquet", index=False)
+        logger.info(f"✅ Đã lưu {len(final_meta)} rows vào scene_metadata.parquet")
+
+    if not partial:
+        if ocr_dfs:
+            pd.concat(ocr_dfs, ignore_index=True).drop_duplicates(subset=["scene_id"], keep="first").to_parquet(out_path / "ocr_text.parquet", index=False)
+        if asr_dfs:
+            pd.concat(asr_dfs, ignore_index=True).drop_duplicates(subset=["scene_id"], keep="first").to_parquet(out_path / "asr_text.parquet", index=False)
             
+        if image_vectors_list:
+            final_image_vecs = np.concatenate(image_vectors_list, axis=0)
+            np.save(out_path / "image_vectors.npy", final_image_vecs)
+        if ocr_vectors_list:
+            final_ocr_vecs = np.concatenate(ocr_vectors_list, axis=0)
+            np.save(out_path / "ocr_vectors.npy", final_ocr_vecs)
+        if asr_vectors_list:
+            final_asr_vecs = np.concatenate(asr_vectors_list, axis=0)
+            np.save(out_path / "asr_vectors.npy", final_asr_vecs)
+
+    # Ghi scene_ids.txt
+    unique_scene_ids = list(dict.fromkeys(total_scene_ids))
+    with open(out_path / "scene_ids.txt", "w", encoding="utf-8") as f:
+        for sid in unique_scene_ids:
+            f.write(f"{sid}\n")
+
     logger.info("=== Hợp nhất hoàn tất ===")
-    logger.info(f"  - Tổng số scenes: {len(total_scene_ids)}")
-    logger.info(f"  - Shape image_vectors: {final_image_vecs.shape}")
-    logger.info(f"  - Shape ocr_vectors: {final_ocr_vecs.shape}")
-    logger.info(f"  - Shape asr_vectors: {final_asr_vecs.shape}")
+    logger.info(f"  - Tổng số unique scenes: {len(unique_scene_ids)}")
     logger.info(f"  - Tổng số keyframes đã copy: {total_keyframes_copied}")
+    logger.info(f"  - Thư mục output: {out_path.resolve()}")
+    logger.info(f"  - Thư mục keyframes: {keys_path.resolve()}")
     
     return True
 
@@ -189,10 +195,15 @@ def main() -> None:
         default="./data/unified_keyframes",
         help="Thư mục chung lưu trữ keyframes phục vụ UI. Mặc định: ./data/unified_keyframes"
     )
+    parser.add_argument(
+        "--partial",
+        action="store_true",
+        help="Gộp chế độ Partial Keyframe Shards (chỉ gộp scene_metadata và keyframes)."
+    )
     
     args = parser.parse_args()
     
-    merge_all(args.shards_dir, args.output_dir, args.keyframes_dir)
+    merge_all(args.shards_dir, args.output_dir, args.keyframes_dir, partial=args.partial)
 
 if __name__ == "__main__":
     main()
