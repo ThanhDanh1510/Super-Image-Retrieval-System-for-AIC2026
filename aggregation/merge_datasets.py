@@ -128,36 +128,79 @@ def merge_all(shards_dir: str, output_dir: str, keyframes_dir: str, partial: boo
     logger.info("Đang hợp nhất Parquet DataFrames...")
     if metadata_dfs:
         final_meta = pd.concat(metadata_dfs, ignore_index=True)
-        # Bỏ duplicate scene_id nếu có
-        if "scene_id" in final_meta.columns:
-            final_meta = final_meta.drop_duplicates(subset=["scene_id"], keep="first")
-        final_meta.to_parquet(out_path / "scene_metadata.parquet", index=False)
-        logger.info(f"✅ Đã lưu {len(final_meta)} rows chuẩn vào scene_metadata.parquet")
+    else:
+        final_meta = pd.DataFrame(columns=[
+            "scene_id", "video_id", "frame_id", "timestamp_start",
+            "timestamp_end", "timestamp_mid", "fps", "keyframe_path", "member"
+        ])
 
-        # Copy CHÍNH XÁC các ảnh keyframe có tên trong scene_metadata.parquet (loại bỏ ảnh rác)
-        logger.info("Đang sao chép đúng các ảnh keyframes có trong metadata...")
-        for row in final_meta.itertuples():
-            rel_path = getattr(row, "keyframe_path", None)
-            if not rel_path:
+    existing_scene_ids = set(final_meta["scene_id"].tolist()) if "scene_id" in final_meta.columns else set()
+    reconstructed_rows = []
+
+    # Quét TOÀN BỘ các file ảnh JPG thực tế trên đĩa trong các shards
+    logger.info("Đang quét toàn bộ các file ảnh keyframe JPG thực tế trên đĩa và tự động tái tạo Metadata...")
+    for shard_path in shard_paths:
+        shard_keys_dir = shard_path / "keyframes"
+        if not shard_keys_dir.exists():
+            shard_keys_dir = shard_path
+            
+        for jpg_path in shard_keys_dir.rglob("*.jpg"):
+            try:
+                rel_path = str(jpg_path.relative_to(shard_keys_dir)).replace("\\", "/")
+            except Exception:
                 continue
+
+            # Copy file JPG sang unified_keyframes
+            dest_path = keys_path / rel_path
+            dest_path.parent.mkdir(parents=True, exist_ok=True)
+            if not dest_path.exists():
+                shutil.copy2(jpg_path, dest_path)
                 
-            # Tìm file ảnh tương ứng trong các raw_shards
-            found = False
-            for shard_path in shard_paths:
-                possible_src = shard_path / "keyframes" / rel_path
-                if not possible_src.exists():
-                    possible_src = shard_path / rel_path
-                    
-                if possible_src.exists():
-                    dest_path = keys_path / rel_path
-                    dest_path.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(possible_src, dest_path)
-                    total_keyframes_copied += 1
-                    found = True
-                    break
-                    
-            if not found:
-                logger.warning(f"Không tìm thấy file ảnh nguồn cho: {rel_path}")
+            total_keyframes_copied += 1
+            
+            # Phân tích bóc tách tên file (Ví dụ: L22_V001/L22_V001_S001_000203.jpg)
+            video_id = jpg_path.parent.name
+            stem = jpg_path.stem # L22_V001_S001_000203 hoặc L22_V001_S001
+            parts = stem.split("_")
+            
+            if len(parts) >= 4 and parts[-1].isdigit():
+                frame_id = int(parts[-1])
+                scene_id = "_".join(parts[:-1])
+            elif len(parts) >= 3:
+                frame_id = 0
+                scene_id = stem
+            else:
+                scene_id = f"{video_id}_{stem}"
+                frame_id = 0
+
+            # Nếu scene_id này chưa có trong scene_metadata.parquet (do bị overwrite trên Kaggle), tự động tái tạo!
+            if scene_id not in existing_scene_ids:
+                existing_scene_ids.add(scene_id)
+                fps = 25.0
+                ts_mid = float(frame_id / fps) if frame_id > 0 else 0.0
+                reconstructed_rows.append({
+                    "scene_id": scene_id,
+                    "video_id": video_id,
+                    "frame_id": frame_id,
+                    "timestamp_start": ts_mid,
+                    "timestamp_end": ts_mid,
+                    "timestamp_mid": ts_mid,
+                    "fps": fps,
+                    "keyframe_path": rel_path,
+                    "member": shard_path.name
+                })
+
+    if reconstructed_rows:
+        logger.info(f"💡 Đã tái tạo khôi phục thành công {len(reconstructed_rows)} dòng metadata bị thiếu cho các video trước đó!")
+        df_reconstructed = pd.DataFrame(reconstructed_rows)
+        final_meta = pd.concat([final_meta, df_reconstructed], ignore_index=True)
+
+    if "scene_id" in final_meta.columns:
+        final_meta = final_meta.drop_duplicates(subset=["scene_id"], keep="first")
+        total_scene_ids = final_meta["scene_id"].tolist()
+
+    final_meta.to_parquet(out_path / "scene_metadata.parquet", index=False)
+    logger.info(f"✅ Đã lưu {len(final_meta)} rows đầy đủ vào scene_metadata.parquet")
 
     if not partial:
         if ocr_dfs:
