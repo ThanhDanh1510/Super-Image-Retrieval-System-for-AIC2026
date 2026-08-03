@@ -9,8 +9,8 @@
 
 ### 1. Module Ingestion (Xử lý Dữ liệu trên Kaggle)
 - `[x]` **TASK-ING-01**: Trích xuất Keyframe từ video (`ingestion/skeletons/01a_keyframe_extraction.py`) — *Đã xong*
-- `[ ]` **TASK-ING-02a**: Trích xuất Text - OCR từ keyframe bằng PaddleOCR v6 (`ingestion/skeletons/01b_text_extraction.py`)
-- `[ ]` **TASK-ING-02b**: Trích xuất Text - ASR giọng nói bằng PhoWhisper (`ingestion/skeletons/01b_text_extraction.py`)
+- `[x]` **TASK-ING-02a**: Trích xuất Text - OCR từ keyframe bằng PaddleOCR v6 (`ingestion/skeletons/01b_text_extraction.py`) *Đã xong*
+- `[x]` **TASK-ING-02b**: Trích xuất Text - ASR giọng nói bằng PhoWhisper (`ingestion/skeletons/01b_text_extraction.py`) - *Đã xong*
 - `[ ]` **TASK-ING-03a**: Sinh Vector Embedding Ảnh bằng BEiT3 + CLIP ViT-L/14 (`ingestion/skeletons/01c_embedding_generation.py`)
 - `[ ]` **TASK-ING-03b**: Sinh Vector Embedding Text bằng gte-Qwen2-1.5B (`ingestion/skeletons/01c_embedding_generation.py`)
 - `[x]` **TASK-ING-04**: Validate & Export Shard Dataset lên Kaggle (`ingestion/skeletons/02_export_shard_dataset.py`) — *Đã xong*
@@ -51,14 +51,12 @@
 
 | Thành viên | Mã Task | File Skeleton cần làm | Chi tiết công việc |
 |---|---|---|---|
-| **Member_1** | `TASK-ING-02a` | `ingestion/skeletons/01b_text_extraction.py` | Implement hàm `run_ocr()` dùng PaddleOCR v6 |
-| | `TASK-SRV-01` | `serving/service/retrieval/skeletons/text_query.py` | Implement `query_by_text()` truy vấn 5 vectors trên Qdrant |
+| **Member_1** | `TASK-SRV-01` | `serving/service/retrieval/skeletons/text_query.py` | Implement `query_by_text()` truy vấn 5 vectors trên Qdrant |
 | | `TASK-RNK-01` | `serving/service/reranker/skeletons/text_branch/viranker.py` | Implement ViRanker text reranking |
 | | `TASK-EVL-01` | `eval/skeletons/metrics/r_score.py` | Implement công thức tính `r_score` cho KIS/VQA/TRAKE |
 | | `TASK-TST-05` | `tests/test_r_score.py` | Viết unit tests kiểm thử r_score |
 |---|---|---|---|
-| **Member_2** | `TASK-ING-02b` | `ingestion/skeletons/01b_text_extraction.py` | Implement hàm `run_asr()` dùng PhoWhisper |
-| | `TASK-SRV-02` | `serving/service/retrieval/skeletons/image_query.py` | Implement `query_by_image()` tìm kiếm theo ảnh |
+| **Member_2** | `TASK-SRV-02` | `serving/service/retrieval/skeletons/image_query.py` | Implement `query_by_image()` tìm kiếm theo ảnh |
 | | `TASK-RNK-02` | `serving/service/reranker/skeletons/crossmodal_branch/jina_reranker_m0.py` | Implement Jina Reranker M0 cross-modal |
 | | `TASK-EVL-02` | `eval/skeletons/metrics/final_score.py` | Implement công thức `final_score` mean R@k |
 |---|---|---|---|
