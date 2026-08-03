@@ -38,15 +38,25 @@ class TextEmbeddingWrapper:
         try:
             import torch
             import transformers
-            from transformers import AutoModel, AutoTokenizer
+            from transformers import AutoConfig, AutoModel, AutoTokenizer
 
             device_str = "cuda" if (device == "cuda" and torch.cuda.is_available()) else "cpu"
             logger.info(f"Loading Text Embedding model '{self.MODEL_ID}' on {device_str} (transformers v{transformers.__version__})...")
+            
+            config = AutoConfig.from_pretrained(self.MODEL_ID, trust_remote_code=True)
+            if not hasattr(config, "rope_theta"):
+                config.rope_theta = 1000000.0
+
             try:
                 self.tokenizer = AutoTokenizer.from_pretrained(self.MODEL_ID, trust_remote_code=True)
             except Exception:
                 self.tokenizer = AutoTokenizer.from_pretrained(self.MODEL_ID, trust_remote_code=True, use_fast=False)
-            self.model = AutoModel.from_pretrained(self.MODEL_ID, trust_remote_code=True).to(device_str)
+            
+            self.model = AutoModel.from_pretrained(
+                self.MODEL_ID,
+                config=config,
+                trust_remote_code=True,
+            ).to(device_str)
             self.model.eval()
             self.torch = torch
             self.device_str = device_str
