@@ -44,18 +44,20 @@ class ImageEmbeddingWrapper:
 
         try:
             import torch
+            import transformers
             from transformers import CLIPModel, CLIPProcessor
 
             device_str = "cuda" if (device == "cuda" and torch.cuda.is_available()) else "cpu"
-            logger.info(f"Loading CLIP model '{self.CLIP_MODEL_ID}' on {device_str}...")
+            logger.info(f"Loading CLIP model '{self.CLIP_MODEL_ID}' on {device_str} (transformers v{transformers.__version__})...")
             self.clip_processor = CLIPProcessor.from_pretrained(self.CLIP_MODEL_ID)
             self.clip_model = CLIPModel.from_pretrained(self.CLIP_MODEL_ID).to(device_str)
             self.clip_model.eval()
             self.torch = torch
             self.device_str = device_str
         except Exception as e:
+            import traceback
             logger.warning(
-                f"Không thể load real transformers model ({e}). "
+                f"Không thể load real transformers model ({e}). Traceback: {traceback.format_exc()}. "
                 "Sẽ sử dụng Fallback Deterministic Image Encoder cho môi trường test/CPU."
             )
             self.is_mock = True
