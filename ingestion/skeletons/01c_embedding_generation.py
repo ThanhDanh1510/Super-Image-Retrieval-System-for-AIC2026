@@ -226,25 +226,7 @@ def run_embedding_generation(
     checkpoint_file = checkpoint_path or str(out_p / "checkpoint.json")
     manifest = CheckpointManifest(checkpoint_file)
 
-    # 1. Sinh Image Embeddings (TASK-ING-03a)
-    logger.info("=== TASK-ING-03a: Sinh Image Dense Vectors (1024-dim) ===")
-    img_model = load_image_model(device=device)
-    img_vecs = generate_image_embeddings(
-        image_model=img_model,
-        keyframe_dir=keyframe_dir,
-        scene_ids=scene_ids,
-        video_ids=video_ids,
-        keyframe_paths=kf_paths,
-        batch_size=batch_size_img,
-    )
-
-    # Giải phóng VRAM của Image Model trước khi nạp Text Model
-    del img_model
-    gc.collect()
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-
-    # 2. Sinh Text Embeddings cho OCR & ASR (TASK-ING-03b)
+    # 1. Sinh Text Embeddings cho OCR & ASR TRƯỚC (TASK-ING-03b)
     logger.info("=== TASK-ING-03b: Sinh Text Dense Vectors (1536-dim) ===")
     txt_model = load_text_model(device=device)
 
@@ -262,7 +244,26 @@ def run_embedding_generation(
         batch_size=batch_size_txt,
     )
 
+    # Giải phóng VRAM của Text Model trước khi nạp Image Model
     del txt_model
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+    # 2. Sinh Image Embeddings CUỐI CÙNG (TASK-ING-03a)
+    logger.info("=== TASK-ING-03a: Sinh Image Dense Vectors (1024-dim) [CUỐI CÙNG] ===")
+    img_model = load_image_model(device=device)
+    img_vecs = generate_image_embeddings(
+        image_model=img_model,
+        keyframe_dir=keyframe_dir,
+        scene_ids=scene_ids,
+        video_ids=video_ids,
+        keyframe_paths=kf_paths,
+        batch_size=batch_size_img,
+    )
+
+    # Giải phóng VRAM của Image Model
+    del img_model
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
