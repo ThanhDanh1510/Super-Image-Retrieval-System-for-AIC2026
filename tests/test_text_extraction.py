@@ -14,6 +14,9 @@ import_existing_ocr_json = text_ext_mod.import_existing_ocr_json
 process_text_extraction = text_ext_mod.process_text_extraction
 
 
+from shared.utils.text_normalizer import clean_whitespace, normalize_nfc, sanitize_search_query
+
+
 def test_normalize_vietnamese_text():
     # Test NFD string -> NFC normalization
     nfd_text = unicodedata.normalize("NFD", "Tiếng Việt có dấu")
@@ -24,6 +27,12 @@ def test_normalize_vietnamese_text():
     # Test whitespace strip
     raw_space = "   Hệ   thống   Truy  vấn    "
     assert normalize_vietnamese_text(raw_space) == "Hệ thống Truy vấn"
+
+
+def test_shared_text_normalizer():
+    assert normalize_nfc("Tiến hành") == "Tiến hành"
+    assert clean_whitespace("   a   b \n c  ") == "a b c"
+    assert sanitize_search_query("  Xe hơi\x00 đỏ   ") == "Xe hơi đỏ"
 
 
 def test_import_existing_ocr_json(tmp_path):

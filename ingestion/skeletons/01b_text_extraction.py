@@ -43,16 +43,14 @@ import pandas as pd
 
 from ingestion.skeletons.checkpoint_manifest import CheckpointManifest
 from shared.utils.config_loader import load_model_versions
+from shared.utils.text_normalizer import normalize_nfc
 
 logger = logging.getLogger(__name__)
 
 
 def normalize_vietnamese_text(text: str) -> str:
     """Chuẩn hóa văn bản tiếng Việt sang dạng Unicode NFC và làm sạch khoảng trắng."""
-    if not text:
-        return ""
-    text = unicodedata.normalize("NFC", str(text))
-    return " ".join(text.split()).strip()
+    return normalize_nfc(text)
 
 
 # =============================================================================
