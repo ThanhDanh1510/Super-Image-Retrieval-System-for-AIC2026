@@ -54,7 +54,7 @@ def mock_qdrant_client():
 # TASK-SRV-01 & TASK-SRV-05: Text Query & Event Splitting
 # =============================================================================
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_enhance_query_english():
     enhanced = await text_query._enhance_query("a man walking a dog in the park")
     assert enhanced == "a man walking a dog in the park"
@@ -83,7 +83,7 @@ def test_split_events_invalid():
         text_query._split_events("Single event without any connectors or newlines")
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_text_query_process(mock_qdrant_client, mock_text_embedder, mock_image_embedder):
     mock_candidate = CandidateResult(
         video_id="V001",
@@ -115,7 +115,7 @@ async def test_text_query_process(mock_qdrant_client, mock_text_embedder, mock_i
 # TASK-SRV-02: Image Query
 # =============================================================================
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_image_query_process(mock_qdrant_client, mock_image_embedder):
     mock_candidate = CandidateResult(
         video_id="V002",
@@ -144,7 +144,7 @@ async def test_image_query_process(mock_qdrant_client, mock_image_embedder):
 # TASK-SRV-03: Voice Query
 # =============================================================================
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_voice_query_transcribe():
     mock_asr = MagicMock(return_value={"text": "Người đàn ông đang chạy bộ"})
     transcript = await voice_query._transcribe(b"fake_audio", "wav", mock_asr)
@@ -155,7 +155,7 @@ async def test_voice_query_transcribe():
 # TASK-SRV-04: Retrieval Pipeline
 # =============================================================================
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_retrieval_pipeline_text(mock_qdrant_client, mock_text_embedder, mock_image_embedder):
     mock_candidate = CandidateResult(
         video_id="V003",

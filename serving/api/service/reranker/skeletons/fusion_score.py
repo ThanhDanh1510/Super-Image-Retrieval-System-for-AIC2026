@@ -14,6 +14,17 @@ from serving.api.schema.retrieval import CandidateResult
 
 logger = logging.getLogger(__name__)
 
+def _normalize(scores: list[float]) -> list[float]:
+    """Min-Max Normalization về khoảng [0.0, 1.0]."""
+    if not scores:
+        return []
+    min_s = min(scores)
+    max_s = max(scores)
+    if max_s == min_s:
+        return [1.0] * len(scores)
+    return [(s - min_s) / (max_s - min_s) for s in scores]
+
+
 def fuse(
     text_scores: list[float],
     crossmodal_scores: list[float],
@@ -38,4 +49,39 @@ def fuse(
     Returns:
         list[CandidateResult]: Danh sách candidates đã được sắp xếp lại theo fused_score giảm dần.
     """
-    raise NotImplementedError
+    if not candidates:
+        return []
+
+    # 1. Đọc alpha và config nếu chưa truyền
+    if alpha is None:
+        if fusion_cfg and "reranker" in fusion_cfg:
+            alpha = float(fusion_cfg["reranker"].get("alpha", 0.6))
+        else:
+            try:
+                from shared.utils.config_loader import load_fusion_config
+                cfg = load_fusion_config()
+                alpha = float(cfg.get("reranker", {}).get("alpha", 0.6))
+            except Exception:
+                alpha = 0.6
+
+    # 2. Xử lý khớp length
+    n = len(candidates)
+    t_scores = list(text_scores) if len(text_scores) == n else [c.score for c in candidates]
+    c_scores = list(crossmodal_scores) if len(crossmodal_scores) == n else [c.score for c in candidates]
+
+    # 3. Min-Max Normalization
+    t_norm = _normalize(t_scores)
+    c_norm = _normalize(c_scores)
+
+    # 4. Hợp nhất điểm số
+    fused_candidates = []
+    for i, cand in enumerate(candidates):
+        fused_val = alpha * t_norm[i] + (1.0 - alpha) * c_norm[i]
+        # Pydantic CandidateResult
+        new_cand = cand.model_copy(update={"score": round(float(fused_val), 6)})
+        fused_candidates.append(new_cand)
+
+    # 5. Sắp xếp giảm dần theo fused score
+    fused_candidates.sort(key=lambda x: x.score, reverse=True)
+    return fused_candidates
+

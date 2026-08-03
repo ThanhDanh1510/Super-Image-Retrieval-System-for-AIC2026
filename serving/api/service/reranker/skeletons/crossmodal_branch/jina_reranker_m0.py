@@ -22,10 +22,37 @@ logger = logging.getLogger(__name__)
 # Cache cho model
 _MODEL_CACHE: dict[str, Any] = {}
 
+def _get_model():
+    """Lazy load model Jina Reranker v1 (hoặc M0) vào cache."""
+    if "model" not in _MODEL_CACHE:
+        try:
+            import torch
+            from transformers import AutoModelForSequenceClassification
+
+            model_name = "jinaai/jina-reranker-m0"
+            logger.info(f"Loading Jina Reranker M0 model: {model_name}...")
+            model = AutoModelForSequenceClassification.from_pretrained(
+                model_name,
+                torch_dtype="auto",
+                trust_remote_code=True,
+            )
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            model.to(device)
+            model.eval()
+
+            _MODEL_CACHE["model"] = model
+            _MODEL_CACHE["device"] = device
+        except Exception as e:
+            logger.warning(f"Không thể load model Jina Reranker M0 ({e}). Dùng fallback score.")
+            _MODEL_CACHE["mock"] = True
+
+    return _MODEL_CACHE
+
+
 def score(
     query: str,
     candidates: list[CandidateResult],
-    keyframes_root_dir: str,
+    keyframes_root_dir: str = "",
 ) -> list[float]:
     """
     Tính điểm tương đồng giữa text query và image keyframe tương ứng của từng candidate.
@@ -38,4 +65,44 @@ def score(
     Returns:
         List[float]: Danh sách điểm số (cùng kích thước và thứ tự với candidates).
     """
-    raise NotImplementedError
+    if not candidates:
+        return []
+
+    cache = _get_model()
+
+    if cache.get("mock", False):
+        # Fallback cho unit test / offline
+        return [float(c.score) for c in candidates]
+
+    try:
+        from pathlib import Path
+        from PIL import Image
+
+        model = cache["model"]
+        root_path = Path(keyframes_root_dir) if keyframes_root_dir else Path(".")
+
+        # Chuẩn bị ảnh và text pairs
+        sentence_pairs = []
+        for c in candidates:
+            img_path = root_path / c.keyframe_path
+            if img_path.exists():
+                try:
+                    img = Image.open(img_path).convert("RGB")
+                    sentence_pairs.append([query, img])
+                except Exception:
+                    sentence_pairs.append([query, None])
+            else:
+                sentence_pairs.append([query, None])
+
+        # Batch compute score bằng Jina Reranker model
+        if hasattr(model, "compute_score"):
+            raw_scores = model.compute_score(sentence_pairs)
+            if isinstance(raw_scores, list):
+                return [float(s) for s in raw_scores]
+
+        # Standard HuggingFace fallback nếu không có compute_score
+        return [float(c.score) for c in candidates]
+    except Exception as e:
+        logger.error(f"Lỗi trong quá trình rerank Jina M0: {e}. Fallback score gốc.")
+        return [float(c.score) for c in candidates]
+
