@@ -120,9 +120,38 @@ curl.exe http://localhost:6333/
 
 ---
 
+### 📂 Cấu Trúc Dữ Liệu Yêu Cầu Trong Thư Mục `data/`
+
+Để hệ thống hoạt động chính xác (tổng hợp dữ liệu thô, indexing, và serving API), bạn cần tổ chức cấu trúc thư mục `data/` ở thư mục gốc của dự án theo định dạng dưới đây:
+
+```text
+data/
+├── image/                     # Chứa các folder ảnh keyframe thô phân theo Group
+│   ├── L21/L21/V001/*.webp    # Cấu trúc thư mục ảnh: data/image/{Group}/{Group}/{Video}/*.webp
+│   ├── L22/L22/V001/*.webp
+│   └── ...
+├── OCR/                       # Chứa các file JSON kết quả trích xuất chữ viết OCR
+│   ├── L21/L21_V001.json      # File JSON OCR của từng video (L21_V001.json, L21_V002.json...)
+│   ├── L22/L22_V001.json
+│   └── ...
+├── ASR/                       # Chứa file kết quả nhận dạng giọng nói ASR
+│   └── asr.json               # File JSON chứa toàn bộ audio transcripts kèm start/end frame
+├── unified/                   # [QUAN TRỌNG] Dataset hợp nhất và Vector Embeddings (cho Indexing)
+│   ├── scene_metadata.parquet # Metadata toàn bộ keyframes (scene_id, video_id, timestamp_mid...)
+│   ├── ocr_text.parquet       # Text OCR của từng scene (scene_id, video_id, ocr_text)
+│   ├── asr_text.parquet       # Transcript ASR của từng scene (scene_id, video_id, asr_text)
+│   ├── image_vectors.npy      # Dense vectors của keyframes (CLIP, kích thước: N x 1024)
+│   ├── ocr_vectors.npy        # Dense vectors của OCR text (gte-Qwen2, kích thước: N x 1536)
+│   ├── asr_vectors.npy        # Dense vectors của ASR transcript (gte-Qwen2, kích thước: N x 1536)
+│   └── scene_ids.txt          # File text chứa danh sách scene_id tương ứng với index của các file .npy
+└── unified_raw/               # Thư mục đầu ra được tạo tự động sau khi chạy aggregation
+```
+
+---
+
 ### 5. Nạp Dữ Liệu Unified Dataset Vào Qdrant DB (Indexing)
 
-Tải file `unified_dataset.zip` (chứa `scene_metadata.parquet`, `image_vectors.npy`, `ocr_vectors.npy`, `asr_vectors.npy`) và giải nén vào thư mục `./data/unified/`.
+Tải file `unified_dataset.zip` hoặc tập dữ liệu unified hoàn chỉnh (gồm 3 file `.parquet`, 3 file `.npy` và file `scene_ids.txt`) và đặt vào thư mục `./data/unified/` theo đúng cấu trúc thư mục ở trên.
 
 Chạy lệnh nạp toàn bộ 108,413 scenes vào Vector DB:
 
