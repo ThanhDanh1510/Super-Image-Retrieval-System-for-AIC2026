@@ -113,7 +113,8 @@ class ImageEmbeddingWrapper:
                 inputs = self.clip_processor(images=batch_imgs, return_tensors="pt").to(self.device_str)
                 with self.torch.no_grad():
                     features = self.clip_model.get_image_features(**inputs)
-                    # CLIP ViT-L/14 output dim=768 -> pad/project sang 1024
+                    if not isinstance(features, self.torch.Tensor):
+                        features = getattr(features, "image_embeds", getattr(features, "pooler_output", features[0]))
                     feats_np = features.cpu().numpy().astype(np.float32)
                     
                     if feats_np.shape[1] < 1024:
@@ -159,6 +160,8 @@ class ImageEmbeddingWrapper:
             inputs = self.clip_processor(text=texts, return_tensors="pt", padding=True).to(self.device_str)
             with self.torch.no_grad():
                 features = self.clip_model.get_text_features(**inputs)
+                if not isinstance(features, self.torch.Tensor):
+                    features = getattr(features, "text_embeds", getattr(features, "pooler_output", features[0]))
                 feats_np = features.cpu().numpy().astype(np.float32)
                 if feats_np.shape[1] < 1024:
                     pad_width = 1024 - feats_np.shape[1]
