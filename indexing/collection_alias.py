@@ -80,22 +80,18 @@ def set_production_alias(client: QdrantClient, collection_name: str) -> None:
         logger.info(f"Tạo alias 'production' → {collection_name}")
 
     # Xóa alias cũ (nếu có) và tạo alias mới trong 1 atomic operation
-    operations: list[AliasOperations] = []
+    operations = []
     if current:
         operations.append(
-            AliasOperations(
-                delete_alias=DeleteAliasOperation(
-                    delete_alias=DeleteAlias(alias_name=PRODUCTION_ALIAS)
-                )
+            DeleteAliasOperation(
+                delete_alias=DeleteAlias(alias_name=PRODUCTION_ALIAS)
             )
         )
     operations.append(
-        AliasOperations(
-            create_alias=CreateAliasOperation(
-                create_alias=CreateAlias(
-                    collection_name=collection_name,
-                    alias_name=PRODUCTION_ALIAS,
-                )
+        CreateAliasOperation(
+            create_alias=CreateAlias(
+                collection_name=collection_name,
+                alias_name=PRODUCTION_ALIAS,
             )
         )
     )

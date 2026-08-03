@@ -205,6 +205,7 @@ def extract_ocr_for_metadata(meta_df: pd.DataFrame, ocr_dir: str | Path) -> pd.D
 
         ocr_rows.append({
             "scene_id": row["scene_id"],
+            "video_id": row["video_id"],
             "ocr_text": clean_ocr,
         })
 
@@ -253,6 +254,7 @@ def extract_asr_for_metadata(meta_df: pd.DataFrame, asr_json_path: str | Path) -
 
         asr_rows.append({
             "scene_id": row["scene_id"],
+            "video_id": row["video_id"],
             "asr_text": clean_asr,
         })
 
