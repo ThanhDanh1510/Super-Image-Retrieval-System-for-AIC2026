@@ -34,14 +34,15 @@ prefetch:
 retrieval:
   top_k: 100            # Giới hạn submit theo contest rule: top-K ≤ 100
 
-# --- Trọng số nhánh (dùng trong FusionQuery nếu cần weighted RRF) -----------
-# Mặc định RRF không cần weight, nhưng để sẵn cho thử nghiệm sau
+# --- Trọng số nhánh (dùng trong Weighted RRF) --------------------------------
+# Tăng trọng số image_dense để ưu tiên tìm kiếm hình ảnh hình học/màu sắc (CLIP)
+# và giảm trọng số OCR/ASR để tránh nhiễu từ các từ khóa chữ trong video (như "màu", "xe")
 weights:
-  image_dense: 1.0
-  ocr_dense: 1.0
-  asr_dense: 0.8        # ASR thường noisy hơn OCR — trọng số thấp hơn
-  ocr_sparse: 0.6       # sparse bổ trợ dense, không phải thay thế
-  asr_sparse: 0.5
+  image_dense: 2.5
+  ocr_dense: 0.5
+  asr_dense: 0.3
+  ocr_sparse: 0.2
+  asr_sparse: 0.2
 
 # --- Cấu hình theo loại query ------------------------------------------------
 # Với mỗi loại query, chỉ enable các nhánh liên quan để tránh nhiễu

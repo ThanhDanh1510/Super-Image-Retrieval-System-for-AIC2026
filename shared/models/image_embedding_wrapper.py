@@ -43,15 +43,34 @@ class ImageEmbeddingWrapper:
         self.clip_processor = None
 
         try:
+            import os
+            from pathlib import Path
+            if "HF_HOME" not in os.environ:
+                hf_dir = Path("./data/hf_cache").resolve()
+                hf_dir.mkdir(parents=True, exist_ok=True)
+                os.environ["HF_HOME"] = str(hf_dir)
+
             import torch
             import transformers
             from transformers import CLIPModel, CLIPProcessor
 
             device_str = "cuda" if (device == "cuda" and torch.cuda.is_available()) else "cpu"
+            if device_str == "cuda":
+                try:
+                    # Test GPU kernel capability
+                    _t = torch.zeros(1, device="cuda")
+                except Exception:
+                    logger.warning("CUDA execution failed (no kernel image for GPU architecture). Falling back to CPU for Real Model.")
+                    device_str = "cpu"
+
             logger.info(f"Loading CLIP model '{self.CLIP_MODEL_ID}' on {device_str} (transformers v{transformers.__version__})...")
             self.clip_processor = CLIPProcessor.from_pretrained(self.CLIP_MODEL_ID)
             dtype = torch.float16 if device_str == "cuda" else torch.float32
-            self.clip_model = CLIPModel.from_pretrained(self.CLIP_MODEL_ID, torch_dtype=dtype).to(device_str)
+            self.clip_model = CLIPModel.from_pretrained(
+                self.CLIP_MODEL_ID,
+                torch_dtype=dtype,
+                low_cpu_mem_usage=True,
+            ).to(device_str)
             self.clip_model.eval()
             self.torch = torch
             self.device_str = device_str

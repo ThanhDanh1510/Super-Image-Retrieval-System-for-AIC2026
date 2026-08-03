@@ -36,18 +36,37 @@ class TextEmbeddingWrapper:
         self.model = None
 
         try:
+            import os
+            from pathlib import Path
+            if "HF_HOME" not in os.environ:
+                hf_dir = Path("./data/hf_cache").resolve()
+                hf_dir.mkdir(parents=True, exist_ok=True)
+                os.environ["HF_HOME"] = str(hf_dir)
+
             import torch
             import transformers
             from transformers import AutoConfig, AutoModel, AutoTokenizer
 
             device_str = "cuda" if (device == "cuda" and torch.cuda.is_available()) else "cpu"
+            if device_str == "cuda":
+                try:
+                    _t = torch.zeros(1, device="cuda")
+                except Exception:
+                    logger.warning("CUDA execution failed. Falling back to CPU for Real Text Model.")
+                    device_str = "cpu"
+
             logger.info(f"Loading Text Embedding model '{self.MODEL_ID}' on {device_str} (transformers v{transformers.__version__})...")
             dtype = torch.float16 if device_str == "cuda" else torch.float32
 
             try:
-                # Thử dùng native transformers implementation (tránh bug DynamicCache cũ của remote code)
-                self.tokenizer = AutoTokenizer.from_pretrained(self.MODEL_ID)
-                self.model = AutoModel.from_pretrained(self.MODEL_ID, torch_dtype=dtype).to(device_str)
+                # Thử dùng native transformers Qwen2Model implementation (tránh bug DynamicCache của remote code cũ)
+                self.tokenizer = AutoTokenizer.from_pretrained(self.MODEL_ID, trust_remote_code=False)
+                self.model = AutoModel.from_pretrained(
+                    self.MODEL_ID,
+                    torch_dtype=dtype,
+                    trust_remote_code=False,
+                    low_cpu_mem_usage=True,
+                ).to(device_str)
             except Exception as e_native:
                 logger.info(f"Native load failed ({e_native}), trying with trust_remote_code...")
                 config = AutoConfig.from_pretrained(self.MODEL_ID, trust_remote_code=True)

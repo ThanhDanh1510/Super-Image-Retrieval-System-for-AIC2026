@@ -56,8 +56,8 @@ def mock_qdrant_client():
 
 @pytest.mark.anyio
 async def test_enhance_query_english():
-    enhanced = await text_query._enhance_query("a man walking a dog in the park")
-    assert enhanced == "a man walking a dog in the park"
+    en_query, _ = await text_query._enhance_query("a man walking a dog in the park")
+    assert en_query == "a man walking a dog in the park"
 
 
 def test_split_events_newline():

@@ -74,29 +74,21 @@ async def process(
     image_embedder: ImageEmbeddingWrapper,
 ) -> TextQueryOutput:
     """
-    Xử lý toàn bộ luồng text query: enhance → encode (text + image vectors) → retrieve.
-
-    Đây là hàm duy nhất mà retrieval_pipeline.py gọi vào module này.
-
-    Args:
-        query_input: TextQueryInput chứa raw query và metadata.
-        qdrant_client: AsyncQdrantClient đã inject từ dependencies.py.
-        text_embedder: TextEmbeddingWrapper đã load model (singleton từ dependencies.py).
-        image_embedder: ImageEmbeddingWrapper đã load model (singleton từ dependencies.py).
-
-    Returns:
-        TextQueryOutput với danh sách candidates thô và enhanced query.
+    Xử lý toàn bộ luồng text query: song ngữ EN/VI → encode (text + image vectors) → retrieve.
     """
-    enhanced = await _enhance_query(query_input.raw_query)
+    en_query, vi_query = await _enhance_query(query_input.raw_query)
 
     sub_events: list[str] | None = None
     if query_input.task_type == TaskType.TRAKE:
-        sub_events = _split_events(enhanced)
+        sub_events = _split_events(en_query)
         logger.info(f"TRAKE: tách được {len(sub_events)} sub-events từ query.")
 
-    ocr_vector, asr_vector = await _encode_text(enhanced, text_embedder)
-    ocr_sparse, asr_sparse = _encode_sparse(enhanced)
-    image_vector = await _encode_text_to_image_vector(enhanced, image_embedder)
+    # Dùng vi_query cho Qwen2 (OCR + ASR) vì database text trong video là Tiếng Việt
+    ocr_vector, asr_vector = await _encode_text(vi_query, text_embedder)
+    ocr_sparse, asr_sparse = _encode_sparse(vi_query)
+    
+    # Dùng en_query cho CLIP (Image Dense) vì CLIP text encoder được huấn luyện tốt nhất bằng Tiếng Anh
+    image_vector = await _encode_text_to_image_vector(en_query, image_embedder)
 
     candidates = await qdrant_repo.search_by_text_vectors(
         client=qdrant_client,
@@ -108,10 +100,9 @@ async def process(
         top_k=query_input.top_k,
     )
 
-
     return TextQueryOutput(
         candidates=candidates,
-        enhanced_query=enhanced,
+        enhanced_query=en_query,
         sub_events=sub_events,
     )
 
@@ -120,35 +111,48 @@ async def process(
 # Internal Helper Functions (implementations)
 # =============================================================================
 
-async def _enhance_query(raw_query: str) -> str:
+async def _enhance_query(raw_query: str) -> tuple[str, str]:
     """
-    Dịch query sang tiếng Anh (nếu là tiếng Việt) và enhance chất lượng.
+    Dịch và chuẩn hóa query song ngữ (English cho CLIP, Tiếng Việt cho Qwen2/OCR/ASR).
 
     Args:
         raw_query: Query gốc từ người dùng.
 
     Returns:
-        Query đã được dịch và enhanced (luôn là tiếng Anh).
+        Tuple (en_query, vi_query).
     """
     from shared.utils.text_normalizer import sanitize_search_query
     cleaned_query = sanitize_search_query(raw_query)
     if not cleaned_query:
-        return ""
+        return "", ""
 
-    # Kiểm tra xem có chứa tiếng Việt (ký tự có dấu) hay không
     import re
     has_vietnamese_accent = bool(re.search(r'[àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđ]', cleaned_query, re.IGNORECASE))
     
+    en_query = cleaned_query
+    vi_query = cleaned_query
+
     if has_vietnamese_accent:
+        # Query gốc là tiếng Việt -> Dịch sang Tiếng Anh cho CLIP
         try:
             from deep_translator import GoogleTranslator
-            translated = GoogleTranslator(source="auto", target="en").translate(cleaned_query)
-            if translated and translated.strip():
-                return sanitize_search_query(translated)
+            translated_en = GoogleTranslator(source="auto", target="en").translate(cleaned_query)
+            if translated_en and translated_en.strip():
+                en_query = sanitize_search_query(translated_en)
         except Exception as e:
-            logger.warning(f"Không thể dịch query '{cleaned_query}' qua deep_translator ({e}), dùng query gốc.")
+            logger.warning(f"Không thể dịch VI->EN qua deep_translator ({e})")
+    else:
+        # Query gốc là tiếng Anh -> Dịch sang Tiếng Việt cho Qwen2/OCR/ASR
+        try:
+            from deep_translator import GoogleTranslator
+            translated_vi = GoogleTranslator(source="auto", target="vi").translate(cleaned_query)
+            if translated_vi and translated_vi.strip():
+                vi_query = sanitize_search_query(translated_vi)
+        except Exception as e:
+            logger.warning(f"Không thể dịch EN->VI qua deep_translator ({e})")
 
-    return cleaned_query
+    logger.info(f"Enhanced queries — EN (CLIP): '{en_query}' | VI (Qwen2): '{vi_query}'")
+    return en_query, vi_query
 
 
 def _split_events(query: str) -> list[str]:

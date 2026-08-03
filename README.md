@@ -2,7 +2,7 @@
 
 Hệ thống truy vấn video keyframe real-time phục vụ cuộc thi **AI Challenge HCMC 2026**.
 
-Hỗ trợ 3 dạng task chính:
+Hỗ trợ 4 dạng task chính:
 - **KIS** (Known-Item Search) — tìm keyframe theo mô tả text/voice
 - **VQA** (Visual Question Answering) — tìm cảnh và trả lời câu hỏi
 - **TRAKE** (Temporal Retrieval) — tìm chuỗi sự kiện theo thứ tự thời gian
@@ -13,130 +13,175 @@ Hỗ trợ 3 dạng task chính:
 ## 🏗️ Kiến trúc tổng quan
 
 ```
-ingestion (Kaggle) → aggregation → indexing (Qdrant) → serving (FastAPI)
+ingestion (Kaggle GPU) → aggregation (Local) → indexing (Qdrant DB) → serving (FastAPI Backend)
 ```
 
-| Tầng | Mô tả | Chạy ở đâu |
+| Tầng | Mô tả | Môi trường chạy |
 |---|---|---|
-| `ingestion/` | Mỗi member chạy full pipeline trên shard video riêng | Kaggle Notebook |
-| `aggregation/` | Gộp output tất cả member thành 1 dataset thống nhất | Local |
-| `indexing/` | Đẩy vectors vào Qdrant (5 named vectors) | Local/Server |
-| `serving/` | FastAPI API real-time (controller → service → repo) | Server thi |
+| `ingestion/` | Trích xuất keyframes, OCR, ASR và sinh Vector Embeddings | Kaggle GPU (T4/P100) |
+| `aggregation/` | Gộp output của tất cả member thành 1 unified dataset | Máy Local |
+| `indexing/` | Nạp dữ liệu & 3 bộ Vector Embeddings vào Qdrant DB | Docker / Local Qdrant |
+| `serving/` | FastAPI REST API real-time cho web client / UI thi đấu | Server local / Staging |
 
 ---
 
-## ⚡ Quick Start
+## 🚀 Hướng Dẫn Cài Đặt & Khởi Chạy Dự Án Siêu Tốc Bằng `uv` (Cho Windows & Apple macOS)
 
-### 1. Clone và cài đặt
+Dự án chuẩn hóa sử dụng **`uv`** (Trình quản lý gói Python bằng Rust siêu nhanh, gấp 10-100 lần pip thông thường) giúp cài đặt môi trường chỉ trong vài giây.
+
+---
+
+### 1. Clone Repository (Dùng chung cho Win & Mac)
 
 ```bash
 git clone https://github.com/ThanhDanh1510/Super-Image-Retrieval-System-for-AIC2026.git
 cd Super-Image-Retrieval-System-for-AIC2026
-
-# Cài đặt dependencies
-pip install -e ".[dev]"
-
-# Copy file cấu hình môi trường
-cp .env.example .env
-# → Sửa .env theo máy của bạn (QDRANT_URL, DEVICE, ...)
 ```
-
-### 2. Chạy Qdrant (Docker)
-
-```bash
-docker run -p 6333:6333 -p 6334:6334 qdrant/qdrant:latest
-```
-
-### 3. Tạo Collection
-
-```bash
-# Xem trước schema (không tạo)
-make create-collection-dry
-
-# Tạo collection
-make create-collection
-```
-
-### 4. Chạy API Server
-
-```bash
-# Dev mode (auto-reload)
-make serve-reload
-
-# Production mode
-make serve
-```
-
-API docs: http://localhost:8000/docs
 
 ---
 
-## 📁 Cấu trúc thư mục
+### 2. Cài Đặt `uv`
+
+#### 🪟 Trên Windows:
+```powershell
+pip install uv
+```
+
+#### 🍎 Trên macOS (Apple Silicon M1/M2/M3/M4 & Intel Macs):
+```bash
+brew install uv
+```
+
+---
+
+### 3. Khởi Tạo Môi Trường Ảo `.venv` & Cài Đặt PyTorch GPU Acceleration
+
+#### 🪟 Dành cho Windows (Có Card GPU NVIDIA RTX / GTX):
+```powershell
+# 1. Tạo môi trường ảo .venv
+uv venv .venv
+
+# 2. Kích hoạt môi trường ảo (PowerShell)
+.\.venv\Scripts\Activate.ps1
+
+# 3. Cài đặt PyTorch CUDA GPU cho NVIDIA Card (RTX 5060 Ti, 40xx, 30xx...)
+uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+
+# 4. Cài toàn bộ dependencies còn lại & package dự án
+uv pip install transformers accelerate sentencepiece qdrant-client fastapi "uvicorn[standard]" pydantic pydantic-settings python-multipart pyyaml python-dotenv pandas numpy pillow scipy deep-translator -e .
+```
+
+#### 🍎 Dành cho macOS / Apple Silicon (M1/M2/M3/M4):
+```bash
+# 1. Tạo môi trường ảo .venv
+uv venv .venv
+
+# 2. Kích hoạt môi trường ảo
+source .venv/bin/activate
+
+# 3. Cài đặt toàn bộ dependencies (Tự động tối ưu PyTorch cho Apple Metal MPS GPU)
+uv pip install torch torchvision torchaudio transformers accelerate sentencepiece qdrant-client fastapi "uvicorn[standard]" pydantic pydantic-settings python-multipart pyyaml python-dotenv pandas numpy pillow scipy deep-translator -e .
+```
+
+> 💡 **Mẹo:** Mỗi lần mở terminal mới để làm việc với dự án, hãy kích hoạt `.venv`:
+> - Windows: `.\.venv\Scripts\Activate.ps1`
+> - macOS: `source .venv/bin/activate`
+
+---
+
+### 4. Khởi Động Qdrant Vector Database (Bằng Docker)
+
+Yêu cầu máy tính đã bật **Docker Desktop**.
+
+#### 🪟 Trên Windows (PowerShell / CMD):
+```powershell
+# 🔹 Nếu là LẦN ĐẦU TIÊN chạy:
+docker run -d -p 6333:6333 -p 6334:6334 -v ${PWD}/data/qdrant_storage:/qdrant/storage --name qdrant_aic2026 qdrant/qdrant
+
+# 🔹 Nếu container ĐÃ TỒN TẠI (những lần sau):
+docker start qdrant_aic2026
+```
+
+#### 🍎 Trên macOS (zsh / bash):
+```bash
+# 🔹 Nếu là LẦN ĐẦU TIÊN chạy:
+docker run -d -p 6333:6333 -p 6334:6334 -v $(pwd)/data/qdrant_storage:/qdrant/storage --name qdrant_aic2026 qdrant/qdrant
+
+# 🔹 Nếu container ĐÃ TỒN TẠI (những lần sau):
+docker start qdrant_aic2026
+```
+
+#### 🧪 Kiểm Tra Qdrant Server:
+```bash
+curl.exe http://localhost:6333/
+```
+
+> 💡 *Nếu chưa bật Docker Desktop, hệ thống indexing sẽ tự động fallback sang **Local Embedded Qdrant** tại `./data/qdrant_db/` mà vẫn chạy mượt 100%!*
+
+---
+
+### 5. Nạp Dữ Liệu Unified Dataset Vào Qdrant DB (Indexing)
+
+Tải file `unified_dataset.zip` (chứa `scene_metadata.parquet`, `image_vectors.npy`, `ocr_vectors.npy`, `asr_vectors.npy`) và giải nén vào thư mục `./data/unified/`.
+
+Chạy lệnh nạp toàn bộ 108,413 scenes vào Vector DB:
+
+```bash
+python -m indexing.run_index \
+    --dataset-dir ./data/unified \
+    --collection collection_v1 \
+    --create-collection
+```
+
+Gắn alias `production` cho collection:
+```bash
+python -m indexing.collection_alias --action set --collection collection_v1
+```
+
+---
+
+### 6. Khởi Chạy FastAPI Server (Serving API)
+
+```bash
+# Chạy API Server ở Dev mode (tự động reload khi sửa code)
+python -m uvicorn serving.api.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+* 🌐 **Swagger UI Interactive API Docs:** `http://localhost:8000/docs`
+* 🩺 **Healthcheck API:** `http://localhost:8000/health`
+
+---
+
+## 📁 Cấu Trúc Thư Mục Dự Án
 
 ```
-project-root/
+Super-Image-Retrieval-System-for-AIC2026/
+├── .venv/                # Môi trường ảo Python được quản lý bởi uv (đã .gitignore)
 ├── configs/              # Cấu hình tập trung (model versions, shard, fusion)
-├── ingestion/            # Pipeline xử lý video trên Kaggle
-├── aggregation/          # Gộp output từ các member
-├── indexing/             # Tạo collection và upsert vectors vào Qdrant
+├── ingestion/            # Pipeline trích xuất keyframes & sinh vector trên Kaggle
+│   └── notebooks/        # Notebooks Kaggle (04_kaggle_generate_all_embeddings.ipynb)
+├── aggregation/          # Gộp output từ các member thành unified raw
+├── indexing/             # Quản lý schema, alias và index data vào Qdrant
 ├── serving/              # FastAPI API (controller → service → repo)
-├── shared/               # Code dùng chung (schemas, model wrappers, utils)
-├── eval/                 # Benchmark offline
-├── infra/                # Docker, CI/CD, monitoring
-├── data/                 # Local, KHÔNG commit git
-├── tests/
-├── AGENT_CONTEXT.md      # Context cho AI Agent (Member paste vào prompt)
+├── shared/               # Code dùng chung (schemas, model wrappers, text normalizer)
+├── data/                 # Thư mục lưu dữ liệu local (unified, qdrant_storage, hf_cache,...)
+├── scratch/              # Thư mục script chạy thử nghiệm/debug
+├── AGENT_CONTEXT.md      # Quy chuẩn và ngữ cảnh dự án cho AI Assistant
 ├── pyproject.toml
-├── Makefile
-└── .env.example
+└── README.md
 ```
 
-Chi tiết: xem [`folder_structure.md`](folder_structure.md).
+---
+
+## 🤖 AI Models Trong Baseline
+
+| Model | Dùng cho | Dim | Gia tốc phần cứng |
+|---|---|---|---|
+| **BEiT-large + CLIP ViT-L/14** | Image embedding | 1024 | CUDA (Nvidia) / MPS (Apple Silicon) / CPU |
+| **gte-Qwen2-1.5B-instruct** | Text embedding (OCR + ASR) | 1536 | CUDA (Nvidia) / MPS (Apple Silicon) / CPU |
+| **PaddleOCR v6** | Nhận dạng chữ viết | — | CUDA / CPU |
+| **PhoWhisper-medium** | Nhận dạng giọng nói tiếng Việt | — | CUDA / MPS / CPU |
+| **TransNetV2** | Phân đoạn video shot boundary | — | CUDA / CPU |
 
 ---
 
-## 🔧 Các lệnh thường dùng
-
-| Lệnh | Mô tả |
-|---|---|
-| `make install` | Cài đặt dependencies |
-| `make serve-reload` | Chạy API server (dev mode) |
-| `make create-collection` | Tạo Qdrant collection |
-| `make lint` | Chạy ruff linter |
-| `make test` | Chạy pytest |
-| `make clean` | Xóa cache |
-
----
-
-## 🤖 AI Models
-
-| Model | Dùng cho | Dim |
-|---|---|---|
-| BEiT-large + CLIP ViT-L/14 | Image embedding | 1024 |
-| gte-Qwen2-1.5B | Text embedding (OCR + ASR) | 1536 |
-| PaddleOCR v6 | Nhận dạng chữ trong ảnh | — |
-| PhoWhisper-medium | Nhận dạng giọng nói tiếng Việt | — |
-| TransNetV2 | Shot detection | — |
-
-Phiên bản chi tiết: xem [`configs/model_versions.yaml`](configs/model_versions.yaml).
-
----
-
-## 📖 Tài liệu
-
-- [`folder_structure.md`](folder_structure.md) — Cấu trúc thư mục chi tiết
-- [`contest_info.md`](contest_info.md) — Thể lệ và timeline cuộc thi
-- [`tasks.md`](tasks.md) — Phân công task và workflow
-- [`AGENT_CONTEXT.md`](AGENT_CONTEXT.md) — Context cho AI Agent
-
----
-
-## 👥 Team
-
-| Vai trò | Trách nhiệm |
-|---|---|
-| **Leader** | Infrastructure, skeleton, review, deploy |
-| **Member_1** | Retrieval (Text/Image/Voice Query) implementation |
-| **Member_2** | Retrieval Pipeline & TRAKE (Event Splitter, Temporal Aligner) |
-| **Member_3** | Reranker (ViRanker, Jina Reranker, Fusion) |
-| **Member_4** | Evaluation (Metric calculation, Benchmark script) |

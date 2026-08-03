@@ -164,113 +164,88 @@ def load_unified_dataset(dataset_dir: str) -> tuple[pd.DataFrame, dict[str, np.n
 
 
 # =============================================================================
-# Point Building
+# Streamed Point Building & Batch Upsert
 # =============================================================================
 
-def build_points(
+def build_and_upsert_batches(
+    client: QdrantClient,
+    collection_name: str,
     metadata: pd.DataFrame,
     vectors: dict[str, np.ndarray],
     ingestion_version: str = "1.0.0",
-) -> list[PointStruct]:
-    """
-    Xây dựng danh sách PointStruct để upsert vào Qdrant.
-
-    Mỗi point = 1 keyframe với:
-        - id: make_point_id(video_id, scene_id)
-        - vectors: {image_dense, ocr_dense, asr_dense}
-        - payload: KeyframePayload fields
-
-    Args:
-        metadata: pd.DataFrame từ load_unified_dataset().
-        vectors: dict từ load_unified_dataset().
-        ingestion_version: Version string ghi vào payload (từ model_versions.yaml).
-
-    Returns:
-        List[PointStruct] sẵn sàng để upsert.
-    """
-    points = []
-    image_vecs = vectors[IMAGE_DENSE.name]
-    ocr_vecs = vectors[OCR_DENSE.name]
-    asr_vecs = vectors[ASR_DENSE.name]
-
-    for i, row in enumerate(metadata.itertuples(index=False)):
-        point_id = make_point_id(row.video_id, row.scene_id)
-
-        payload = {
-            "video_id": str(row.video_id),
-            "scene_id": str(row.scene_id),
-            "frame_id": int(row.frame_id),
-            "timestamp_start": float(row.timestamp_start),
-            "timestamp_end": float(row.timestamp_end),
-            "timestamp_mid": float(row.timestamp_mid),
-            "keyframe_path": str(row.keyframe_path),
-            "ocr_text": str(row.ocr_text),
-            "asr_text": str(row.asr_text),
-            "ingestion_version": ingestion_version,
-            "member": str(getattr(row, "member", "unknown")),
-        }
-
-        points.append(
-            PointStruct(
-                id=point_id,
-                vector={
-                    IMAGE_DENSE.name: image_vecs[i].tolist(),
-                    OCR_DENSE.name: ocr_vecs[i].tolist(),
-                    ASR_DENSE.name: asr_vecs[i].tolist(),
-                },
-                payload=payload,
-            )
-        )
-
-    logger.info(f"Built {len(points)} PointStruct objects")
-    return points
-
-
-# =============================================================================
-# Upsert with Retry
-# =============================================================================
-
-def batch_upsert(
-    client: QdrantClient,
-    collection_name: str,
-    points: list[PointStruct],
     batch_size: int = 200,
 ) -> int:
     """
-    Upsert points vào Qdrant theo batch với retry logic (exponential backoff).
+    Build PointStruct và upsert theo từng batch nhỏ để tiết kiệm RAM tối đa (Memory Efficient).
 
     Args:
         client: QdrantClient đã kết nối.
         collection_name: Tên collection Qdrant.
-        points: List PointStruct từ build_points().
-        batch_size: Số points mỗi lần upsert (100-500 tùy RAM/network).
+        metadata: pd.DataFrame từ load_unified_dataset().
+        vectors: dict từ load_unified_dataset().
+        ingestion_version: Version string ghi vào payload.
+        batch_size: Số points mỗi lần upsert.
 
     Returns:
         Tổng số points đã upsert thành công.
-
-    Raises:
-        RuntimeError: Nếu vẫn thất bại sau tất cả retries.
     """
-    total = len(points)
+    total = len(metadata)
     upserted = 0
     start_time = time.time()
+    total_batches = (total + batch_size - 1) // batch_size
+
+    image_vecs = vectors[IMAGE_DENSE.name]
+    ocr_vecs = vectors[OCR_DENSE.name]
+    asr_vecs = vectors[ASR_DENSE.name]
+
+    logger.info(f"Bắt đầu upsert {total} points vào '{collection_name}' theo từng batch {batch_size}...")
 
     for batch_start in range(0, total, batch_size):
-        batch = points[batch_start : batch_start + batch_size]
+        batch_end = min(batch_start + batch_size, total)
+        batch_meta = metadata.iloc[batch_start:batch_end]
         batch_num = batch_start // batch_size + 1
-        total_batches = (total + batch_size - 1) // batch_size
+
+        batch_points = []
+        for i, row in enumerate(batch_meta.itertuples(index=False)):
+            idx = batch_start + i
+            point_id = make_point_id(row.video_id, row.scene_id)
+            payload = {
+                "video_id": str(row.video_id),
+                "scene_id": str(row.scene_id),
+                "frame_id": int(row.frame_id),
+                "timestamp_start": float(row.timestamp_start),
+                "timestamp_end": float(row.timestamp_end),
+                "timestamp_mid": float(row.timestamp_mid),
+                "keyframe_path": str(row.keyframe_path),
+                "ocr_text": str(row.ocr_text),
+                "asr_text": str(row.asr_text),
+                "ingestion_version": ingestion_version,
+                "member": str(getattr(row, "member", "unknown")),
+            }
+            batch_points.append(
+                PointStruct(
+                    id=point_id,
+                    vector={
+                        IMAGE_DENSE.name: image_vecs[idx].tolist(),
+                        OCR_DENSE.name: ocr_vecs[idx].tolist(),
+                        ASR_DENSE.name: asr_vecs[idx].tolist(),
+                    },
+                    payload=payload,
+                )
+            )
 
         for attempt in range(1, _MAX_RETRIES + 1):
             try:
-                client.upsert(collection_name=collection_name, points=batch)
-                upserted += len(batch)
+                client.upsert(collection_name=collection_name, points=batch_points)
+                upserted += len(batch_points)
                 elapsed = time.time() - start_time
                 speed = upserted / elapsed if elapsed > 0 else 0
-                logger.info(
-                    f"Batch {batch_num}/{total_batches} — "
-                    f"{upserted}/{total} points ({speed:.1f} pts/s)"
-                )
-                break  # Thành công, thoát vòng retry
+                if batch_num % 10 == 0 or batch_num == total_batches or batch_num <= 5:
+                    logger.info(
+                        f"Batch {batch_num}/{total_batches} — "
+                        f"{upserted}/{total} points ({speed:.1f} pts/s)"
+                    )
+                break
             except Exception as e:
                 if attempt == _MAX_RETRIES:
                     raise RuntimeError(
@@ -300,6 +275,7 @@ def run(
     collection_name: str,
     qdrant_url: str = "http://localhost:6333",
     qdrant_api_key: str | None = None,
+    qdrant_path: str | None = None,
     batch_size: int = 200,
     create_if_missing: bool = False,
     skip_alias: bool = False,
@@ -328,9 +304,22 @@ def run(
     logger.info(f"Qdrant URL  : {qdrant_url}")
     logger.info(f"Batch size  : {batch_size}")
 
-    # 1. Kết nối Qdrant
-    client = QdrantClient(url=qdrant_url, api_key=qdrant_api_key, timeout=60)
-    logger.info("Qdrant client connected.")
+    # 1. Kết nối Qdrant (Thử URL, nếu lỗi thì fallback sang Local Embedded Path)
+    if qdrant_path:
+        logger.info(f"Kết nối Embedded Qdrant tại path: {qdrant_path}")
+        client = QdrantClient(path=qdrant_path)
+    else:
+        try:
+            client = QdrantClient(url=qdrant_url, api_key=qdrant_api_key, timeout=10)
+            client.get_collections()
+            logger.info(f"Qdrant client connected to server {qdrant_url}.")
+        except Exception as e:
+            fallback_path = "./data/qdrant_db"
+            logger.warning(
+                f"Không thể kết nối Qdrant server tại {qdrant_url} ({e}). "
+                f"Tự động chuyển sang Local Embedded Qdrant tại '{fallback_path}'..."
+            )
+            client = QdrantClient(path=fallback_path)
 
     # 2. Tạo collection nếu cần
     existing = [c.name for c in client.get_collections().collections]
@@ -358,13 +347,15 @@ def run(
     except Exception:
         ingestion_version = "1.0.0"
 
-    # 4. Build points
-    logger.info("Building Qdrant points...")
-    points = build_points(metadata, vectors, ingestion_version=ingestion_version)
-
-    # 5. Upsert
-    logger.info(f"Upserting {len(points)} points into '{collection_name}'...")
-    total_upserted = batch_upsert(client, collection_name, points, batch_size=batch_size)
+    # 4. Stream Build & Upsert Points
+    total_upserted = build_and_upsert_batches(
+        client=client,
+        collection_name=collection_name,
+        metadata=metadata,
+        vectors=vectors,
+        ingestion_version=ingestion_version,
+        batch_size=batch_size,
+    )
 
     # 6. Set production alias
     if not skip_alias:
@@ -434,6 +425,11 @@ Ví dụ:
         help="API key của Qdrant (nếu có authentication).",
     )
     parser.add_argument(
+        "--qdrant-path",
+        default=None,
+        help="Đường dẫn lưu Local Embedded Qdrant Database (không cần Docker).",
+    )
+    parser.add_argument(
         "--batch-size",
         type=int,
         default=200,
@@ -468,6 +464,7 @@ def main(argv: list[str] | None = None) -> None:
             collection_name=args.collection,
             qdrant_url=args.qdrant_url,
             qdrant_api_key=args.qdrant_api_key,
+            qdrant_path=args.qdrant_path,
             batch_size=args.batch_size,
             create_if_missing=args.create_collection,
             skip_alias=args.skip_alias,

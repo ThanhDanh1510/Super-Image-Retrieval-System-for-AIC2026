@@ -102,81 +102,132 @@ async def search_by_text_vectors(
     score_threshold: float | None = None,
 ) -> list[CandidateResult]:
     """
-    Tìm kiếm keyframe bằng text vectors (dense + sparse) cùng với image vector (Text-to-Image) qua RRF fusion.
+    Tìm kiếm keyframe bằng text vectors (dense + sparse) và image vector qua Weighted RRF fusion.
 
-    Thực hiện multi-vector prefetch từ các nhánh:
+    Thực hiện multi-vector query từ các nhánh:
       - image_dense (CLIP text vector mô phỏng ảnh, dim=1024)
       - ocr_dense  (gte-Qwen2-1.5B embedding của text OCR, dim=1536)
       - asr_dense  (gte-Qwen2-1.5B embedding của transcript ASR, dim=1536)
       - ocr_sparse (BM42 keyword matching cho OCR)
       - asr_sparse (BM42 keyword matching cho ASR)
 
-    Sau đó dùng FusionQuery với Fusion.RRF để kết hợp.
+    Áp dụng trọng số nhánh (Weighted RRF) đọc từ configs/fusion_config.yaml:
+      RRF_score(d) = Σ w_branch * (1 / (k + rank_branch(d)))
     """
-    # --- Build danh sách prefetch từ các nhánh ---
-    prefetches: list[Prefetch] = []
+    import asyncio
+    from shared.utils.config_loader import load_fusion_config
+
+    try:
+        cfg = load_fusion_config()
+        weights = cfg.get("weights", {})
+        rrf_k = float(cfg.get("rrf", {}).get("k", 60))
+    except Exception:
+        weights = {"image_dense": 2.5, "ocr_dense": 0.5, "asr_dense": 0.3, "ocr_sparse": 0.2, "asr_sparse": 0.2}
+        rrf_k = 60.0
+
+    w_image = float(weights.get("image_dense", 2.5))
+    w_ocr_dense = float(weights.get("ocr_dense", 0.5))
+    w_asr_dense = float(weights.get("asr_dense", 0.3))
+    w_ocr_sparse = float(weights.get("ocr_sparse", 0.2))
+    w_asr_sparse = float(weights.get("asr_sparse", 0.2))
+
+    tasks = []
+    task_weights = []
 
     # Nhánh image_dense (Text-to-Image via CLIP text encoder)
     if image_vector is not None:
-        prefetches.append(
-            Prefetch(
-                query=NamedVector(name=IMAGE_DENSE.name, vector=image_vector),
+        tasks.append(
+            client.query_points(
+                collection_name=collection_name,
+                query=image_vector,
+                using=IMAGE_DENSE.name,
                 limit=_DEFAULT_PREFETCH_LIMIT,
                 score_threshold=score_threshold,
+                with_payload=True,
             )
         )
+        task_weights.append(w_image)
 
     # Nhánh ocr_dense
-    prefetches.append(
-        Prefetch(
-            query=NamedVector(name=OCR_DENSE.name, vector=ocr_vector),
+    tasks.append(
+        client.query_points(
+            collection_name=collection_name,
+            query=ocr_vector,
+            using=OCR_DENSE.name,
             limit=_DEFAULT_PREFETCH_LIMIT,
             score_threshold=score_threshold,
+            with_payload=True,
         )
     )
+    task_weights.append(w_ocr_dense)
 
     # Nhánh asr_dense
-    prefetches.append(
-        Prefetch(
-            query=NamedVector(name=ASR_DENSE.name, vector=asr_vector),
+    tasks.append(
+        client.query_points(
+            collection_name=collection_name,
+            query=asr_vector,
+            using=ASR_DENSE.name,
             limit=_DEFAULT_PREFETCH_LIMIT,
             score_threshold=score_threshold,
+            with_payload=True,
         )
     )
+    task_weights.append(w_asr_dense)
 
     # Nhánh ocr_sparse
     if ocr_sparse_vector is not None:
-        prefetches.append(
-            Prefetch(
-                query=NamedSparseVector(
-                    name=OCR_SPARSE.name, vector=ocr_sparse_vector,
-                ),
+        tasks.append(
+            client.query_points(
+                collection_name=collection_name,
+                query=ocr_sparse_vector,
+                using=OCR_SPARSE.name,
                 limit=_DEFAULT_PREFETCH_LIMIT,
+                with_payload=True,
             )
         )
+        task_weights.append(w_ocr_sparse)
 
     # Nhánh asr_sparse
     if asr_sparse_vector is not None:
-        prefetches.append(
-            Prefetch(
-                query=NamedSparseVector(
-                    name=ASR_SPARSE.name, vector=asr_sparse_vector,
-                ),
+        tasks.append(
+            client.query_points(
+                collection_name=collection_name,
+                query=asr_sparse_vector,
+                using=ASR_SPARSE.name,
                 limit=_DEFAULT_PREFETCH_LIMIT,
+                with_payload=True,
             )
         )
+        task_weights.append(w_asr_sparse)
 
-    # --- RRF Fusion ---
-    results = await client.query_points(
-        collection_name=collection_name,
-        prefetch=prefetches,
-        query=FusionQuery(fusion=Fusion.RRF),
-        limit=top_k,
-        with_payload=True,
-    )
+    # Thực thi tất cả nhánh bất đồng bộ
+    branch_results = await asyncio.gather(*tasks)
 
-    logger.debug(f"search_by_text_vectors: {len(results.points)} results from {len(prefetches)} branches")
-    return [_scored_point_to_candidate(p) for p in results.points]
+    # Tích lũy điểm Weighted RRF
+    rrf_scores: dict[str, float] = {}
+    point_map: dict[str, any] = {}
+
+    for branch_res, weight in zip(branch_results, task_weights):
+        points = getattr(branch_res, "points", branch_res)
+        for rank, point in enumerate(points, start=1):
+            pid = str(point.id)
+            score_contrib = weight * (1.0 / (rrf_k + rank))
+            rrf_scores[pid] = rrf_scores.get(pid, 0.0) + score_contrib
+            if pid not in point_map:
+                point_map[pid] = point
+
+    # Sắp xếp theo Weighted RRF score giảm dần
+    sorted_ids = sorted(rrf_scores.keys(), key=lambda pid: rrf_scores[pid], reverse=True)[:top_k]
+
+    final_candidates = []
+    for pid in sorted_ids:
+        sp = point_map[pid]
+        cand = _scored_point_to_candidate(sp)
+        cand.score = round(float(rrf_scores[pid]), 6)
+        final_candidates.append(cand)
+
+    logger.debug(f"search_by_text_vectors: {len(final_candidates)} candidates via Weighted RRF from {len(tasks)} branches")
+    return final_candidates
 
 
 async def search_by_image_vector(
@@ -193,7 +244,8 @@ async def search_by_image_vector(
     """
     results = await client.query_points(
         collection_name=collection_name,
-        query=NamedVector(name=IMAGE_DENSE.name, vector=image_vector),
+        query=image_vector,
+        using=IMAGE_DENSE.name,
         limit=top_k,
         score_threshold=score_threshold,
         with_payload=True,
