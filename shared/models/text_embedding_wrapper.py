@@ -41,7 +41,10 @@ class TextEmbeddingWrapper:
 
             device_str = "cuda" if (device == "cuda" and torch.cuda.is_available()) else "cpu"
             logger.info(f"Loading Text Embedding model '{self.MODEL_ID}' on {device_str}...")
-            self.tokenizer = AutoTokenizer.from_pretrained(self.MODEL_ID, trust_remote_code=True)
+            try:
+                self.tokenizer = AutoTokenizer.from_pretrained(self.MODEL_ID, trust_remote_code=True)
+            except Exception:
+                self.tokenizer = AutoTokenizer.from_pretrained(self.MODEL_ID, trust_remote_code=True, use_fast=False)
             self.model = AutoModel.from_pretrained(self.MODEL_ID, trust_remote_code=True).to(device_str)
             self.model.eval()
             self.torch = torch
