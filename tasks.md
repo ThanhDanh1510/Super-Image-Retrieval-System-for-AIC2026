@@ -30,9 +30,9 @@
 - `[x]` **TASK-RNK-04**: Temporal Aligner cho sự kiện TRAKE (`serving/service/temporal_aligner.py`) — *Đã xong*
 
 ### 4. Module Evaluation & Benchmark (Đo đạc Đánh giá)
-- `[ ]` **TASK-EVL-01**: Tính chỉ số r_score cho KIS/VQA/TRAKE (`eval/skeletons/metrics/r_score.py`)
-- `[ ]` **TASK-EVL-02**: Tính điểm tổng hợp Final Score R@{1,5,20,50,100} (`eval/skeletons/metrics/final_score.py`)
-- `[ ]` **TASK-EVL-03**: Script chạy Benchmark thử nghiệm (`eval/skeletons/run_benchmark.py`)
+- `[x]` **TASK-EVL-01**: Tính chỉ số r_score cho KIS/VQA/TRAKE (`eval/skeletons/metrics/r_score.py`) — *Đã xong*
+- `[x]` **TASK-EVL-02**: Tính điểm tổng hợp Final Score R@{1,5,20,50,100} (`eval/skeletons/metrics/final_score.py`) — *Đã xong*
+- `[x]` **TASK-EVL-03**: Script chạy Benchmark thử nghiệm (`eval/skeletons/run_benchmark.py`) — *Đã xong*
 
 ### 5. Module Unit Testing (Kiểm thử Tự động)
 - `[x]` **TASK-TST-01**: Test Fusion Score Reranking (`tests/test_fusion_score.py`) — *Đã xong*
