@@ -16,6 +16,9 @@ from typing import Any, Literal
 
 logger = logging.getLogger(__name__)
 
+from eval.skeletons.metrics.r_score import r_score
+
+
 def calculate_recall_at_k(
     ranked_list: list[dict[str, Any]],
     ground_truth: dict[str, Any],
@@ -36,7 +39,13 @@ def calculate_recall_at_k(
     Returns:
         float: Giá trị R@k (từ 0.0 đến 1.0).
     """
-    raise NotImplementedError
+    if not ranked_list or k <= 0:
+        return 0.0
+
+    top_k_preds = ranked_list[:k]
+    scores = [r_score(pred, ground_truth, task_type) for pred in top_k_preds]
+    return max(scores, default=0.0)
+
 
 def final_score(
     ranked_list: list[dict[str, Any]],
@@ -56,4 +65,6 @@ def final_score(
     Returns:
         float: Final score.
     """
-    raise NotImplementedError
+    k_list = [1, 5, 20, 50, 100]
+    recalls = [calculate_recall_at_k(ranked_list, ground_truth, k, task_type) for k in k_list]
+    return sum(recalls) / len(recalls)
