@@ -41,16 +41,91 @@ def r_score(
 
     Args:
         prediction: Dict chứa kết quả dự đoán của mô hình.
-            Ví dụ KIS: {'video_id': 'L01_V001', 'timestamp': 45.5}
-            Ví dụ VQA: {'video_id': 'L01_V001', 'timestamp': 45.5, 'answer': 'màu xanh'}
-            Ví dụ TRAKE: {'video_id': 'L01_V001', 'timestamps': [12.0, 45.5, 90.0]}
         ground_truth: Dict chứa ground truth tương ứng.
-            Ví dụ KIS: {'video_id': 'L01_V001', 'timestamp_start': 40.0, 'timestamp_end': 50.0}
-            Ví dụ VQA: {'video_id': 'L01_V001', 'timestamp_start': 40.0, 'timestamp_end': 50.0, 'answer': 'màu xanh'}
-            Ví dụ TRAKE: {'video_id': 'L01_V001', 'events': [{'start': 10.0, 'end': 15.0}, {'start': 40.0, 'end': 50.0}]}
         task_type: Loại task "KIS" | "VQA" | "TRAKE".
 
     Returns:
         float: Điểm số r_score trong khoảng [0.0, 1.0].
     """
-    raise NotImplementedError
+    if not prediction or not ground_truth:
+        return 0.0
+
+    pred_video = str(prediction.get("video_id", "") or "").strip()
+    gt_video = str(ground_truth.get("video_id", "") or "").strip()
+
+    if not pred_video or not gt_video or pred_video != gt_video:
+        return 0.0
+
+    task = str(task_type).upper()
+
+    if task == "KIS":
+        pred_ts = prediction.get("timestamp")
+        if pred_ts is None:
+            pred_ts = prediction.get("timestamp_mid", 0.0)
+
+        gt_start = float(ground_truth.get("timestamp_start", 0.0))
+        gt_end = float(ground_truth.get("timestamp_end", float("inf")))
+
+        if gt_start <= float(pred_ts) <= gt_end:
+            return 1.0
+        return 0.0
+
+    elif task == "VQA":
+        pred_ts = prediction.get("timestamp")
+        if pred_ts is None:
+            pred_ts = prediction.get("timestamp_mid", 0.0)
+
+        gt_start = float(ground_truth.get("timestamp_start", 0.0))
+        gt_end = float(ground_truth.get("timestamp_end", float("inf")))
+        ts_valid = (gt_start <= float(pred_ts) <= gt_end)
+
+        pred_ans = str(prediction.get("answer", "") or "").strip().lower()
+        gt_ans = str(ground_truth.get("answer", "") or "").strip().lower()
+        ans_valid = (pred_ans == gt_ans) and bool(gt_ans)
+
+        if ts_valid and ans_valid:
+            return 1.0
+        return 0.0
+
+    elif task == "TRAKE":
+        gt_events = ground_truth.get("events", [])
+        if not gt_events:
+            return 0.0
+
+        n_events = len(gt_events)
+
+        pred_ts_list = prediction.get("timestamps")
+        if pred_ts_list is None:
+            pred_ts_list = prediction.get("sub_events_timestamps")
+        if pred_ts_list is None:
+            pred_events = prediction.get("events", [])
+            if isinstance(pred_events, list):
+                pred_ts_list = [
+                    e.get("timestamp", e.get("timestamp_mid", 0.0)) if isinstance(e, dict) else float(e)
+                    for e in pred_events
+                ]
+
+        if not pred_ts_list:
+            return 0.0
+
+        matched_count = 0
+        for j in range(min(n_events, len(pred_ts_list))):
+            ev = gt_events[j]
+            ts = float(pred_ts_list[j])
+
+            if isinstance(ev, dict):
+                start = float(ev.get("start", ev.get("timestamp_start", 0.0)))
+                end = float(ev.get("end", ev.get("timestamp_end", float("inf"))))
+            elif isinstance(ev, (tuple, list)) and len(ev) >= 2:
+                start, end = float(ev[0]), float(ev[1])
+            else:
+                continue
+
+            if start <= ts <= end:
+                matched_count += 1
+
+        return float(matched_count / n_events)
+
+    else:
+        logger.warning(f"Unsupported task_type: {task_type}")
+        return 0.0
