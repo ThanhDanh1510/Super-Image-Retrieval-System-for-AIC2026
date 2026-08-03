@@ -37,10 +37,11 @@ class TextEmbeddingWrapper:
 
         try:
             import torch
+            import transformers
             from transformers import AutoModel, AutoTokenizer
 
             device_str = "cuda" if (device == "cuda" and torch.cuda.is_available()) else "cpu"
-            logger.info(f"Loading Text Embedding model '{self.MODEL_ID}' on {device_str}...")
+            logger.info(f"Loading Text Embedding model '{self.MODEL_ID}' on {device_str} (transformers v{transformers.__version__})...")
             try:
                 self.tokenizer = AutoTokenizer.from_pretrained(self.MODEL_ID, trust_remote_code=True)
             except Exception:
@@ -50,8 +51,9 @@ class TextEmbeddingWrapper:
             self.torch = torch
             self.device_str = device_str
         except Exception as e:
+            import traceback
             logger.warning(
-                f"Không thể load real Text Embedding model '{self.MODEL_ID}' ({e}). "
+                f"Không thể load real Text Embedding model '{self.MODEL_ID}' ({e}). Traceback: {traceback.format_exc()}. "
                 "Sẽ sử dụng Fallback Deterministic Text Encoder cho môi trường test/CPU."
             )
             self.is_mock = True
