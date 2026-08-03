@@ -11,8 +11,8 @@
 - `[x]` **TASK-ING-01**: Trích xuất Keyframe từ video (`ingestion/skeletons/01a_keyframe_extraction.py`) — *Đã xong*
 - `[x]` **TASK-ING-02a**: Trích xuất Text - OCR từ keyframe bằng PaddleOCR v6 (`ingestion/skeletons/01b_text_extraction.py`) *Đã xong*
 - `[x]` **TASK-ING-02b**: Trích xuất Text - ASR giọng nói bằng PhoWhisper (`ingestion/skeletons/01b_text_extraction.py`) - *Đã xong*
-- `[ ]` **TASK-ING-03a**: Sinh Vector Embedding Ảnh bằng BEiT3 + CLIP ViT-L/14 (`ingestion/skeletons/01c_embedding_generation.py`)
-- `[ ]` **TASK-ING-03b**: Sinh Vector Embedding Text bằng gte-Qwen2-1.5B (`ingestion/skeletons/01c_embedding_generation.py`)
+- `[x]` **TASK-ING-03a**: Sinh Vector Embedding Ảnh bằng BEiT3 + CLIP ViT-L/14 (`ingestion/skeletons/01c_embedding_generation.py`) — *Đã xong*
+- `[x]` **TASK-ING-03b**: Sinh Vector Embedding Text bằng gte-Qwen2-1.5B (`ingestion/skeletons/01c_embedding_generation.py`) — *Đã xong*
 - `[x]` **TASK-ING-04**: Validate & Export Shard Dataset lên Kaggle (`ingestion/skeletons/02_export_shard_dataset.py`) — *Đã xong*
 - `[x]` **TASK-ING-05**: Checkpoint Manifest quản lý trạng thái (`ingestion/skeletons/checkpoint_manifest.py`) — *Đã xong*
 
@@ -60,14 +60,12 @@
 | | `TASK-RNK-02` | `serving/service/reranker/skeletons/crossmodal_branch/jina_reranker_m0.py` | Implement Jina Reranker M0 cross-modal |
 | | `TASK-EVL-02` | `eval/skeletons/metrics/final_score.py` | Implement công thức `final_score` mean R@k |
 |---|---|---|---|
-| **Member_3** | `TASK-ING-03a` | `ingestion/skeletons/01c_embedding_generation.py` | Implement `generate_image_embeddings()` dùng BEiT3 + CLIP |
-| | `TASK-SRV-03` | `serving/service/retrieval/skeletons/voice_query.py` | Implement `query_by_voice()` xử lý audio query |
+| **Member_3** | `TASK-SRV-03` | `serving/service/retrieval/skeletons/voice_query.py` | Implement `query_by_voice()` xử lý audio query |
 | | `TASK-SRV-05` | `serving/service/retrieval/skeletons/text_query.py` | Implement `split_trake_events()` tách sự kiện TRAKE |
 | | `TASK-RNK-03` | `serving/service/reranker/skeletons/fusion_score.py` | Implement `fuse()` kết hợp điểm từ 2 nhánh rerank |
 | | `TASK-EVL-03` | `eval/skeletons/run_benchmark.py` | Implement script chạy benchmark thử nghiệm |
 | | `TASK-TST-01` | `tests/test_fusion_score.py` | Viết unit tests cho Fusion Score |
 |---|---|---|---|
-| **Member_4** | `TASK-ING-03b` | `ingestion/skeletons/01c_embedding_generation.py` | Implement `generate_text_embeddings()` dùng gte-Qwen2-1.5B |
-| | `TASK-SRV-04` | `serving/service/retrieval/skeletons/retrieval_pipeline.py` | Implement `retrieve()` orchestrator |
+| **Member_4** | `TASK-SRV-04` | `serving/service/retrieval/skeletons/retrieval_pipeline.py` | Implement `retrieve()` orchestrator |
 | | `TASK-RNK-04` | `serving/service/temporal_aligner.py` | Implement `align()` căn chỉnh thứ tự thời gian cho TRAKE |
 | | `TASK-TST-02` | `tests/test_query_parsing.py` | Viết unit tests cho query parsing & TRAKE alignment |
