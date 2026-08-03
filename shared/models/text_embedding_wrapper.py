@@ -140,7 +140,7 @@ class TextEmbeddingWrapper:
                     attention_mask = inputs["attention_mask"].unsqueeze(-1)
                     token_embeddings = outputs[0]  # First element of model_output contains all token embeddings
                     sum_embeddings = self.torch.sum(token_embeddings * attention_mask, 1)
-                    sum_mask = torch.clamp(attention_mask.sum(1), min=1e-9)
+                    sum_mask = self.torch.clamp(attention_mask.sum(1), min=1e-9)
                     pooled = (sum_embeddings / sum_mask).cpu().numpy().astype(np.float32)
 
                     # Adjust dimension sang 1536 nếu cần
