@@ -181,11 +181,9 @@ def run_embedding_generation(
     """
     Entry point chính: Sinh toàn bộ vectors và lưu ra file .npy và scene_ids.txt.
     """
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(message)s",
-        force=True,
-    )
+    meta_p = Path(metadata_path)
+    if not meta_p.exists():
+        raise FileNotFoundError(f"File metadata không tồn tại: {metadata_path}")
 
     out_p = Path(output_dir)
     out_p.mkdir(parents=True, exist_ok=True)
