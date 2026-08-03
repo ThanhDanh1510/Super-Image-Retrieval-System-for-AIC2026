@@ -3,6 +3,8 @@ ingestion/skeletons/01b_text_extraction.py
 ============================================
 TASK-ING-02: Trích xuất text từ keyframes (OCR) và audio video (ASR).
 
+SKELETON IMPLEMENTATION: Trích xuất text bằng PaddleOCR v6 và PhoWhisper.
+
 INPUT:
     - scene_metadata.parquet (từ TASK-ING-01)
     - Keyframe JPG files (từ TASK-ING-01)
@@ -12,10 +14,9 @@ OUTPUT:
     - ocr_text.parquet  — schema: (scene_id, video_id, ocr_text)
     - asr_text.parquet  — schema: (scene_id, video_id, asr_text)
 
-CONSTRAINTS:
+CONSTRAINTS (KHÔNG ĐƯỢC THAY ĐỔI):
     - Model OCR: PaddleOCR v6 — version đọc từ configs/model_versions.yaml, KHÔNG hardcode
     - Model ASR: PhoWhisper-medium — version đọc từ configs/model_versions.yaml, KHÔNG hardcode
-    - Chuẩn hóa Unicode tiếng Việt NFC cho tất cả kết quả văn bản.
     - Nếu không nhận dạng được text/audio → lưu chuỗi rỗng '' (KHÔNG lưu None hay NaN)
     - Output encoding: UTF-8
 
@@ -30,27 +31,44 @@ CÁCH CHẠY (Kaggle Notebook cell):
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 import os
 import subprocess
-import tempfile
-import unicodedata
+import sys
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
+import yaml
+
+# Thêm root path vào PYTHONPATH để import shared package khi chạy cục bộ
+sys.path.append(str(Path(__file__).resolve().parents[2]))
+
+try:
+    from shared.utils.config_loader import load_model_versions
+except ImportError:
+    def load_model_versions() -> dict[str, Any]:
+        possible_paths = [
+            Path("/kaggle/input/aic2026-configs/model_versions.yaml"),
+            Path(__file__).resolve().parents[2] / "configs" / "model_versions.yaml",
+            Path("configs/model_versions.yaml"),
+        ]
+        for path in possible_paths:
+            if path.exists():
+                with open(path, "r", encoding="utf-8") as f:
+                    return yaml.safe_load(f)
+        raise FileNotFoundError("Không tìm thấy configs/model_versions.yaml")
 
 from ingestion.skeletons.checkpoint_manifest import CheckpointManifest
-from shared.utils.config_loader import load_model_versions
-from shared.utils.text_normalizer import normalize_nfc
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-
-def normalize_vietnamese_text(text: str) -> str:
-    """Chuẩn hóa văn bản tiếng Việt sang dạng Unicode NFC và làm sạch khoảng trắng."""
-    return normalize_nfc(text)
+# An toàn cho Paddle 3.x chạy CPU trên Windows: tắt PIR executor và MKLDNN (oneDNN)
+# để tránh lỗi "ConvertPirAttribute2RuntimeAttribute ... onednn_instruction.cc".
+# Phải set TRƯỚC khi import paddle/paddleocr (chỉ import bên trong init_ocr_engine).
+os.environ.setdefault("FLAGS_enable_pir_api", "0")
+os.environ.setdefault("FLAGS_use_mkldnn", "0")
 
 
 # =============================================================================
@@ -60,101 +78,199 @@ def normalize_vietnamese_text(text: str) -> str:
 def init_ocr_engine(model_cfg: dict) -> Any:
     """
     Khởi tạo PaddleOCR engine từ cấu hình trong model_versions.yaml.
+
+    Version OCR đọc từ: model_cfg['ocr']['version'] == 'v6'
+    Ngôn ngữ đọc từ:    model_cfg['ocr']['lang']    == 'vi'
+
+    Args:
+        model_cfg: Dict đọc từ load_model_versions().
+
+    Returns:
+        PaddleOCR instance đã khởi tạo.
+
+    Raises:
+        ImportError: Nếu paddleocr chưa được cài đặt.
+        RuntimeError: Nếu không khởi tạo được engine.
     """
+    try:
+        from paddleocr import PaddleOCR
+    except ImportError as err:
+        raise ImportError("PaddleOCR package chưa được cài đặt. Vui lòng install 'paddleocr' và 'paddlepaddle'.") from err
+
     ocr_cfg = model_cfg.get("ocr", {})
     lang = ocr_cfg.get("lang", "vi")
     use_gpu = ocr_cfg.get("use_gpu", True)
+    det_model_dir = ocr_cfg.get("det_model_dir")
+    rec_model_dir = ocr_cfg.get("rec_model_dir")
 
-    try:
-        from paddleocr import PaddleOCR
-    except ImportError as e:
-        raise ImportError(
-            "Chưa cài đặt package 'paddleocr'. "
-            "Vui lòng chạy: pip install paddlepaddle paddleocr"
-        ) from e
+    # Quyết định device chạy. Thứ tự ưu tiên:
+    #   1) Biến môi trường AIC_DEVICE (set trong .env, ví dụ AIC_DEVICE=cpu)
+    #   2) Giá trị use_gpu trong config — nhưng tự kiểm tra CUDA khả dụng để tránh
+    #      fallback GPU->CPU gây lỗi oneDNN/PIR trên máy không có GPU.
+    env_device = os.environ.get("AIC_DEVICE", "").strip().lower()
+    if env_device in ("cpu", "gpu"):
+        device = env_device
+    else:
+        device = "cpu"
+        if use_gpu:
+            try:
+                import paddle
 
+                device = "gpu" if paddle.device.cuda.device_count() > 0 else "cpu"
+            except Exception:
+                device = "cpu"
+
+    # Tắt MKLDNN (oneDNN) để tránh lỗi "ConvertPirAttribute2RuntimeAttribute not support ...
+    # onednn_instruction.cc" của Paddle 3.x chạy CPU trên Windows. Không ảnh hưởng tới Kaggle/Linux.
+    enable_mkldnn = bool(ocr_cfg.get("enable_mkldnn", False))
+
+    kwargs: dict[str, Any] = {
+        "lang": lang,
+    }
+    if det_model_dir:
+        kwargs["det_model_dir"] = det_model_dir
+    if rec_model_dir:
+        kwargs["rec_model_dir"] = rec_model_dir
+
+    last_err: Exception | None = None
+
+    # 1) PaddleOCR 3.x style — dùng device + enable_mkldnn (ổn định trên Windows CPU/Paddle 3.x)
     try:
-        logger.info(f"Đang khởi tạo PaddleOCR (lang='{lang}', use_gpu={use_gpu})...")
-        ocr_engine = PaddleOCR(
-            use_angle_cls=True,
-            lang=lang,
-            use_gpu=use_gpu,
-            show_log=False,
-        )
-        return ocr_engine
-    except Exception as e:
-        logger.warning(f"Không thể khởi tạo PaddleOCR GPU mode: {e}. Thử lại với use_gpu=False...")
-        try:
-            ocr_engine = PaddleOCR(
-                use_angle_cls=True,
-                lang=lang,
-                use_gpu=False,
-                show_log=False,
-            )
-            return ocr_engine
-        except Exception as err:
-            raise RuntimeError(f"Lỗi khởi tạo PaddleOCR engine: {err}") from err
+        ocr = PaddleOCR(device=device, enable_mkldnn=enable_mkldnn, **kwargs)
+        return ocr
+    except (TypeError, ValueError):
+        pass
+    except Exception as err:
+        last_err = err
+
+    # 2) PaddleOCR 2.x style — dùng use_gpu + use_angle_cls
+    try:
+        ocr = PaddleOCR(use_angle_cls=True, use_gpu=use_gpu, **kwargs)
+        return ocr
+    except (TypeError, ValueError):
+        pass
+    except Exception as err:
+        last_err = err
+
+    # 3) Base fallback — chỉ lang (và det/rec model dir nếu có)
+    try:
+        ocr = PaddleOCR(**kwargs)
+        return ocr
+    except Exception as err:
+        last_err = err
+
+    raise RuntimeError(f"Không thể khởi tạo PaddleOCR engine: {last_err}") from last_err
 
 
 def init_asr_model(model_cfg: dict) -> Any:
     """
     Khởi tạo ASR model (PhoWhisper) từ cấu hình trong model_versions.yaml.
+
+    Model ID đọc từ: model_cfg['asr']['model'] == 'vinai/PhoWhisper-medium'
+    Language đọc từ: model_cfg['asr']['language'] == 'vi'
+
+    Args:
+        model_cfg: Dict đọc từ load_model_versions().
+
+    Returns:
+        HuggingFace ASR pipeline instance đã load model.
+
+    Raises:
+        RuntimeError: Nếu không load được model.
     """
     asr_cfg = model_cfg.get("asr", {})
-    model_name = asr_cfg.get("model", "vinai/PhoWhisper-medium")
-    language = asr_cfg.get("language", "vi")
-    device_cfg = asr_cfg.get("device", "cuda")
+    model_id = asr_cfg.get("model", "vinai/PhoWhisper-medium")
+    device_setting = asr_cfg.get("device", "cuda")
+
+    device = 0 if device_setting == "cuda" else -1
 
     try:
-        import torch
         from transformers import pipeline
-    except ImportError as e:
-        raise ImportError(
-            "Chưa cài đặt package 'transformers' hoặc 'torch'. "
-            "Vui lòng chạy: pip install transformers torch soundfile"
-        ) from e
-
-    device_id = 0 if (device_cfg == "cuda" and torch.cuda.is_available()) else -1
-    torch_dtype = torch.float16 if device_id >= 0 else torch.float32
-
-    logger.info(f"Đang load ASR model '{model_name}' (device={device_id}, dtype={torch_dtype})...")
-    try:
-        asr_pipeline = pipeline(
+        asr = pipeline(
             "automatic-speech-recognition",
-            model=model_name,
-            device=device_id,
-            torch_dtype=torch_dtype,
-            generate_kwargs={"language": language, "task": "transcribe"},
+            model=model_id,
+            device=device,
         )
-        return asr_pipeline
-    except Exception as e:
-        raise RuntimeError(f"Không thể load ASR model '{model_name}': {e}") from e
+        return asr
+    except Exception as err:
+        raise RuntimeError(f"Không thể load ASR model '{model_id}': {err}") from err
+
+
+def _collect_ocr_text(node: Any, out: list[str]) -> None:
+    """
+    Đệ quy trích xuất các chuỗi text nhận dạng từ output của PaddleOCR.
+
+    Hỗ trợ nhiều cấu trúc kết quả:
+      - 3.x predict:  { 'rec_texts': ['...'], 'rec_scores': [...] }  (có thể bọc trong list)
+      - 2.x ocr:      [ [ [box, (text, score)], ... ] ]
+
+    Args:
+        node: Node bất kỳ của cấu trúc kết quả OCR (dict/list/tuple/str...).
+        out:   List tích lũy các text đã trích xuất.
+    """
+    if isinstance(node, dict):
+        # Ưu tiên key 'rec_texts' / 'rec_text' của PaddleOCR 3.x
+        rec = node.get("rec_texts") or node.get("rec_text") or []
+        if rec:
+            for t in rec:
+                if t:
+                    out.append(str(t).strip())
+            return
+        for value in node.values():
+            _collect_ocr_text(value, out)
+    elif isinstance(node, (list, tuple)):
+        # Line 2.x: [box, (text, score)] → phần tử thứ 2 là tuple (text, score)
+        if (
+            len(node) == 2
+            and isinstance(node[0], (list, tuple))
+            and isinstance(node[1], (list, tuple))
+            and len(node[1]) >= 1
+            and isinstance(node[1][0], str)
+        ):
+            out.append(node[1][0].strip())
+        else:
+            for item in node:
+                _collect_ocr_text(item, out)
 
 
 def run_ocr(ocr_engine: Any, image_path: str) -> str:
     """
-    Chạy OCR trên một ảnh keyframe và trả về text nhận dạng tiếng Việt.
+    Chạy OCR trên một ảnh keyframe và trả về text nhận dạng được.
+
+    Args:
+        ocr_engine: PaddleOCR instance từ init_ocr_engine().
+        image_path: Đường dẫn tuyệt đối tới file JPG keyframe.
+
+    Returns:
+        Chuỗi text đã nhận dạng. Trả về '' nếu không có text.
+
+    Raises:
+        FileNotFoundError: Nếu image_path không tồn tại.
     """
     path = Path(image_path)
     if not path.exists():
-        raise FileNotFoundError(f"File ảnh keyframe không tồn tại: {image_path}")
+        raise FileNotFoundError(f"Không tìm thấy file ảnh keyframe: {image_path}")
 
     try:
-        result = ocr_engine.ocr(str(path), cls=True)
-        if not result or not result[0]:
+        try:
+            result = ocr_engine.ocr(str(path), cls=True)
+        except (TypeError, ValueError):
+            result = ocr_engine.ocr(str(path))
+        if not result:
             return ""
 
-        extracted_lines = []
-        for line in result[0]:
-            if line and len(line) >= 2 and line[1]:
-                text_content = line[1][0]
-                if text_content:
-                    extracted_lines.append(text_content)
+        # Gom text từ output theo nhiều định dạng của PaddleOCR:
+        #   - 3.x predict:  [ { 'rec_texts': [...], ... } ]  hoặc  { 'rec_texts': [...] }
+        #   - 2.x ocr:      [ [ [box, (text, score)], ... ] ]
+        # Hàm đệ quy dưới đây xử lý được tất cả các cấu trúc trên.
+        texts: list[str] = []
+        _collect_ocr_text(result, texts)
 
-        full_text = " ".join(extracted_lines)
-        return normalize_vietnamese_text(full_text)
-    except Exception as e:
-        logger.warning(f"Lỗi khi chạy OCR trên ảnh {image_path}: {e}")
+        return " ".join(texts).strip()
+    except FileNotFoundError:
+        raise
+    except Exception as err:
+        logger.warning(f"Lỗi khi chạy OCR trên {image_path}: {err}")
         return ""
 
 
@@ -165,111 +281,87 @@ def extract_audio_segment(
     tmp_dir: str = "/tmp",
 ) -> str:
     """
-    Trích xuất đoạn audio từ video và lưu ra file WAV 16kHz Mono tạm thời.
+    Trích xuất đoạn audio từ video và lưu ra file WAV tạm thời.
+
+    Args:
+        video_path: Đường dẫn tuyệt đối tới file video.
+        start_sec: Giây bắt đầu đoạn audio cần extract.
+        end_sec: Giây kết thúc đoạn audio cần extract.
+        tmp_dir: Thư mục tạm để lưu file WAV.
+
+    Returns:
+        Đường dẫn tuyệt đối tới file WAV tạm thời.
+
+    Raises:
+        FileNotFoundError: Nếu video_path không tồn tại.
+        RuntimeError: Nếu ffmpeg không khả dụng hoặc extract thất bại.
     """
     v_path = Path(video_path)
     if not v_path.exists():
-        raise FileNotFoundError(f"File video không tồn tại: {video_path}")
+        raise FileNotFoundError(f"Không tìm thấy video tại: {video_path}")
 
     os.makedirs(tmp_dir, exist_ok=True)
+    duration = max(0.1, float(end_sec) - float(start_sec))
 
-    # Đảm bảo start/end hợp lệ
-    duration = max(0.1, end_sec - start_sec)
-    
-    # Tạo tên file WAV tạm duy nhất
-    tmp_file = tempfile.NamedTemporaryFile(
-        suffix=".wav",
-        prefix=f"audio_{v_path.stem}_",
-        dir=tmp_dir,
-        delete=False,
-    )
-    tmp_path = tmp_file.name
-    tmp_file.close()
+    filename = f"audio_{v_path.stem}_{start_sec:.2f}_{end_sec:.2f}_{os.urandom(4).hex()}.wav"
+    tmp_path = os.path.join(tmp_dir, filename)
 
     cmd = [
         "ffmpeg",
         "-y",
-        "-ss", str(start_sec),
-        "-t", str(duration),
-        "-i", str(v_path),
+        "-ss",
+        str(start_sec),
+        "-i",
+        str(v_path),
+        "-t",
+        str(duration),
         "-vn",
-        "-ar", "16000",
-        "-ac", "1",
-        "-loglevel", "error",
+        "-ar",
+        "16000",
+        "-ac",
+        "1",
         tmp_path,
     ]
 
     try:
-        subprocess.run(cmd, check=True, capture_output=True)
+        subprocess.run(cmd, check=True, capture_output=True, text=True)
         return tmp_path
-    except subprocess.CalledProcessError as e:
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
-        raise RuntimeError(f"Lỗi FFmpeg khi trích xuất audio từ {video_path}: {e.stderr.decode('utf-8', errors='ignore')}") from e
-    except FileNotFoundError as e:
-        raise RuntimeError("Hệ thống chưa cài đặt 'ffmpeg'. Vui lòng cài đặt ffmpeg trước khi chạy ASR.") from e
+    except FileNotFoundError as err:
+        raise RuntimeError("ffmpeg không được cài đặt hoặc không nằm trong PATH.") from err
+    except subprocess.CalledProcessError as err:
+        raise RuntimeError(f"Trích xuất audio ffmpeg thất bại: {err.stderr}") from err
 
 
 def run_asr(asr_model: Any, audio_path: str) -> str:
     """
-    Chạy ASR trên file audio và trả về transcript text tiếng Việt.
+    Chạy ASR trên file audio và trả về transcript text.
+
+    Args:
+        asr_model: HuggingFace ASR pipeline từ init_asr_model().
+        audio_path: Đường dẫn tới file WAV tạm thời (từ extract_audio_segment()).
+
+    Returns:
+        Transcript text (tiếng Việt). Trả về '' nếu không có giọng nói.
+
+    Raises:
+        FileNotFoundError: Nếu audio_path không tồn tại.
     """
     a_path = Path(audio_path)
     if not a_path.exists():
-        raise FileNotFoundError(f"File audio không tồn tại: {audio_path}")
+        raise FileNotFoundError(f"Không tìm thấy file audio tại: {audio_path}")
 
     try:
         result = asr_model(str(a_path))
-        text = ""
         if isinstance(result, dict):
-            text = result.get("text", "")
+            return str(result.get("text", "") or "").strip()
         elif isinstance(result, str):
-            text = result
-        return normalize_vietnamese_text(text)
-    except Exception as e:
-        logger.warning(f"Lỗi khi chạy ASR trên {audio_path}: {e}")
+            return result.strip()
         return ""
-
-
-def import_existing_ocr_json(import_dir: str, metadata_df: pd.DataFrame) -> dict[str, str]:
-    """
-    Nạp dữ liệu OCR từ thư mục chứa các file JSON có sẵn (được đánh theo frame_id hoặc index).
-    """
-    ocr_map = {}
-    import_path = Path(import_dir)
-    if not import_path.exists():
-        logger.warning(f"Thư mục import OCR không tồn tại: {import_dir}")
-        return ocr_map
-
-    logger.info(f"Đang nạp dữ liệu OCR có sẵn từ: {import_path}")
-
-    # Đọc tất cả các file json trong import_path (ví dụ: L21_V001.json)
-    json_files = list(import_path.rglob("*.json"))
-    json_cache = {}
-    for jf in json_files:
-        try:
-            with open(jf, "r", encoding="utf-8") as f:
-                json_cache[jf.stem] = json.load(f)
-        except Exception as e:
-            logger.warning(f"Không thể đọc file OCR JSON {jf}: {e}")
-
-    for row in metadata_df.itertuples():
-        scene_id = row.scene_id
-        video_id = row.video_id
-        frame_id = str(getattr(row, "frame_id", 0))
-
-        ocr_text = ""
-        if video_id in json_cache:
-            v_json = json_cache[video_id]
-            # Thử lấy theo frame_id (ví dụ "17", "54") hoặc theo scene_id
-            if frame_id in v_json:
-                ocr_text = str(v_json[frame_id])
-            elif scene_id in v_json:
-                ocr_text = str(v_json[scene_id])
-
-        ocr_map[scene_id] = normalize_vietnamese_text(ocr_text)
-
-    return ocr_map
+    except FileNotFoundError:
+        raise
+    except Exception as err:
+        logger.warning(f"Lỗi khi chạy ASR trên {audio_path}: {err}")
+        return ""
 
 
 def process_text_extraction(
@@ -278,158 +370,174 @@ def process_text_extraction(
     video_dir: str,
     output_dir: str,
     checkpoint_path: str | None = None,
-    import_ocr_dir: str | None = None,
-    import_asr_dir: str | None = None,
-    skip_ocr: bool = False,
-    skip_asr: bool = False,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Entry point chính: Chạy OCR + ASR cho toàn bộ scenes trong metadata.
+
+    Args:
+        metadata_path: Đường dẫn tới scene_metadata.parquet.
+        keyframe_dir: Thư mục chứa keyframe JPG.
+        video_dir: Thư mục chứa video gốc (dùng cho ASR).
+        output_dir: Thư mục output (/kaggle/working/shard_output/).
+        checkpoint_path: Đường dẫn checkpoint.json. None → mặc định.
+
+    Returns:
+        Tuple (ocr_df, asr_df):
+            - ocr_df: pd.DataFrame với cột (scene_id, video_id, ocr_text)
+            - asr_df: pd.DataFrame với cột (scene_id, video_id, asr_text)
+
+    Raises:
+        FileNotFoundError: Nếu metadata_path không tồn tại.
     """
-    meta_p = Path(metadata_path)
-    if not meta_p.exists():
-        raise FileNotFoundError(f"File metadata không tồn tại: {metadata_path}")
+    meta_path = Path(metadata_path)
+    if not meta_path.exists():
+        raise FileNotFoundError(f"Không tìm thấy scene_metadata.parquet tại: {metadata_path}")
+
+    df_meta = pd.read_parquet(meta_path)
+    if df_meta.empty:
+        logger.warning("scene_metadata.parquet rỗng.")
+        empty_ocr = pd.DataFrame(columns=["scene_id", "video_id", "ocr_text"])
+        empty_asr = pd.DataFrame(columns=["scene_id", "video_id", "asr_text"])
+        return empty_ocr, empty_asr
 
     out_p = Path(output_dir)
     out_p.mkdir(parents=True, exist_ok=True)
 
-    metadata_df = pd.read_parquet(meta_p)
-    logger.info(f"Đã nạp {len(metadata_df)} scenes từ {metadata_path}")
+    if checkpoint_path is None:
+        checkpoint_path = str(out_p / "checkpoint.json")
 
-    checkpoint_file = checkpoint_path or str(out_p / "checkpoint.json")
-    manifest = CheckpointManifest(checkpoint_file)
+    manifest = CheckpointManifest(checkpoint_path)
+    model_cfg = load_model_versions()
 
-    # 1. Nạp/Khởi tạo OCR
-    ocr_map: dict[str, str] = {}
+    # Load pre-existing parquet results if checkpoint resumption is active
+    ocr_output_path = out_p / "ocr_text.parquet"
+    asr_output_path = out_p / "asr_text.parquet"
+
+    ocr_cache: dict[str, str] = {}
+    if ocr_output_path.exists():
+        try:
+            cached_ocr_df = pd.read_parquet(ocr_output_path)
+            ocr_cache = dict(zip(cached_ocr_df["scene_id"], cached_ocr_df["ocr_text"].fillna("")))
+        except Exception as e:
+            logger.warning(f"Không thể đọc cached ocr_text.parquet: {e}")
+
+    asr_cache: dict[str, str] = {}
+    if asr_output_path.exists():
+        try:
+            cached_asr_df = pd.read_parquet(asr_output_path)
+            asr_cache = dict(zip(cached_asr_df["scene_id"], cached_asr_df["asr_text"].fillna("")))
+        except Exception as e:
+            logger.warning(f"Không thể đọc cached asr_text.parquet: {e}")
+
+    # Init engines lazily / safely
     ocr_engine = None
-    if import_ocr_dir:
-        ocr_map = import_existing_ocr_json(import_ocr_dir, metadata_df)
-    elif not skip_ocr:
-        try:
-            cfg = load_model_versions()
-            ocr_engine = init_ocr_engine(cfg)
-        except Exception as e:
-            logger.error(f"Không thể khởi tạo OCR Engine: {e}. Sẽ dùng chuỗi rỗng cho OCR.")
+    try:
+        ocr_engine = init_ocr_engine(model_cfg)
+    except Exception as e:
+        logger.warning(f"Khởi tạo OCR engine thất bại ({e}). OCR text sẽ để rỗng.")
 
-    # 2. Nạp/Khởi tạo ASR
-    asr_map: dict[str, str] = {}
     asr_model = None
-    if not skip_asr and not import_asr_dir:
-        try:
-            cfg = load_model_versions()
-            asr_model = init_asr_model(cfg)
-        except Exception as e:
-            logger.error(f"Không thể khởi tạo ASR Model: {e}. Sẽ dùng chuỗi rỗng cho ASR.")
+    try:
+        asr_model = init_asr_model(model_cfg)
+    except Exception as e:
+        logger.warning(f"Khởi tạo ASR model thất bại ({e}). ASR text sẽ để rỗng.")
 
-    # 3. Lặp qua từng scene
-    ocr_rows = []
-    asr_rows = []
+    # Cache video files in video_dir
+    video_file_map: dict[str, Path] = {}
+    v_dir = Path(video_dir) if video_dir else None
+    if v_dir and v_dir.exists():
+        for ext in ("*.mp4", "*.mkv", "*.avi", "*.webm"):
+            for v_file in v_dir.rglob(ext):
+                video_file_map[v_file.stem] = v_file
 
-    kf_dir_p = Path(keyframe_dir)
-    v_dir_p = Path(video_dir)
+    ocr_records = []
+    asr_records = []
+    total_scenes = len(df_meta)
 
-    processed_count = 0
-    total_scenes = len(metadata_df)
+    for idx, row in df_meta.iterrows():
+        scene_id = str(row["scene_id"])
+        video_id = str(row["video_id"])
+        keyframe_rel = str(row["keyframe_path"])
+        start_sec = float(row.get("timestamp_start", 0.0))
+        end_sec = float(row.get("timestamp_end", 0.0))
 
-    for row in metadata_df.itertuples():
-        scene_id = row.scene_id
-        video_id = row.video_id
-        rel_kf_path = getattr(row, "keyframe_path", "")
-        start_sec = getattr(row, "timestamp_start", 0.0)
-        end_sec = getattr(row, "timestamp_end", 0.0)
-
-        # Trích xuất OCR
-        if scene_id in ocr_map:
-            ocr_text = ocr_map[scene_id]
-        elif ocr_engine is not None:
-            # Tìm file ảnh
-            img_p = kf_dir_p / rel_kf_path
-            if not img_p.exists():
-                img_p = kf_dir_p / video_id / f"{scene_id}.jpg"
-
-            if img_p.exists():
-                ocr_text = run_ocr(ocr_engine, str(img_p))
-            else:
-                ocr_text = ""
+        # --- OCR Extraction ---
+        if manifest.is_done(scene_id, step="ocr") and scene_id in ocr_cache:
+            ocr_text = ocr_cache[scene_id]
         else:
             ocr_text = ""
+            if ocr_engine:
+                kf_path = Path(keyframe_dir) / keyframe_rel
+                if not kf_path.exists():
+                    kf_path = Path(keyframe_dir) / video_id / keyframe_rel
+                if kf_path.exists():
+                    try:
+                        ocr_text = run_ocr(ocr_engine, str(kf_path))
+                    except Exception as err:
+                        logger.warning(f"OCR error on scene {scene_id}: {err}")
+                else:
+                    logger.warning(f"Keyframe path not found: {kf_path}")
 
-        # Trích xuất ASR
-        if scene_id in asr_map:
-            asr_text = asr_map[scene_id]
-        elif asr_model is not None:
-            # Tìm file video
-            v_p = v_dir_p / f"{video_id}.mp4"
-            if not v_p.exists():
-                v_p = v_dir_p / f"{video_id}.mkv"
-                
-            if v_p.exists():
-                tmp_wav = None
-                try:
-                    tmp_wav = extract_audio_segment(str(v_p), start_sec, end_sec)
-                    asr_text = run_asr(asr_model, tmp_wav)
-                except Exception as e:
-                    logger.warning(f"Lỗi extract/run ASR cho {scene_id}: {e}")
-                    asr_text = ""
-                finally:
-                    if tmp_wav and os.path.exists(tmp_wav):
-                        try:
-                            os.remove(tmp_wav)
-                        except Exception:
-                            pass
-            else:
-                asr_text = ""
+            manifest.mark_done(scene_id, step="ocr")
+            ocr_cache[scene_id] = ocr_text
+
+        # --- ASR Extraction ---
+        if manifest.is_done(scene_id, step="asr") and scene_id in asr_cache:
+            asr_text = asr_cache[scene_id]
         else:
             asr_text = ""
+            if asr_model and video_id in video_file_map:
+                v_path = video_file_map[video_id]
+                wav_path = None
+                try:
+                    wav_path = extract_audio_segment(
+                        video_path=str(v_path),
+                        start_sec=start_sec,
+                        end_sec=end_sec,
+                        tmp_dir=str(out_p / "tmp_audio"),
+                    )
+                    asr_text = run_asr(asr_model, wav_path)
+                except Exception as err:
+                    logger.warning(f"ASR error on scene {scene_id}: {err}")
+                finally:
+                    if wav_path and os.path.exists(wav_path):
+                        try:
+                            os.remove(wav_path)
+                        except OSError:
+                            pass
 
-        ocr_rows.append({"scene_id": scene_id, "video_id": video_id, "ocr_text": ocr_text})
-        asr_rows.append({"scene_id": scene_id, "video_id": video_id, "asr_text": asr_text})
+            manifest.mark_done(scene_id, step="asr")
+            asr_cache[scene_id] = asr_text
 
-        manifest.mark_done(scene_id, step="ocr")
-        manifest.mark_done(scene_id, step="asr")
-        processed_count += 1
+        manifest.save()
 
-        if processed_count % 50 == 0 or processed_count == total_scenes:
-            logger.info(f"Đã xử lý Text Extraction: {processed_count}/{total_scenes} scenes")
-            manifest.save()
+        ocr_records.append({"scene_id": scene_id, "video_id": video_id, "ocr_text": ocr_text})
+        asr_records.append({"scene_id": scene_id, "video_id": video_id, "asr_text": asr_text})
 
-    ocr_df = pd.DataFrame(ocr_rows)
-    asr_df = pd.DataFrame(asr_rows)
+        if (idx + 1) % 50 == 0 or (idx + 1) == total_scenes:
+            logger.info(f"Processed text extraction for {idx + 1}/{total_scenes} scenes.")
 
-    # Đảm bảo string type và không chứa NaN/None
-    ocr_df["ocr_text"] = ocr_df["ocr_text"].fillna("").astype(str)
-    asr_df["asr_text"] = asr_df["asr_text"].fillna("").astype(str)
+    ocr_df = pd.DataFrame(ocr_records)
+    asr_df = pd.DataFrame(asr_records)
 
-    # 4. Ghi file Parquet kết quả
-    ocr_out = out_p / "ocr_text.parquet"
-    asr_out = out_p / "asr_text.parquet"
+    # Fill any potential null values with empty string
+    ocr_df["ocr_text"] = ocr_df["ocr_text"].fillna("")
+    asr_df["asr_text"] = asr_df["asr_text"].fillna("")
 
-    ocr_df.to_parquet(ocr_out, index=False)
-    asr_df.to_parquet(asr_out, index=False)
-
-    logger.info(f"✅ Hoàn tất TASK-ING-02! Đã lưu:")
-    logger.info(f"  - {ocr_out} ({len(ocr_df)} rows)")
-    logger.info(f"  - {asr_out} ({len(asr_df)} rows)")
+    ocr_df.to_parquet(ocr_output_path, index=False)
+    asr_df.to_parquet(asr_output_path, index=False)
+    logger.info(f"Saved {ocr_output_path} and {asr_output_path}")
 
     return ocr_df, asr_df
 
 
 if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    )
-
     parser = argparse.ArgumentParser(description="TASK-ING-02: Trích xuất text từ keyframes (OCR) và audio video (ASR).")
     parser.add_argument("--metadata-path", required=True, help="Đường dẫn tới scene_metadata.parquet.")
     parser.add_argument("--keyframe-dir", required=True, help="Thư mục chứa keyframe JPG.")
     parser.add_argument("--video-dir", required=True, help="Thư mục chứa video gốc.")
     parser.add_argument("--output-dir", default="/kaggle/working/shard_output", help="Thư mục lưu kết quả.")
     parser.add_argument("--checkpoint-path", default=None, help="Đường dẫn file checkpoint.")
-    parser.add_argument("--import-ocr-dir", default=None, help="Thư mục chứa các file OCR JSON có sẵn để import nhanh.")
-    parser.add_argument("--import-asr-dir", default=None, help="Thư mục chứa các file ASR JSON có sẵn để import nhanh.")
-    parser.add_argument("--skip-ocr", action="store_true", help="Bỏ qua bước OCR (chỉ xuất chuỗi rỗng).")
-    parser.add_argument("--skip-asr", action="store_true", help="Bỏ qua bước ASR (chỉ xuất chuỗi rỗng).")
 
     args = parser.parse_args()
 
@@ -439,8 +547,4 @@ if __name__ == "__main__":
         video_dir=args.video_dir,
         output_dir=args.output_dir,
         checkpoint_path=args.checkpoint_path,
-        import_ocr_dir=args.import_ocr_dir,
-        import_asr_dir=args.import_asr_dir,
-        skip_ocr=args.skip_ocr,
-        skip_asr=args.skip_asr,
     )

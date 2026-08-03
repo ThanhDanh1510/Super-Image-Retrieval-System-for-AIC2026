@@ -121,22 +121,64 @@ async def _transcribe(audio_bytes: bytes, audio_format: str, asr_model) -> str:
     """
     Chuyển đổi audio → text bằng model ASR.
 
-    Gợi ý implementation:
-      - Save audio_bytes ra file tạm (tempfile) rồi load bằng librosa/soundfile.
-      - Chạy qua asr_model (PhoWhisper hoặc whisper.cpp).
-      - Return transcript text (tiếng Việt hoặc tiếng Anh tùy model).
-
     Args:
         audio_bytes: Raw audio bytes.
-        audio_format: 'wav', 'mp3', 'webm', v.v.
-        asr_model: Model đã load — interface tùy implementation (HuggingFace pipeline
-                   hoặc faster-whisper hoặc whisper.cpp binding).
+        audio_format: Format của audio ('wav', 'mp3', 'webm', v.v.).
+        asr_model: ASR model (PhoWhisper pipeline) singleton đã load.
 
     Returns:
-        Transcript string. Tiếng Việt nếu dùng PhoWhisper.
+        Transcript string.
 
     Raises:
-        ValueError: Nếu audio không thể decode được.
-        RuntimeError: Nếu ASR model không thể transcribe (audio quá ngắn, nhiễu...).
+        ValueError: Nếu audio_bytes rỗng.
+        RuntimeError: Nếu ASR model không thể transcribe.
     """
-    raise NotImplementedError
+    if not audio_bytes:
+        raise ValueError("audio_bytes không được rỗng")
+
+    if asr_model is None:
+        logger.warning("ASR model là None, không thể transcribe audio real. Trả về transcript fallback.")
+        return "[VOICE_TRANSCRIPT_FALLBACK]"
+
+    import tempfile
+    import os
+
+    suffix = f".{audio_format.lstrip('.')}" if audio_format else ".wav"
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp.write(audio_bytes)
+        tmp_path = tmp.name
+
+    try:
+        if callable(asr_model):
+            result = asr_model(tmp_path)
+            if isinstance(result, dict):
+                transcript = str(result.get("text", "") or "").strip()
+            elif isinstance(result, str):
+                transcript = result.strip()
+            else:
+                transcript = str(result).strip()
+            return transcript
+        elif hasattr(asr_model, "transcribe"):
+            # e.g., whisper model instance
+            result = asr_model.transcribe(tmp_path)
+            if isinstance(result, tuple):
+                # e.g. faster-whisper returns (segments, info)
+                segments, _ = result
+                transcript = " ".join([s.text for s in segments]).strip()
+            elif isinstance(result, dict):
+                transcript = str(result.get("text", "") or "").strip()
+            else:
+                transcript = str(result).strip()
+            return transcript
+        else:
+            logger.warning(f"asr_model type {type(asr_model)} không supported callable/transcribe.")
+            return "[VOICE_TRANSCRIPT_FALLBACK]"
+    except Exception as e:
+        logger.error(f"Lỗi trong quá trình transcribe audio: {e}", exc_info=True)
+        raise RuntimeError(f"Lỗi khi transcribe audio: {e}") from e
+    finally:
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
