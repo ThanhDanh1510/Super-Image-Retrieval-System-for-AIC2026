@@ -52,9 +52,11 @@ class TextEmbeddingWrapper:
             except Exception:
                 self.tokenizer = AutoTokenizer.from_pretrained(self.MODEL_ID, trust_remote_code=True, use_fast=False)
             
+            dtype = torch.float16 if device_str == "cuda" else torch.float32
             self.model = AutoModel.from_pretrained(
                 self.MODEL_ID,
                 config=config,
+                torch_dtype=dtype,
                 trust_remote_code=True,
             ).to(device_str)
             self.model.eval()

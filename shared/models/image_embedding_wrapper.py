@@ -50,7 +50,8 @@ class ImageEmbeddingWrapper:
             device_str = "cuda" if (device == "cuda" and torch.cuda.is_available()) else "cpu"
             logger.info(f"Loading CLIP model '{self.CLIP_MODEL_ID}' on {device_str} (transformers v{transformers.__version__})...")
             self.clip_processor = CLIPProcessor.from_pretrained(self.CLIP_MODEL_ID)
-            self.clip_model = CLIPModel.from_pretrained(self.CLIP_MODEL_ID).to(device_str)
+            dtype = torch.float16 if device_str == "cuda" else torch.float32
+            self.clip_model = CLIPModel.from_pretrained(self.CLIP_MODEL_ID, torch_dtype=dtype).to(device_str)
             self.clip_model.eval()
             self.torch = torch
             self.device_str = device_str
