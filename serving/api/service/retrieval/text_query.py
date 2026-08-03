@@ -117,17 +117,12 @@ async def process(
 
 
 # =============================================================================
-# Internal Helper Functions (implement these)
+# Internal Helper Functions (implementations)
 # =============================================================================
 
 async def _enhance_query(raw_query: str) -> str:
     """
     Dịch query sang tiếng Anh (nếu là tiếng Việt) và enhance chất lượng.
-
-    Gợi ý implementation:
-      - Dùng model dịch nhẹ (MarianMT vi→en) hoặc API (DeepL/Google Translate).
-      - Sau khi dịch, có thể thêm bước paraphrase/expand để tăng recall.
-      - Nếu query đã là tiếng Anh, bỏ qua bước dịch.
 
     Args:
         raw_query: Query gốc từ người dùng.
@@ -135,26 +130,36 @@ async def _enhance_query(raw_query: str) -> str:
     Returns:
         Query đã được dịch và enhanced (luôn là tiếng Anh).
     """
-    raise NotImplementedError
+    from shared.utils.text_normalizer import sanitize_search_query
+    cleaned_query = sanitize_search_query(raw_query)
+    if not cleaned_query:
+        return ""
+
+    # Kiểm tra xem có chứa tiếng Việt (ký tự có dấu) hay không
+    import re
+    has_vietnamese_accent = bool(re.search(r'[àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđ]', cleaned_query, re.IGNORECASE))
+    
+    if has_vietnamese_accent:
+        try:
+            from deep_translator import GoogleTranslator
+            translated = GoogleTranslator(source="auto", target="en").translate(cleaned_query)
+            if translated and translated.strip():
+                return sanitize_search_query(translated)
+        except Exception as e:
+            logger.warning(f"Không thể dịch query '{cleaned_query}' qua deep_translator ({e}), dùng query gốc.")
+
+    return cleaned_query
 
 
 def _split_events(query: str) -> list[str]:
     """
     Tách TRAKE query thành N sub-event descriptions.
 
-    Ví dụ input:
-        "A person jumps over a fence, then lands on the ground, then runs away"
-    Ví dụ output:
-        ["A person jumps over a fence",
-         "lands on the ground",
-         "runs away"]
-
-    Gợi ý implementation:
-      - Rule-based: tách theo connector words ("then", "after that", "followed by", ...)
-      - Hoặc dùng LLM để tách có context-aware hơn.
+    Priority 1: Nếu query chứa xuống dòng '\\n', tách theo từng dòng.
+    Priority 2: Rule-based connectors ('then', 'after that', 'sau đó', ...).
 
     Args:
-        query: Query tiếng Anh đã enhanced.
+        query: Query tiếng Anh đã enhanced (hoặc tiếng Việt).
 
     Returns:
         List các sub-event strings. Mỗi string mô tả 1 khoảnh khắc.
@@ -162,7 +167,30 @@ def _split_events(query: str) -> list[str]:
     Raises:
         ValueError: Nếu không thể tách được ít nhất 2 sub-events từ query.
     """
-    raise NotImplementedError
+    import re
+
+    # 1. Ưu tiên 1 — Newline split
+    if "\n" in query:
+        lines = [line.strip() for line in query.split("\n") if line.strip()]
+        if len(lines) >= 2:
+            return lines
+
+    # 2. Fallback — Rule-based connectors
+    connectors_pattern = (
+        r"\b(?:then|after that|followed by|next|afterwards|subsequently|later|finally|sau đó|tiếp theo|rồi)\b"
+    )
+    segments = re.split(connectors_pattern, query, flags=re.IGNORECASE)
+    sub_events = [s.strip(" .,;-") for s in segments if s and s.strip(" .,;-")]
+
+    # 3. Nếu connectors không tách được, thử tách theo dấu chấm hoặc chấm phẩy
+    if len(sub_events) < 2:
+        punct_segments = re.split(r"[.;]", query)
+        sub_events = [s.strip(" .,;-") for s in punct_segments if s and s.strip(" .,;-")]
+
+    if len(sub_events) < 2:
+        raise ValueError(f"Không thể tách query thành ít nhất 2 sub-events: '{query}'")
+
+    return sub_events
 
 
 async def _encode_text(
@@ -170,37 +198,30 @@ async def _encode_text(
     embedder: TextEmbeddingWrapper,
 ) -> tuple[list[float], list[float]]:
     """
-    Encode text thành 2 dense vectors: ocr_vector và asr_vector.
-
-    Cả 2 vector cùng dim=1536, cùng model (gte-Qwen2-1.5B) — được giữ riêng lẻng để
-    Qdrant thực hiện prefetch độc lập trên 2 named vector khác nhau (ocr_dense và asr_dense),
-    sau đó RRF fusion kết quả. Nếu Qdrant chấp nhận 2 vector giống nhau từ cùng 1 model thì
-    chúng sẽ trả kết quả giống nhau — trong trường hợp này có thể disable một nánh.
+    Encode text thành 2 dense vectors: ocr_vector và asr_vector (dim=1536).
 
     Args:
-        text: Text đã enhanced (tiếng Anh).
+        text: Text đã enhanced.
         embedder: TextEmbeddingWrapper singleton (gte-Qwen2-1.5B).
 
     Returns:
-        Tuple (ocr_vector, asr_vector).
-        - ocr_vector: list[float], len=1536, L2-normalized.
-        - asr_vector: list[float], len=1536, L2-normalized.
+        Tuple (ocr_vector, asr_vector) list[float], len=1536.
     """
-    raise NotImplementedError
+    vec = embedder.encode(text)
+    if hasattr(vec, "tolist"):
+        vec_list = vec.tolist()
+    else:
+        vec_list = list(vec)
+
+    return vec_list, vec_list
 
 
 def _encode_sparse(text: str) -> tuple[object | None, object | None]:
     """
     Encode text thành sparse vectors (BM42) cho keyword matching.
-
-    Args:
-        text: Text đã enhanced (tiếng Anh).
-
-    Returns:
-        Tuple (ocr_sparse, asr_sparse).
-        Mỗi phần tử là qdrant_client.models.SparseVector hoặc None nếu không dùng sparse.
+    Phase 1: Trả về (None, None).
     """
-    raise NotImplementedError
+    return None, None
 
 
 async def _encode_text_to_image_vector(
@@ -208,14 +229,17 @@ async def _encode_text_to_image_vector(
     embedder: ImageEmbeddingWrapper,
 ) -> list[float]:
     """
-    Encode text query thành image dense vector (Text-to-Image) dùng CLIP text encoder.
+    Encode text query thành image dense vector (Text-to-Image) dùng CLIP text encoder (dim=1024).
 
     Args:
-        text: Text đã enhanced (tiếng Anh).
+        text: Text đã enhanced.
         embedder: ImageEmbeddingWrapper singleton.
 
     Returns:
         list[float], len=1024, L2-normalized.
     """
-    raise NotImplementedError
+    vec = embedder.encode_text(text)
+    if hasattr(vec, "tolist"):
+        return vec.tolist()
+    return list(vec)
 

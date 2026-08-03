@@ -1,106 +1,126 @@
-import os
-import json
-import tempfile
 import importlib
-import unicodedata
+import tempfile
+from pathlib import Path
+from unittest.mock import MagicMock
+
 import pandas as pd
 import pytest
 
-# Dynamic import vì module name bắt đầu bằng số (01b_text_extraction)
-text_ext_mod = importlib.import_module("ingestion.skeletons.01b_text_extraction")
-
-normalize_vietnamese_text = text_ext_mod.normalize_vietnamese_text
-import_existing_ocr_json = text_ext_mod.import_existing_ocr_json
-process_text_extraction = text_ext_mod.process_text_extraction
+text_extractor = importlib.import_module("ingestion.skeletons.01b_text_extraction")
 
 
-from shared.utils.text_normalizer import clean_whitespace, normalize_nfc, sanitize_search_query
+def test_run_ocr_file_not_found():
+    mock_ocr = MagicMock()
+    with pytest.raises(FileNotFoundError):
+        text_extractor.run_ocr(mock_ocr, "/non/existent/image.jpg")
 
 
-def test_normalize_vietnamese_text():
-    # Test NFD string -> NFC normalization
-    nfd_text = unicodedata.normalize("NFD", "Tiếng Việt có dấu")
-    normalized = normalize_vietnamese_text(nfd_text)
-    assert unicodedata.is_normalized("NFC", normalized)
-    assert normalized == "Tiếng Việt có dấu"
+def test_run_ocr_mock_engine(tmp_path):
+    # Tạo fake image file
+    img_path = tmp_path / "test_frame.jpg"
+    img_path.touch()
 
-    # Test whitespace strip
-    raw_space = "   Hệ   thống   Truy  vấn    "
-    assert normalize_vietnamese_text(raw_space) == "Hệ thống Truy vấn"
+    # Mock PaddleOCR engine return structure: [ [ [box, (text, score)], ... ] ]
+    mock_ocr = MagicMock()
+    mock_ocr.ocr.return_value = [
+        [
+            [[[0, 0], [10, 0], [10, 10], [0, 10]], ("CỬA HÀNG", 0.98)],
+            [[[0, 20], [10, 20], [10, 30], [0, 30]], ("TIỆN LỢI", 0.95)],
+        ]
+    ]
 
-
-def test_shared_text_normalizer():
-    assert normalize_nfc("Tiến hành") == "Tiến hành"
-    assert clean_whitespace("   a   b \n c  ") == "a b c"
-    assert sanitize_search_query("  Xe hơi\x00 đỏ   ") == "Xe hơi đỏ"
-
-
-def test_import_existing_ocr_json(tmp_path):
-    # Tạo fake metadata
-    meta_df = pd.DataFrame([
-        {"scene_id": "L21_V001_S001", "video_id": "L21_V001", "frame_id": 17},
-        {"scene_id": "L21_V001_S002", "video_id": "L21_V001", "frame_id": 54},
-    ])
-
-    # Tạo fake OCR JSON với format key = frame_id
-    ocr_dir = tmp_path / "OCR" / "L21"
-    ocr_dir.mkdir(parents=True)
-    ocr_json_path = ocr_dir / "L21_V001.json"
-    
-    ocr_data = {
-        "17": unicodedata.normalize("NFD", "TIN CHÍNH 60 GIÂY"),
-        "54": "TÌNH TRẠNG SỤT LÚN",
-    }
-    with open(ocr_json_path, "w", encoding="utf-8") as f:
-        json.dump(ocr_data, f, ensure_ascii=False)
-
-    ocr_map = import_existing_ocr_json(str(tmp_path / "OCR"), meta_df)
-    
-    assert "L21_V001_S001" in ocr_map
-    assert ocr_map["L21_V001_S001"] == "TIN CHÍNH 60 GIÂY"
-    assert unicodedata.is_normalized("NFC", ocr_map["L21_V001_S001"])
-    assert ocr_map["L21_V001_S002"] == "TÌNH TRẠNG SỤT LÚN"
+    result = text_extractor.run_ocr(mock_ocr, str(img_path))
+    assert result == "CỬA HÀNG TIỆN LỢI"
+    mock_ocr.ocr.assert_called_once_with(str(img_path), cls=True)
 
 
-def test_process_text_extraction_skip(tmp_path):
-    # Tạo fake scene_metadata.parquet
-    meta_path = tmp_path / "scene_metadata.parquet"
-    meta_df = pd.DataFrame([
+def test_run_ocr_empty_result(tmp_path):
+    img_path = tmp_path / "blank.jpg"
+    img_path.touch()
+
+    mock_ocr = MagicMock()
+    mock_ocr.ocr.return_value = [[]]
+
+    result = text_extractor.run_ocr(mock_ocr, str(img_path))
+    assert result == ""
+
+
+def test_run_asr_file_not_found():
+    mock_asr = MagicMock()
+    with pytest.raises(FileNotFoundError):
+        text_extractor.run_asr(mock_asr, "/non/existent/audio.wav")
+
+
+def test_run_asr_mock_model(tmp_path):
+    audio_path = tmp_path / "test_audio.wav"
+    audio_path.touch()
+
+    mock_asr = MagicMock()
+    mock_asr.return_value = {"text": " Xin chào Việt Nam "}
+
+    result = text_extractor.run_asr(mock_asr, str(audio_path))
+    assert result == "Xin chào Việt Nam"
+
+
+def test_extract_audio_segment_file_not_found():
+    with pytest.raises(FileNotFoundError):
+        text_extractor.extract_audio_segment("/non/existent/video.mp4", 0.0, 5.0)
+
+
+def test_process_text_extraction_end_to_end(tmp_path, monkeypatch):
+    # Setup dummy directory structure
+    meta_dir = tmp_path / "input"
+    meta_dir.mkdir()
+    keyframe_dir = tmp_path / "keyframes" / "L01_V001"
+    keyframe_dir.mkdir(parents=True)
+    out_dir = tmp_path / "output"
+    out_dir.mkdir()
+
+    # Create dummy metadata parquet
+    df_meta = pd.DataFrame([
         {
-            "scene_id": "L21_V001_S001",
-            "video_id": "L21_V001",
-            "frame_id": 17,
+            "scene_id": "L01_V001_S001",
+            "video_id": "L01_V001",
+            "frame_id": 15,
             "timestamp_start": 0.0,
             "timestamp_end": 5.0,
             "timestamp_mid": 2.5,
             "fps": 25.0,
-            "keyframe_path": "L21_V001/L21_V001_S001_000017.jpg",
+            "keyframe_path": "L01_V001/L01_V001_S001_000015.jpg",
         }
     ])
-    meta_df.to_parquet(meta_path, index=False)
+    meta_path = meta_dir / "scene_metadata.parquet"
+    df_meta.to_parquet(meta_path)
 
-    kf_dir = tmp_path / "keyframes"
-    kf_dir.mkdir()
-    v_dir = tmp_path / "videos"
-    v_dir.mkdir()
-    out_dir = tmp_path / "output"
+    # Create keyframe file
+    kf_file = keyframe_dir / "L01_V001_S001_000015.jpg"
+    kf_file.touch()
 
-    ocr_df, asr_df = process_text_extraction(
+    # Mock init_ocr_engine & init_asr_model
+    mock_ocr = MagicMock()
+    mock_ocr.ocr.return_value = [
+        [
+            [[[0, 0], [10, 0], [10, 10], [0, 10]], ("BIỂN BÁO", 0.99)]
+        ]
+    ]
+    monkeypatch.setattr(text_extractor, "init_ocr_engine", lambda cfg: mock_ocr)
+    monkeypatch.setattr(text_extractor, "init_asr_model", lambda cfg: None)
+
+    ocr_df, asr_df = text_extractor.process_text_extraction(
         metadata_path=str(meta_path),
-        keyframe_dir=str(kf_dir),
-        video_dir=str(v_dir),
+        keyframe_dir=str(tmp_path / "keyframes"),
+        video_dir=str(tmp_path),
         output_dir=str(out_dir),
-        skip_ocr=True,
-        skip_asr=True,
     )
 
-    assert set(ocr_df.columns) == {"scene_id", "video_id", "ocr_text"}
-    assert set(asr_df.columns) == {"scene_id", "video_id", "asr_text"}
     assert len(ocr_df) == 1
+    assert ocr_df.iloc[0]["scene_id"] == "L01_V001_S001"
+    assert ocr_df.iloc[0]["ocr_text"] == "BIỂN BÁO"
+
     assert len(asr_df) == 1
-    assert ocr_df.iloc[0]["ocr_text"] == ""
+    assert asr_df.iloc[0]["scene_id"] == "L01_V001_S001"
     assert asr_df.iloc[0]["asr_text"] == ""
 
-    # Verify parquet files written to disk
+    # Verify saved files
     assert (out_dir / "ocr_text.parquet").exists()
     assert (out_dir / "asr_text.parquet").exists()

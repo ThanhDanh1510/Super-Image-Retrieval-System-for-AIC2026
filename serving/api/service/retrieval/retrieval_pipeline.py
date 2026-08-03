@@ -139,18 +139,29 @@ async def _run_text(
 ) -> PipelineResult:
     """
     Route text query sang text_query.process() và wrap kết quả thành PipelineResult.
-
-    Args:
-        request: KISRequest, VQARequest, hoặc TRAKERequest.
-        task_type: TaskType để text_query biết có cần tách sub-events không.
-        qdrant_client: AsyncQdrantClient singleton.
-        text_embedder: TextEmbeddingWrapper singleton.
-        image_embedder: ImageEmbeddingWrapper singleton.
-
-    Returns:
-        PipelineResult với candidates, enhanced_query, và sub_events (nếu TRAKE).
     """
-    raise NotImplementedError
+    raw_query = getattr(request, "query", "")
+    top_k = getattr(request, "top_k", 100)
+
+    query_input = TextQueryInput(
+        raw_query=raw_query,
+        task_type=task_type,
+        top_k=top_k,
+    )
+
+    output: TextQueryOutput = await text_query.process(
+        query_input=query_input,
+        qdrant_client=qdrant_client,
+        text_embedder=text_embedder,
+        image_embedder=image_embedder,
+    )
+
+    return PipelineResult(
+        candidates=output.candidates,
+        task_type=task_type,
+        enhanced_query=output.enhanced_query,
+        sub_events=output.sub_events,
+    )
 
 
 async def _run_voice(
@@ -163,23 +174,45 @@ async def _run_voice(
 ) -> PipelineResult:
     """
     Route voice query sang voice_query.process() và wrap kết quả.
-
-    Lưu ý: request.query đối với voice là audio base64 hoặc controller
-    đã decode thành bytes và truyền riêng — cần thống nhất với controller.
-
-    Args:
-        request: Request với audio data (đã decode thành bytes bởi controller).
-        task_type: KIS / VQA / TRAKE.
-        qdrant_client: AsyncQdrantClient singleton.
-        text_embedder: TextEmbeddingWrapper singleton.
-        image_embedder: ImageEmbeddingWrapper singleton.
-        asr_model: PhoWhisper model singleton.
-
-    Returns:
-        PipelineResult với candidates, transcript, enhanced_query, sub_events.
     """
-    raise NotImplementedError
+    import base64
 
+    query_data = getattr(request, "query", b"")
+    if isinstance(query_data, str):
+        try:
+            audio_bytes = base64.b64decode(query_data)
+        except Exception:
+            audio_bytes = query_data.encode("utf-8")
+    elif isinstance(query_data, bytes):
+        audio_bytes = query_data
+    else:
+        audio_bytes = bytes(query_data)
+
+    audio_format = getattr(request, "audio_format", "wav")
+    top_k = getattr(request, "top_k", 100)
+
+    voice_input = VoiceQueryInput(
+        audio_bytes=audio_bytes,
+        audio_format=audio_format,
+        task_type=task_type,
+        top_k=top_k,
+    )
+
+    output: VoiceQueryOutput = await voice_query.process(
+        query_input=voice_input,
+        qdrant_client=qdrant_client,
+        text_embedder=text_embedder,
+        image_embedder=image_embedder,
+        asr_model=asr_model,
+    )
+
+    return PipelineResult(
+        candidates=output.candidates,
+        task_type=task_type,
+        enhanced_query=output.enhanced_query,
+        transcript=output.transcript,
+        sub_events=output.sub_events,
+    )
 
 
 async def _run_image(
@@ -189,15 +222,31 @@ async def _run_image(
 ) -> PipelineResult:
     """
     Route image query sang image_query.process() và wrap kết quả.
-
-    Lưu ý: ImageSearch chỉ hỗ trợ task_type=KIS (không có VQA/TRAKE với image input).
-
-    Args:
-        request: ImageSearchRequest với image_base64.
-        qdrant_client: AsyncQdrantClient singleton.
-        image_embedder: ImageEmbeddingWrapper singleton.
-
-    Returns:
-        PipelineResult với candidates. enhanced_query và sub_events là None.
     """
-    raise NotImplementedError
+    import base64
+
+    image_base64 = getattr(request, "image_base64", "")
+    if not image_base64:
+        raise ValueError("image_base64 trong request không được rỗng")
+
+    image_bytes = base64.b64decode(image_base64)
+    top_k = getattr(request, "top_k", 100)
+
+    image_input = ImageQueryInput(
+        image_bytes=image_bytes,
+        top_k=top_k,
+    )
+
+    output: ImageQueryOutput = await image_query.process(
+        query_input=image_input,
+        qdrant_client=qdrant_client,
+        image_embedder=image_embedder,
+    )
+
+    return PipelineResult(
+        candidates=output.candidates,
+        task_type=TaskType.KIS,
+        enhanced_query=None,
+        transcript=None,
+        sub_events=None,
+    )

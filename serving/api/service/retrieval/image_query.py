@@ -92,20 +92,11 @@ async def _encode_image(
     embedder: ImageEmbeddingWrapper,
 ) -> list[float]:
     """
-    Decode và encode ảnh thành image_vector.
-
-    Pipeline:
-      1. Decode bytes → PIL Image
-      2. Resize về kích thước chuẩn của model (224x224 hoặc theo model config)
-      3. Normalize (mean/std theo ImageNet hoặc theo model config)
-      4. Forward qua BEiT-large → embedding
-      5. Forward qua CLIP ViT-L/14 → embedding
-      6. Fuse 2 embeddings (concat hoặc weighted average) → final vector dim=1024
-      7. L2-normalize
+    Decode và encode ảnh thành image_vector (dim=1024, L2-normalized).
 
     Args:
         image_bytes: Raw bytes của ảnh (JPEG/PNG/WebP).
-        embedder: ImageEmbeddingWrapper đã load cả BEiT và CLIP model.
+        embedder: ImageEmbeddingWrapper đã load model.
 
     Returns:
         list[float], len=1024, L2-normalized.
@@ -113,4 +104,10 @@ async def _encode_image(
     Raises:
         ValueError: Nếu image_bytes không phải ảnh hợp lệ.
     """
-    raise NotImplementedError
+    if not image_bytes:
+        raise ValueError("image_bytes không được rỗng")
+
+    vec = embedder.encode_from_bytes(image_bytes)
+    if hasattr(vec, "tolist"):
+        return vec.tolist()
+    return list(vec)
