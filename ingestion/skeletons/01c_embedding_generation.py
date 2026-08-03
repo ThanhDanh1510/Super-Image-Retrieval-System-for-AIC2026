@@ -77,7 +77,9 @@ def generate_image_embeddings(
     all_vecs = []
     total = len(scene_ids)
 
-    logger.info(f"Bắt đầu sinh Image Embeddings cho {total} scenes (batch_size={batch_size})...")
+    msg = f"📸 Bắt đầu sinh Image Embeddings cho {total} scenes (batch_size={batch_size})..."
+    logger.info(msg)
+    print(msg, flush=True)
 
     for i in range(0, total, batch_size):
         batch_sids = scene_ids[i : i + batch_size]
@@ -108,7 +110,6 @@ def generate_image_embeddings(
                     logger.warning(f"Không thể đọc ảnh {img_file}: {e}. Dùng blank image.")
                     img = Image.new("RGB", (224, 224), color=(0, 0, 0))
             else:
-                logger.warning(f"Không tìm thấy ảnh cho scene {sid} (video {vid}). Dùng blank image.")
                 img = Image.new("RGB", (224, 224), color=(0, 0, 0))
 
             images.append(img)
@@ -118,8 +119,11 @@ def generate_image_embeddings(
             vecs = np.expand_dims(vecs, axis=0)
         all_vecs.append(vecs)
 
-        if (i + len(batch_sids)) % 100 == 0 or (i + len(batch_sids)) == total:
-            logger.info(f"  - Đã sinh Image vectors: {min(i + batch_size, total)}/{total}")
+        curr_count = min(i + len(batch_sids), total)
+        if curr_count % 1000 == 0 or curr_count == total:
+            prog_msg = f"  - [Image] Đã sinh vectors: {curr_count}/{total} ({curr_count/total*100:.1f}%)"
+            logger.info(prog_msg)
+            print(prog_msg, flush=True)
 
     if not all_vecs:
         return np.zeros((0, image_model.dim), dtype=np.float32)
@@ -139,7 +143,9 @@ def generate_text_embeddings(
     total = len(texts)
     all_vecs = []
 
-    logger.info(f"Bắt đầu sinh Text Embeddings cho {total} texts (batch_size={batch_size})...")
+    msg = f"🔤 Bắt đầu sinh Text Embeddings cho {total} texts (batch_size={batch_size})..."
+    logger.info(msg)
+    print(msg, flush=True)
 
     for i in range(0, total, batch_size):
         batch_texts = texts[i : i + batch_size]
@@ -148,8 +154,11 @@ def generate_text_embeddings(
             vecs = np.expand_dims(vecs, axis=0)
         all_vecs.append(vecs)
 
-        if (i + len(batch_texts)) % 100 == 0 or (i + len(batch_texts)) == total:
-            logger.info(f"  - Đã sinh Text vectors: {min(i + batch_size, total)}/{total}")
+        curr_count = min(i + len(batch_texts), total)
+        if curr_count % 1000 == 0 or curr_count == total:
+            prog_msg = f"  - [Text] Đã sinh vectors: {curr_count}/{total} ({curr_count/total*100:.1f}%)"
+            logger.info(prog_msg)
+            print(prog_msg, flush=True)
 
     if not all_vecs:
         return np.zeros((0, text_model.dim), dtype=np.float32)
@@ -172,15 +181,19 @@ def run_embedding_generation(
     """
     Entry point chính: Sinh toàn bộ vectors và lưu ra file .npy và scene_ids.txt.
     """
-    meta_p = Path(metadata_path)
-    if not meta_p.exists():
-        raise FileNotFoundError(f"File metadata không tồn tại: {metadata_path}")
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        force=True,
+    )
 
     out_p = Path(output_dir)
     out_p.mkdir(parents=True, exist_ok=True)
 
     meta_df = pd.read_parquet(meta_p)
-    logger.info(f"Đã nạp {len(meta_df)} scenes từ {metadata_path}")
+    msg = f"🚀 Đã nạp {len(meta_df)} scenes từ {metadata_path}"
+    logger.info(msg)
+    print(msg, flush=True)
 
     # Đọc OCR text
     ocr_p = Path(ocr_path)
