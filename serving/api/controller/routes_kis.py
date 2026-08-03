@@ -101,8 +101,46 @@ async def search_kis(
                 )
             )
 
+        # Rerank candidates nếu có
+        candidates = pipeline_res.candidates
+        if candidates:
+            try:
+                from serving.api.service.reranker.skeletons.text_branch import viranker
+                from serving.api.service.reranker.skeletons.crossmodal_branch import jina_reranker_m0
+                from serving.api.service.reranker.skeletons import fusion_score
+
+                query_for_rerank = pipeline_res.enhanced_query or request.query
+                text_scores = viranker.score(query_for_rerank, candidates)
+                crossmodal_scores = jina_reranker_m0.score(query_for_rerank, candidates)
+                candidates = fusion_score.fuse(text_scores, crossmodal_scores, candidates)
+            except Exception as re_err:
+                logger.warning(f"Reranking error (falling back to RRF scores): {re_err}")
+
+        # Merge logic: Ghép các frame người dùng đã tự chọn bằng tay lên đầu
+        final_results = []
+        seen = set()
+
+        # 1. Thêm các lựa chọn thủ công của người dùng trước
+        for choice in request.user_choices:
+            key = (choice.video_id, choice.frame_id)
+            seen.add(key)
+            final_results.append(
+                CandidateResult(
+                    video_id=choice.video_id,
+                    frame_id=choice.frame_id,
+                    scene_id=choice.scene_id,
+                    timestamp_start=choice.timestamp_start,
+                    timestamp_end=choice.timestamp_end,
+                    timestamp_mid=choice.timestamp_mid,
+                    keyframe_path=choice.keyframe_path,
+                    ocr_text=choice.ocr_text,
+                    asr_text=choice.asr_text,
+                    score=1.0,  # Điểm số tối đa cho frame tự chọn
+                )
+            )
+
         # 2. Bổ sung nốt kết quả từ AI (Reranking) cho đủ top_k và tránh trùng lặp
-        for cand in pipeline_res.candidates:
+        for cand in candidates:
             if len(final_results) >= request.top_k:
                 break
             key = (cand.video_id, cand.frame_id)
@@ -151,6 +189,20 @@ async def search_vqa(
             asr_model=asr_model,
         )
 
+        candidates = pipeline_res.candidates
+        if candidates:
+            try:
+                from serving.api.service.reranker.skeletons.text_branch import viranker
+                from serving.api.service.reranker.skeletons.crossmodal_branch import jina_reranker_m0
+                from serving.api.service.reranker.skeletons import fusion_score
+
+                query_for_rerank = pipeline_res.enhanced_query or request.query
+                text_scores = viranker.score(query_for_rerank, candidates)
+                crossmodal_scores = jina_reranker_m0.score(query_for_rerank, candidates)
+                candidates = fusion_score.fuse(text_scores, crossmodal_scores, candidates)
+            except Exception as re_err:
+                logger.warning(f"Reranking error in VQA: {re_err}")
+
         # Merge logic cho VQA: Ghép lựa chọn thủ công (kèm đáp án) lên đầu
         final_results = []
         answers = []
@@ -177,7 +229,7 @@ async def search_vqa(
             answers.append(choice.answer)
 
         # 2. Bổ sung nốt kết quả từ AI, gán câu trả lời trống ""
-        for cand in pipeline_res.candidates:
+        for cand in candidates:
             if len(final_results) >= request.top_k:
                 break
             key = (cand.video_id, cand.frame_id)
@@ -214,8 +266,9 @@ async def search_trake(
 
     Luồng xử lý:
         1. Gọi retrieval_pipeline.run() với TaskType.TRAKE
-        2. Sắp xếp candidates theo thứ tự thời gian (temporal_aligner)
-        3. Build TRAKEResponse với danh sách chuỗi sự kiện
+        2. Tách sub-events và retrieve candidates cho từng sub-event
+        3. Căn chỉnh thứ tự thời gian bằng thuật toán DANTE DP (temporal_aligner)
+        4. Build TRAKEResponse với danh sách chuỗi sự kiện
     """
     try:
         pipeline_res = await retrieval_pipeline.run(
@@ -228,26 +281,52 @@ async def search_trake(
             asr_model=asr_model,
         )
 
-        # Mock gom nhóm candidates thành các chuỗi sự kiện cho Tuần 1.
-        # Ở Tuần 3, Member_2 sẽ cài đặt thuật toán temporal_aligner thực tế.
+        sub_events = pipeline_res.sub_events
         results = []
-        candidates = pipeline_res.candidates
-        n = request.num_events
-        # Tạm thời gom nhóm tuần tự n phần tử làm 1 event chain
-        for i in range(0, len(candidates) - n + 1, n):
-            group = candidates[i : i + n]
-            results.append(group)
 
-        # Nếu không đủ candidates, đưa toàn bộ candidates thành 1 chain nếu có ít nhất 1
-        if not results and candidates:
-            results.append(candidates[:n])
+        if sub_events and len(sub_events) >= 2:
+            # 1. Retrieve candidates cho từng sub-event
+            from serving.api.service.retrieval import text_query
+            from serving.api.service import temporal_aligner
+
+            event_candidates_list = []
+            for ev_text in sub_events:
+                ev_input = text_query.TextQueryInput(
+                    raw_query=ev_text,
+                    task_type=TaskType.KIS,
+                    top_k=request.top_k,
+                )
+                ev_output = await text_query.process(
+                    query_input=ev_input,
+                    qdrant_client=qdrant_client,
+                    text_embedder=text_embedder,
+                    image_embedder=image_embedder,
+                )
+                event_candidates_list.append(ev_output.candidates)
+
+            # 2. Thuật toán DANTE Alignment
+            aligned_chains = temporal_aligner.align(
+                event_candidates=event_candidates_list,
+                max_results=request.top_k,
+            )
+            results = aligned_chains
+        
+        if not results:
+            # Fallback nếu không tách được sub-events hoặc DANTE không tìm thấy chuỗi
+            candidates = pipeline_res.candidates
+            n = request.num_events
+            for i in range(0, len(candidates) - n + 1, n):
+                results.append(candidates[i : i + n])
+            if not results and candidates:
+                results.append(candidates[:n])
 
         return TRAKEResponse(
             results=results,
             total=len(results),
             query_text=pipeline_res.enhanced_query or request.query,
-            num_events=n,
+            num_events=request.num_events,
         )
     except Exception as e:
         logger.error(f"Error in search_trake: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+

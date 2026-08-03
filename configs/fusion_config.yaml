@@ -52,3 +52,14 @@ query_routing:
     enabled_branches: [image_dense]
   multimodal_query:   # tương lai: query gồm cả ảnh và text
     enabled_branches: [image_dense, ocr_dense, asr_dense, ocr_sparse, asr_sparse]
+
+# --- Reranker Fusion Configuration -------------------------------------------
+reranker:
+  alpha: 0.6              # Trọng số text branch (0.6 = 60% text, 40% cross-modal)
+  normalize_scores: true   # Min-max normalize trước khi fusion
+
+# --- DANTE Temporal Aligner Configuration ------------------------------------
+temporal_aligner:
+  lambda_penalty: 0.001    # λ penalty cho khoảng cách thời gian giữa events
+  max_results: 100         # Số lượng chuỗi event tối đa trả về
+

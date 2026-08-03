@@ -19,6 +19,32 @@ logger = logging.getLogger(__name__)
 # Cache cho model và tokenizer
 _MODEL_CACHE: dict[str, Any] = {}
 
+def _get_model():
+    """Lazy load model và tokenizer BAAI/bge-reranker-v2-m3 vào cache."""
+    if "model" not in _MODEL_CACHE or "tokenizer" not in _MODEL_CACHE:
+        try:
+            import torch
+            from transformers import AutoModelForSequenceClassification, AutoTokenizer
+
+            model_name = "BAAI/bge-reranker-v2-m3"
+            logger.info(f"Loading ViRanker text model: {model_name}...")
+            tokenizer = AutoTokenizer.from_pretrained(model_name)
+            model = AutoModelForSequenceClassification.from_pretrained(model_name)
+            
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            model.to(device)
+            model.eval()
+
+            _MODEL_CACHE["tokenizer"] = tokenizer
+            _MODEL_CACHE["model"] = model
+            _MODEL_CACHE["device"] = device
+        except Exception as e:
+            logger.warning(f"Không thể load model ViRanker ({e}). Dùng CPU mock score.")
+            _MODEL_CACHE["mock"] = True
+
+    return _MODEL_CACHE
+
+
 def score(query: str, candidates: list[CandidateResult]) -> list[float]:
     """
     Tính điểm tương đồng ngữ nghĩa giữa query và ocr_text + asr_text của từng candidate.
@@ -30,4 +56,50 @@ def score(query: str, candidates: list[CandidateResult]) -> list[float]:
     Returns:
         List[float]: Danh sách điểm số (cùng kích thước và thứ tự với candidates).
     """
-    raise NotImplementedError
+    if not candidates:
+        return []
+
+    cache = _get_model()
+
+    if cache.get("mock", False):
+        # Fallback cho unit test / offline: Trả về score gốc từ candidate
+        return [float(c.score) for c in candidates]
+
+    try:
+        import torch
+        model = cache["model"]
+        tokenizer = cache["tokenizer"]
+        device = cache["device"]
+
+        # Chuẩn bị cặp (query, doc_text)
+        pairs = []
+        for c in candidates:
+            doc = (c.ocr_text + " " + c.asr_text).strip()
+            if not doc:
+                doc = "[EMPTY]"
+            pairs.append([query, doc])
+
+        inputs = tokenizer(
+            pairs,
+            padding=True,
+            truncation=True,
+            max_length=512,
+            return_tensors="pt",
+        ).to(device)
+
+        with torch.no_grad():
+            outputs = model(**inputs)
+            logits = outputs.logits
+            if logits.dim() > 1:
+                logits = logits.squeeze(-1)
+            scores_tensor = torch.sigmoid(logits)
+            scores = scores_tensor.cpu().numpy().tolist()
+
+        if isinstance(scores, float):
+            scores = [scores]
+
+        return [float(s) for s in scores]
+    except Exception as e:
+        logger.error(f"Lỗi trong quá trình rerank ViRanker: {e}. Fallback score gốc.")
+        return [float(c.score) for c in candidates]
+

@@ -24,10 +24,10 @@
 - `[x]` **TASK-SRV-05**: Tách chuỗi sự kiện TRAKE multi-event (`serving/service/retrieval/skeletons/text_query.py`) — *Đã xong*
 
 ### 3. Module Reranker & Temporal Alignment (Xếp hạng & Căn chỉnh)
-- `[ ]` **TASK-RNK-01**: ViRanker Text Reranker (`serving/service/reranker/skeletons/text_branch/viranker.py`)
-- `[ ]` **TASK-RNK-02**: Jina Reranker M0 Cross-modal (`serving/service/reranker/skeletons/crossmodal_branch/jina_reranker_m0.py`)
-- `[ ]` **TASK-RNK-03**: Fusion Score Integration (`serving/service/reranker/skeletons/fusion_score.py`)
-- `[ ]` **TASK-RNK-04**: Temporal Aligner cho sự kiện TRAKE (`serving/service/temporal_aligner.py`)
+- `[x]` **TASK-RNK-01**: ViRanker Text Reranker (`serving/service/reranker/skeletons/text_branch/viranker.py`) — *Đã xong*
+- `[x]` **TASK-RNK-02**: Jina Reranker M0 Cross-modal (`serving/service/reranker/skeletons/crossmodal_branch/jina_reranker_m0.py`) — *Đã xong*
+- `[x]` **TASK-RNK-03**: Fusion Score Integration (`serving/service/reranker/skeletons/fusion_score.py`) — *Đã xong*
+- `[x]` **TASK-RNK-04**: Temporal Aligner cho sự kiện TRAKE (`serving/service/temporal_aligner.py`) — *Đã xong*
 
 ### 4. Module Evaluation & Benchmark (Đo đạc Đánh giá)
 - `[ ]` **TASK-EVL-01**: Tính chỉ số r_score cho KIS/VQA/TRAKE (`eval/skeletons/metrics/r_score.py`)
@@ -35,13 +35,13 @@
 - `[ ]` **TASK-EVL-03**: Script chạy Benchmark thử nghiệm (`eval/skeletons/run_benchmark.py`)
 
 ### 5. Module Unit Testing (Kiểm thử Tự động)
+- `[x]` **TASK-TST-01**: Test Fusion Score Reranking (`tests/test_fusion_score.py`) — *Đã xong*
+- `[x]` **TASK-TST-02**: Test Query Parsing & TRAKE Alignment (`tests/test_query_parsing.py`) — *Đã xong*
 - `[x]` **TASK-TST-03**: Test API Request/Response Schemas (`tests/test_api_schema.py`) — *Đã xong*
 - `[x]` **TASK-TST-04**: Test Verification & Merge Shards (`tests/test_merge_shards.py`) — *Đã xong*
+- `[x]` **TASK-TST-05**: Test Evaluation R-Score Metrics (`tests/test_r_score.py`)
 - `[x]` **TASK-TST-06**: Test Keyframe Extraction & Checkpoint (`tests/test_keyframe_extraction.py`) — *Đã xong*
 - `[x]` **TASK-TST-07**: Test Export Shard Dataset & Validation (`tests/test_export_shard_dataset.py`) — *Đã xong*
-- `[ ]` **TASK-TST-01**: Test Fusion Score Reranking (`tests/test_fusion_score.py`)
-- `[ ]` **TASK-TST-02**: Test Query Parsing & TRAKE Alignment (`tests/test_query_parsing.py`)
-- `[ ]` **TASK-TST-05**: Test Evaluation R-Score Metrics (`tests/test_r_score.py`)
 
 ---
 
