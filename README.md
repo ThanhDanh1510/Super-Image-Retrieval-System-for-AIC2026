@@ -68,7 +68,7 @@ uv venv .venv
 uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
 
 # 4. Cài toàn bộ dependencies còn lại & package dự án
-uv pip install transformers accelerate sentencepiece qdrant-client fastapi "uvicorn[standard]" pydantic pydantic-settings python-multipart pyyaml python-dotenv pandas numpy pillow scipy deep-translator -e .
+uv pip install transformers accelerate sentencepiece qdrant-client fastapi "uvicorn[standard]" pydantic pydantic-settings python-multipart pyyaml python-dotenv pandas numpy pillow scipy pyarrow fastparquet deep-translator -e .
 ```
 
 #### 🍎 Dành cho macOS / Apple Silicon (M1/M2/M3/M4):
@@ -80,7 +80,7 @@ uv venv .venv
 source .venv/bin/activate
 
 # 3. Cài đặt toàn bộ dependencies (Tự động tối ưu PyTorch cho Apple Metal MPS GPU)
-uv pip install torch torchvision torchaudio transformers accelerate sentencepiece qdrant-client fastapi "uvicorn[standard]" pydantic pydantic-settings python-multipart pyyaml python-dotenv pandas numpy pillow scipy deep-translator -e .
+uv pip install torch torchvision torchaudio transformers accelerate sentencepiece qdrant-client fastapi "uvicorn[standard]" pydantic pydantic-settings python-multipart pyyaml python-dotenv pandas numpy pillow scipy pyarrow fastparquet deep-translator -e .
 ```
 
 > 💡 **Mẹo:** Mỗi lần mở terminal mới để làm việc với dự án, hãy kích hoạt `.venv`:
@@ -202,15 +202,20 @@ Super-Image-Retrieval-System-for-AIC2026/
 
 ---
 
-## 🤖 AI Models Trong Baseline
+## 🤖 AI Models Trong Baseline & Cơ Chế Tự Động Tải
 
-| Model | Dùng cho | Dim | Gia tốc phần cứng |
-|---|---|---|---|
-| **BEiT-large + CLIP ViT-L/14** | Image embedding | 1024 | CUDA (Nvidia) / MPS (Apple Silicon) / CPU |
-| **gte-Qwen2-1.5B-instruct** | Text embedding (OCR + ASR) | 1536 | CUDA (Nvidia) / MPS (Apple Silicon) / CPU |
-| **PaddleOCR v6** | Nhận dạng chữ viết | — | CUDA / CPU |
-| **PhoWhisper-medium** | Nhận dạng giọng nói tiếng Việt | — | CUDA / MPS / CPU |
-| **TransNetV2** | Phân đoạn video shot boundary | — | CUDA / CPU |
+Các mô hình AI trong hệ thống sẽ **TỰ ĐỘNG TẢI VỀ** từ Hugging Face Hub ở lần đầu tiên khởi chạy Backend API Server (`python -m uvicorn ...`). Bạn **KHÔNG cần tải thủ công** từng mô hình về máy.
+
+| Model | Dùng cho | Repositories trên HuggingFace | Dim | Gia tốc phần cứng |
+|---|---|---|---|---|
+| **CLIP ViT-L/14** | Image embedding | `openai/clip-vit-large-patch14` | 1024 | CUDA / MPS / CPU |
+| **gte-Qwen2-1.5B-instruct** | Text embedding (OCR + ASR) | `Alibaba-NLP/gte-Qwen2-1.5B-instruct` | 1536 | CUDA / MPS / CPU |
+| **PhoWhisper-medium** | Voice ASR (Nhận dạng giọng nói) | `vinai/phowhisper-medium` | — | CUDA / MPS / CPU |
+| **BEiT-large** | Visual feature extractor (Indexing) | `microsoft/beit-large-patch16-224` | 1024 | CUDA / MPS / CPU |
+
+> 💡 **Cấu Hình Tùy Chọn (Biến Môi Trường HuggingFace):**
+> - **Tăng tốc độ tải mô hình:** Đăng ký HuggingFace Token miễn phí và thiết lập `$env:HF_TOKEN="your_token_here"` để tránh bị giới hạn băng thông (Rate limit).
+> - **Đổi ổ đĩa lưu cache mô hình:** Mặc định cache nằm ở `C:\Users\<user>\.cache\huggingface`. Nếu muốn đổi sang ổ D, set biến môi trường: `$env:HF_HOME="D:\data\hf_cache"`.
 
 ---
 
