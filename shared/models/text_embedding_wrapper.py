@@ -37,6 +37,11 @@ class TextEmbeddingWrapper:
 
         try:
             import torch
+            import transformers
+            from transformers import AutoConfig, AutoModel, AutoTokenizer
+
+            device_str = "cuda" if (device == "cuda" and torch.cuda.is_available()) else "cpu"
+            logger.info(f"Loading Text Embedding model '{self.MODEL_ID}' on {device_str} (transformers v{transformers.__version__})...")
             dtype = torch.float16 if device_str == "cuda" else torch.float32
 
             try:
