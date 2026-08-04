@@ -29,9 +29,9 @@ def _get_model():
             model_name = "BAAI/bge-reranker-v2-m3"
             logger.info(f"Loading ViRanker text model: {model_name}...")
             tokenizer = AutoTokenizer.from_pretrained(model_name)
-            model = AutoModelForSequenceClassification.from_pretrained(model_name)
-            
             device = "cuda" if torch.cuda.is_available() else "cpu"
+            dtype = torch.float16 if device == "cuda" else torch.float32
+            model = AutoModelForSequenceClassification.from_pretrained(model_name, torch_dtype=dtype)
             model.to(device)
             model.eval()
 

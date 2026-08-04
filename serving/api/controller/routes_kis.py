@@ -78,40 +78,20 @@ async def search_kis(
             asr_model=asr_model,
         )
 
-        # Merge logic: Ghép các frame người dùng đã tự chọn bằng tay lên đầu
-        final_results = []
-        seen = set()
-
-        # 1. Thêm các lựa chọn thủ công của người dùng trước
-        for choice in request.user_choices:
-            key = (choice.video_id, choice.frame_id)
-            seen.add(key)
-            final_results.append(
-                CandidateResult(
-                    video_id=choice.video_id,
-                    frame_id=choice.frame_id,
-                    scene_id=choice.scene_id,
-                    timestamp_start=choice.timestamp_start,
-                    timestamp_end=choice.timestamp_end,
-                    timestamp_mid=choice.timestamp_mid,
-                    keyframe_path=choice.keyframe_path,
-                    ocr_text=choice.ocr_text,
-                    asr_text=choice.asr_text,
-                    score=1.0,  # Điểm số tối đa cho frame tự chọn
-                )
-            )
-
         # Rerank candidates nếu có
         candidates = pipeline_res.candidates
         if candidates:
             try:
+                import asyncio
                 from serving.api.service.reranker.skeletons.text_branch import viranker
                 from serving.api.service.reranker.skeletons.crossmodal_branch import jina_reranker_m0
                 from serving.api.service.reranker.skeletons import fusion_score
 
                 query_for_rerank = pipeline_res.enhanced_query or request.query
-                text_scores = viranker.score(query_for_rerank, candidates)
-                crossmodal_scores = jina_reranker_m0.score(query_for_rerank, candidates)
+                text_scores, crossmodal_scores = await asyncio.gather(
+                    asyncio.to_thread(viranker.score, query_for_rerank, candidates),
+                    asyncio.to_thread(jina_reranker_m0.score, query_for_rerank, candidates),
+                )
                 candidates = fusion_score.fuse(text_scores, crossmodal_scores, candidates)
             except Exception as re_err:
                 logger.warning(f"Reranking error (falling back to RRF scores): {re_err}")
@@ -192,13 +172,16 @@ async def search_vqa(
         candidates = pipeline_res.candidates
         if candidates:
             try:
+                import asyncio
                 from serving.api.service.reranker.skeletons.text_branch import viranker
                 from serving.api.service.reranker.skeletons.crossmodal_branch import jina_reranker_m0
                 from serving.api.service.reranker.skeletons import fusion_score
 
                 query_for_rerank = pipeline_res.enhanced_query or request.query
-                text_scores = viranker.score(query_for_rerank, candidates)
-                crossmodal_scores = jina_reranker_m0.score(query_for_rerank, candidates)
+                text_scores, crossmodal_scores = await asyncio.gather(
+                    asyncio.to_thread(viranker.score, query_for_rerank, candidates),
+                    asyncio.to_thread(jina_reranker_m0.score, query_for_rerank, candidates),
+                )
                 candidates = fusion_score.fuse(text_scores, crossmodal_scores, candidates)
             except Exception as re_err:
                 logger.warning(f"Reranking error in VQA: {re_err}")
@@ -285,24 +268,26 @@ async def search_trake(
         results = []
 
         if sub_events and len(sub_events) >= 2:
-            # 1. Retrieve candidates cho từng sub-event
+            # 1. Retrieve candidates song song cho từng sub-event
+            import asyncio
             from serving.api.service.retrieval import text_query
             from serving.api.service import temporal_aligner
 
-            event_candidates_list = []
-            for ev_text in sub_events:
-                ev_input = text_query.TextQueryInput(
-                    raw_query=ev_text,
-                    task_type=TaskType.KIS,
-                    top_k=request.top_k,
-                )
-                ev_output = await text_query.process(
-                    query_input=ev_input,
+            tasks = [
+                text_query.process(
+                    query_input=text_query.TextQueryInput(
+                        raw_query=ev_text,
+                        task_type=TaskType.KIS,
+                        top_k=request.top_k,
+                    ),
                     qdrant_client=qdrant_client,
                     text_embedder=text_embedder,
                     image_embedder=image_embedder,
                 )
-                event_candidates_list.append(ev_output.candidates)
+                for ev_text in sub_events
+            ]
+            outputs = await asyncio.gather(*tasks)
+            event_candidates_list = [out.candidates for out in outputs]
 
             # 2. Thuật toán DANTE Alignment
             aligned_chains = temporal_aligner.align(

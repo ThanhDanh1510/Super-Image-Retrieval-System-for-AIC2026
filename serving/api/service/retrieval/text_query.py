@@ -76,6 +76,8 @@ async def process(
     """
     Xử lý toàn bộ luồng text query: song ngữ EN/VI → encode (text + image vectors) → retrieve.
     """
+    import asyncio
+
     en_query, vi_query = await _enhance_query(query_input.raw_query)
 
     sub_events: list[str] | None = None
@@ -83,12 +85,12 @@ async def process(
         sub_events = _split_events(en_query)
         logger.info(f"TRAKE: tách được {len(sub_events)} sub-events từ query.")
 
-    # Dùng vi_query cho Qwen2 (OCR + ASR) vì database text trong video là Tiếng Việt
-    ocr_vector, asr_vector = await _encode_text(vi_query, text_embedder)
+    # Run Qwen2 (OCR/ASR text) and CLIP (Image Dense) embeddings in parallel on threads
+    (ocr_vector, asr_vector), image_vector = await asyncio.gather(
+        _encode_text(vi_query, text_embedder),
+        _encode_text_to_image_vector(en_query, image_embedder),
+    )
     ocr_sparse, asr_sparse = _encode_sparse(vi_query)
-    
-    # Dùng en_query cho CLIP (Image Dense) vì CLIP text encoder được huấn luyện tốt nhất bằng Tiếng Anh
-    image_vector = await _encode_text_to_image_vector(en_query, image_embedder)
 
     candidates = await qdrant_repo.search_by_text_vectors(
         client=qdrant_client,
@@ -121,6 +123,7 @@ async def _enhance_query(raw_query: str) -> tuple[str, str]:
     Returns:
         Tuple (en_query, vi_query).
     """
+    import asyncio
     from shared.utils.text_normalizer import sanitize_search_query
     cleaned_query = sanitize_search_query(raw_query)
     if not cleaned_query:
@@ -136,7 +139,8 @@ async def _enhance_query(raw_query: str) -> tuple[str, str]:
         # Query gốc là tiếng Việt -> Dịch sang Tiếng Anh cho CLIP
         try:
             from deep_translator import GoogleTranslator
-            translated_en = GoogleTranslator(source="auto", target="en").translate(cleaned_query)
+            translator = GoogleTranslator(source="auto", target="en")
+            translated_en = await asyncio.to_thread(translator.translate, cleaned_query)
             if translated_en and translated_en.strip():
                 en_query = sanitize_search_query(translated_en)
         except Exception as e:
@@ -145,7 +149,8 @@ async def _enhance_query(raw_query: str) -> tuple[str, str]:
         # Query gốc là tiếng Anh -> Dịch sang Tiếng Việt cho Qwen2/OCR/ASR
         try:
             from deep_translator import GoogleTranslator
-            translated_vi = GoogleTranslator(source="auto", target="vi").translate(cleaned_query)
+            translator = GoogleTranslator(source="auto", target="vi")
+            translated_vi = await asyncio.to_thread(translator.translate, cleaned_query)
             if translated_vi and translated_vi.strip():
                 vi_query = sanitize_search_query(translated_vi)
         except Exception as e:
@@ -211,7 +216,8 @@ async def _encode_text(
     Returns:
         Tuple (ocr_vector, asr_vector) list[float], len=1536.
     """
-    vec = embedder.encode(text)
+    import asyncio
+    vec = await asyncio.to_thread(embedder.encode, text)
     if hasattr(vec, "tolist"):
         vec_list = vec.tolist()
     else:
@@ -242,7 +248,8 @@ async def _encode_text_to_image_vector(
     Returns:
         list[float], len=1024, L2-normalized.
     """
-    vec = embedder.encode_text(text)
+    import asyncio
+    vec = await asyncio.to_thread(embedder.encode_text, text)
     if hasattr(vec, "tolist"):
         return vec.tolist()
     return list(vec)
