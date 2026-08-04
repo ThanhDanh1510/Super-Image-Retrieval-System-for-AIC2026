@@ -27,11 +27,11 @@ def _get_model():
     if "model" not in _MODEL_CACHE:
         try:
             import torch
-            from transformers import AutoModelForSequenceClassification
+            from transformers import AutoModel
 
             model_name = "jinaai/jina-reranker-m0"
             logger.info(f"Loading Jina Reranker M0 model: {model_name}...")
-            model = AutoModelForSequenceClassification.from_pretrained(
+            model = AutoModel.from_pretrained(
                 model_name,
                 torch_dtype="auto",
                 trust_remote_code=True,
@@ -96,9 +96,29 @@ def score(
 
         # Batch compute score bằng Jina Reranker model
         if hasattr(model, "compute_score"):
-            raw_scores = model.compute_score(sentence_pairs)
-            if isinstance(raw_scores, list):
-                return [float(s) for s in raw_scores]
+            # Filter out candidates with missing images if needed, or pass PIL images with doc_type="image"
+            valid_pairs = []
+            for pair in sentence_pairs:
+                if pair[1] is not None:
+                    valid_pairs.append(pair)
+
+            if not valid_pairs:
+                return [float(c.score) for c in candidates]
+
+            raw_scores = model.compute_score(valid_pairs, doc_type="image")
+            if isinstance(raw_scores, (list, float, int)):
+                if not isinstance(raw_scores, list):
+                    raw_scores = [raw_scores]
+                
+                # Map scores back to candidate list
+                score_iter = iter(raw_scores)
+                final_scores = []
+                for pair, cand in zip(sentence_pairs, candidates):
+                    if pair[1] is not None:
+                        final_scores.append(float(next(score_iter)))
+                    else:
+                        final_scores.append(float(cand.score))
+                return final_scores
 
         # Standard HuggingFace fallback nếu không có compute_score
         return [float(c.score) for c in candidates]
