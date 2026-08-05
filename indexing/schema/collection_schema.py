@@ -32,7 +32,6 @@ from qdrant_client.models import (
     VectorParams,
     SparseVectorParams,
     Distance,
-    CollectionStatus,
     OptimizersConfigDiff,
     HnswConfigDiff,
     ScalarQuantization,
@@ -43,11 +42,6 @@ from qdrant_client.models import (
 from shared.schemas.named_vector_spec import (
     ALL_VECTOR_SPECS,
     VectorSpec,
-    IMAGE_DENSE,
-    OCR_DENSE,
-    ASR_DENSE,
-    OCR_SPARSE,
-    ASR_SPARSE,
 )
 
 logger = logging.getLogger(__name__)
@@ -201,17 +195,6 @@ def create_production_alias(
     if alias in existing_aliases:
         logger.info(f"Alias '{alias}' đã trỏ tới '{collection_name}'. Skip.")
         return
-
-    # Xóa alias cũ nếu đang trỏ tới collection khác, rồi tạo mới
-    try:
-        client.update_collection_aliases(
-            change_aliases_operations=[
-                # Xóa alias cũ (nếu có) — ignore error nếu alias chưa tồn tại
-                # Tạo alias mới trỏ về collection hiện tại
-            ]
-        )
-    except Exception:
-        pass  # Alias chưa tồn tại, bỏ qua
 
     client.update_collection_aliases(
         change_aliases_operations=[

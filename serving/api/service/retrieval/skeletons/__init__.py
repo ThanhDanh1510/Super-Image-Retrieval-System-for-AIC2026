@@ -1,1 +1,0 @@
-# retrieval skeletons package

@@ -6,7 +6,7 @@ Service xử lý query dạng ảnh (Image-to-Image / Instance Search).
 LUỒNG XỬ LÝ:
   1. Decode ảnh từ base64 hoặc bytes
   2. Preprocess ảnh (resize, normalize)
-  3. Encode ảnh → image_vector (BEiT-large + CLIP)
+  3. Encode ảnh → image_vector (CLIP ViT-L/14)
   4. Gọi qdrant_repo.search_by_image_vector() → danh sách CandidateResult thô
 
 IMPORT RULES:

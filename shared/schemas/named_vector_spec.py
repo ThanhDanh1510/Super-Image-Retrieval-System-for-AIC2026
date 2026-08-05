@@ -131,9 +131,9 @@ class KeyframePayload:
     # Đường dẫn ảnh
     keyframe_path: str
     """
-    Đường dẫn tương đối của file ảnh keyframe từ thư mục data/unified_keyframes/.
-    Format: '{video_id}/{scene_id}.jpg'
-    Ví dụ: 'L01_V001/L01_V001_S003.jpg'
+    Đường dẫn tương đối của file ảnh keyframe từ thư mục data/.
+    Format: 'unified/{video_id}-{scene_id}-{frame_id}.webp'
+    Ví dụ: 'unified/L01_V001-L01_V001_S003-171.webp'
     """
 
     # Text content

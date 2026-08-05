@@ -61,7 +61,7 @@ class CandidateResult(BaseModel):
 
     keyframe_path: str = Field(
         ...,
-        description="Đường dẫn tương đối tới ảnh keyframe từ data/unified_keyframes/",
+        description="Đường dẫn tương đối tới ảnh keyframe từ data/ (tên mới unified/{video_id}-{scene_id}-{frame_id}.webp)",
     )
 
     ocr_text: str = Field(default="", description="Text OCR nhận dạng được từ keyframe")
