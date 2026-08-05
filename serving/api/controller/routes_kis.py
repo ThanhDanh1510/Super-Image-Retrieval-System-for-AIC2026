@@ -35,12 +35,14 @@ from serving.api.schema.retrieval import (
     TRAKEResponse,
 )
 from serving.api.service.retrieval import retrieval_pipeline
+from serving.api.service.reranker import rerank_service
 from serving.api.core.dependencies import (
     get_qdrant_client,
     get_text_embedder,
     get_image_embedder,
     get_asr_model,
 )
+from serving.api.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -78,23 +80,15 @@ async def search_kis(
             asr_model=asr_model,
         )
 
-        # Rerank candidates nếu có
+        # Rerank candidates nếu có (qua seam rerank_service — controller không import reranker trực tiếp)
         candidates = pipeline_res.candidates
         if candidates:
-            try:
-                import asyncio
-                from serving.api.service.reranker.skeletons.text_branch import viranker
-                from serving.api.service.reranker.skeletons.crossmodal_branch import jina_reranker_m0
-                from serving.api.service.reranker.skeletons import fusion_score
-
-                query_for_rerank = pipeline_res.enhanced_query or request.query
-                text_scores, crossmodal_scores = await asyncio.gather(
-                    asyncio.to_thread(viranker.score, query_for_rerank, candidates),
-                    asyncio.to_thread(jina_reranker_m0.score, query_for_rerank, candidates),
-                )
-                candidates = fusion_score.fuse(text_scores, crossmodal_scores, candidates)
-            except Exception as re_err:
-                logger.warning(f"Reranking error (falling back to RRF scores): {re_err}")
+            candidates = await rerank_service.rerank(
+                query=request.query,
+                candidates=candidates,
+                enhanced_query=pipeline_res.enhanced_query,
+                keyframes_root_dir=get_settings().DATA_DIR,
+            )
 
         # Merge logic: Ghép các frame người dùng đã tự chọn bằng tay lên đầu
         final_results = []
@@ -171,20 +165,12 @@ async def search_vqa(
 
         candidates = pipeline_res.candidates
         if candidates:
-            try:
-                import asyncio
-                from serving.api.service.reranker.skeletons.text_branch import viranker
-                from serving.api.service.reranker.skeletons.crossmodal_branch import jina_reranker_m0
-                from serving.api.service.reranker.skeletons import fusion_score
-
-                query_for_rerank = pipeline_res.enhanced_query or request.query
-                text_scores, crossmodal_scores = await asyncio.gather(
-                    asyncio.to_thread(viranker.score, query_for_rerank, candidates),
-                    asyncio.to_thread(jina_reranker_m0.score, query_for_rerank, candidates),
-                )
-                candidates = fusion_score.fuse(text_scores, crossmodal_scores, candidates)
-            except Exception as re_err:
-                logger.warning(f"Reranking error in VQA: {re_err}")
+            candidates = await rerank_service.rerank(
+                query=request.query,
+                candidates=candidates,
+                enhanced_query=pipeline_res.enhanced_query,
+                keyframes_root_dir=get_settings().DATA_DIR,
+            )
 
         # Merge logic cho VQA: Ghép lựa chọn thủ công (kèm đáp án) lên đầu
         final_results = []
@@ -272,6 +258,16 @@ async def search_trake(
             import asyncio
             from serving.api.service.retrieval import text_query
             from serving.api.service import temporal_aligner
+            from serving.api.repo import qdrant_repo
+
+            # Ensure sub_events count matches request.num_events if specified
+            n_events = request.num_events
+            if len(sub_events) > n_events:
+                sub_events = sub_events[:n_events]
+            elif len(sub_events) < n_events:
+                # Pad sub_events using the full query if sub_events is shorter
+                while len(sub_events) < n_events:
+                    sub_events.append(request.query)
 
             tasks = [
                 text_query.process(
@@ -289,6 +285,27 @@ async def search_trake(
             outputs = await asyncio.gather(*tasks)
             event_candidates_list = [out.candidates for out in outputs]
 
+            # Collect top candidate video_ids across all sub-events
+            candidate_vids: set[str] = set()
+            for cand_list in event_candidates_list:
+                for c in cand_list[:20]:
+                    candidate_vids.add(c.video_id)
+
+            # Enrich keyframes for top candidate videos by querying Qdrant for full video timelines
+            enrich_tasks = [
+                qdrant_repo.get_keyframes_by_video_id(qdrant_client, v_id)
+                for v_id in list(candidate_vids)[:15]
+            ]
+            enriched_results = await asyncio.gather(*enrich_tasks)
+            for video_kfs in enriched_results:
+                if video_kfs:
+                    # Distribute enriched keyframes across event_candidates_list
+                    for ev_cands in event_candidates_list:
+                        existing_frames = {c.frame_id for c in ev_cands}
+                        for kf in video_kfs:
+                            if kf.frame_id not in existing_frames:
+                                ev_cands.append(kf)
+
             # 2. Thuật toán DANTE Alignment
             aligned_chains = temporal_aligner.align(
                 event_candidates=event_candidates_list,
@@ -297,17 +314,63 @@ async def search_trake(
             results = aligned_chains
         
         if not results:
-            # Fallback nếu không tách được sub-events hoặc DANTE không tìm thấy chuỗi
+            # Fallback: Group candidates strictly by video_id
             candidates = pipeline_res.candidates
             n = request.num_events
-            for i in range(0, len(candidates) - n + 1, n):
-                results.append(candidates[i : i + n])
-            if not results and candidates:
-                results.append(candidates[:n])
+            by_video: dict[str, list[CandidateResult]] = {}
+            for cand in candidates:
+                by_video.setdefault(cand.video_id, []).append(cand)
+
+            for v_id, v_cands in by_video.items():
+                # Deduplicate by timestamp_mid
+                seen_ts: set[float] = set()
+                uniq_v_cands = []
+                for c in sorted(v_cands, key=lambda x: (x.timestamp_mid, x.frame_id)):
+                    t_rounded = round(c.timestamp_mid, 2)
+                    if t_rounded not in seen_ts:
+                        seen_ts.add(t_rounded)
+                        uniq_v_cands.append(c)
+
+                if len(uniq_v_cands) >= n:
+                    for i in range(0, len(uniq_v_cands) - n + 1):
+                        results.append(uniq_v_cands[i : i + n])
+
+        # 3. Final Guard: Enforce strict single video, exact length, and STRICTLY INCREASING timestamps (no exact duplicates)
+        final_chains: list[list[CandidateResult]] = []
+        n_req = request.num_events
+        seen_chain_signatures: set[tuple[str, ...]] = set()
+
+        for chain in results:
+            if not chain or len(chain) != n_req:
+                continue
+
+            target_vid = chain[0].video_id
+            # 1. Single video check
+            if not all(c.video_id == target_vid for c in chain):
+                continue
+
+            # 2. Sort chronologically
+            sorted_chain = sorted(chain, key=lambda c: (c.timestamp_mid, c.frame_id))
+
+            # 3. Strictly increasing timestamp check (timestamps MUST NOT be exact duplicates)
+            has_duplicates = False
+            for i in range(len(sorted_chain) - 1):
+                if round(sorted_chain[i].timestamp_mid, 2) >= round(sorted_chain[i + 1].timestamp_mid, 2):
+                    has_duplicates = True
+                    break
+
+            if not has_duplicates:
+                sig = tuple(f"{c.video_id}_{c.frame_id}" for c in sorted_chain)
+                if sig not in seen_chain_signatures:
+                    seen_chain_signatures.add(sig)
+                    final_chains.append(sorted_chain)
+
+        if len(final_chains) > request.top_k:
+            final_chains = final_chains[:request.top_k]
 
         return TRAKEResponse(
-            results=results,
-            total=len(results),
+            results=final_chains,
+            total=len(final_chains),
             query_text=pipeline_res.enhanced_query or request.query,
             num_events=request.num_events,
         )

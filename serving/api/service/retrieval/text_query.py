@@ -20,6 +20,7 @@ SKELETON: Implement các hàm có `raise NotImplementedError`.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 
 from serving.api.schema.retrieval import CandidateResult, TaskType
@@ -113,9 +114,105 @@ async def process(
 # Internal Helper Functions (implementations)
 # =============================================================================
 
+# deep_translator.GoogleTranslator đôi khi trả về trang lỗi HTML của Google
+# (VD: "Error 500 (Server Error)!!1500.That's an error...") dưới dạng một
+# "bản dịch" thành công — KHÔNG raise exception. Những marker này dùng để
+# phát hiện và loại bỏ output rác, tránh rò rỉ vào enhanced_query/query_text.
+_GOOGLE_ERROR_MARKERS = (
+    "error 500", "error 400", "error 502", "error 503",
+    "that's an error", "that’s an error",
+    "please try again later", "that's all we know", "that’s all we know",
+    "the server encountered an error",
+)
+
+# deep_translator không set timeout cho requests.get() -> có thể treo vô hạn.
+# Giới hạn cứng mỗi lần dịch để request API không bao giờ bị chặn lâu.
+TRANSLATE_TIMEOUT_S = 15.0
+
+
+def _is_valid_translation(text: str, source: str) -> bool:
+    """
+    Kiểm tra output của GoogleTranslator có phải bản dịch hợp lệ hay không.
+
+    deep_translator đôi khi trả về trang lỗi HTML của Google như một "bản dịch"
+    thành công (không raise). Hàm này lọc các chuỗi không phải dịch thật:
+      - Rỗng / chỉ khoảng trắng.
+      - Chứa marker lỗi của Google ("Error 500", "That's an error", ...).
+      - Rò rỉ HTML (`<tag>`) hoặc ký tự không in được.
+      - Không chứa từ tiếng Latinh thật (error page thường chỉ là symbol noise).
+
+    Args:
+        text: Output mà translator trả về.
+        source: Query nguồn gốc (dùng để chặn output quá lệch).
+
+    Returns:
+        True nếu text được coi là bản dịch hợp lệ, ngược lại False.
+    """
+    if not text or not text.strip():
+        return False
+
+    lowered = text.lower()
+    if any(marker in lowered for marker in _GOOGLE_ERROR_MARKERS):
+        return False
+    # Rò rỉ HTML markup -> đánh dấu là lỗi
+    if "<" in text and ">" in text:
+        return False
+    # Phải chứa ít nhất một từ Latinh (2 ký tự chữ trở lên)
+    if not re.search(r"[A-Za-zÀ-ỹ]{2,}", text):
+        return False
+    # Bản dịch hợp lệ hiếm khi dài hơn một bội số hợp lý so với nguồn
+    if len(text) > 5 * max(len(source), 1) + 500:
+        return False
+    return True
+
+
+async def _translate(query: str, target: str) -> str | None:
+    """
+    Dịch `query` sang ngôn ngữ `target` bằng deep_translator.GoogleTranslator,
+    kèm validate + retry để trang lỗi HTML của Google không bao giờ lọt vào kết quả.
+
+    Args:
+        query: Query nguồn (tiếng Việt hoặc tiếng Anh).
+        target: Mã ngôn ngữ đích ("en" / "vi").
+
+    Returns:
+        Bản dịch hợp lệ, hoặc None nếu mọi lần dịch đều lỗi/không hợp lệ.
+    """
+    import asyncio
+    from deep_translator import GoogleTranslator
+
+    attempts = 0
+    while attempts < 2:
+        attempts += 1
+        try:
+            translator = GoogleTranslator(source="auto", target=target)
+            # deep_translator KHÔNG set timeout cho requests.get() -> có thể treo vô hạn.
+            # Bọc thêm timeout cứng để không bao giờ chặn request > TRANSLATE_TIMEOUT_S.
+            out = await asyncio.wait_for(
+                asyncio.to_thread(translator.translate, query),
+                timeout=TRANSLATE_TIMEOUT_S,
+            )
+        except Exception as e:
+            logger.warning(f"GoogleTranslator (attempt {attempts} -> {target}) failed: {e}")
+            out = None
+
+        if out and _is_valid_translation(out, query):
+            return out
+
+        logger.warning(
+            f"GoogleTranslator (attempt {attempts} -> {target}) returned non-translation "
+            f"output (len={len(out or '')}): {str(out)[:120]!r}. Falling back."
+        )
+
+    return None
+
+
 async def _enhance_query(raw_query: str) -> tuple[str, str]:
     """
     Dịch và chuẩn hóa query song ngữ (English cho CLIP, Tiếng Việt cho Qwen2/OCR/ASR).
+
+    Nếu dịch thất bại hoặc Google trả về trang lỗi, hàm KHÔNG ghi đè query gốc:
+    giữ nguyên query đã làm sạch để không làm hỏng enhanced_query/query_text.
 
     Args:
         raw_query: Query gốc từ người dùng.
@@ -123,38 +220,32 @@ async def _enhance_query(raw_query: str) -> tuple[str, str]:
     Returns:
         Tuple (en_query, vi_query).
     """
-    import asyncio
     from shared.utils.text_normalizer import sanitize_search_query
     cleaned_query = sanitize_search_query(raw_query)
     if not cleaned_query:
         return "", ""
 
-    import re
-    has_vietnamese_accent = bool(re.search(r'[àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđ]', cleaned_query, re.IGNORECASE))
-    
+    has_vietnamese_accent = bool(
+        re.search(
+            r'[àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđ]',
+            cleaned_query,
+            re.IGNORECASE,
+        )
+    )
+
     en_query = cleaned_query
     vi_query = cleaned_query
 
     if has_vietnamese_accent:
-        # Query gốc là tiếng Việt -> Dịch sang Tiếng Anh cho CLIP
-        try:
-            from deep_translator import GoogleTranslator
-            translator = GoogleTranslator(source="auto", target="en")
-            translated_en = await asyncio.to_thread(translator.translate, cleaned_query)
-            if translated_en and translated_en.strip():
-                en_query = sanitize_search_query(translated_en)
-        except Exception as e:
-            logger.warning(f"Không thể dịch VI->EN qua deep_translator ({e})")
+        # Query gốc là tiếng Việt -> Dịch sang tiếng Anh cho CLIP
+        translated_en = await _translate(cleaned_query, "en")
+        if translated_en and _is_valid_translation(translated_en, cleaned_query):
+            en_query = sanitize_search_query(translated_en)
     else:
-        # Query gốc là tiếng Anh -> Dịch sang Tiếng Việt cho Qwen2/OCR/ASR
-        try:
-            from deep_translator import GoogleTranslator
-            translator = GoogleTranslator(source="auto", target="vi")
-            translated_vi = await asyncio.to_thread(translator.translate, cleaned_query)
-            if translated_vi and translated_vi.strip():
-                vi_query = sanitize_search_query(translated_vi)
-        except Exception as e:
-            logger.warning(f"Không thể dịch EN->VI qua deep_translator ({e})")
+        # Query gốc là tiếng Anh -> Dịch sang tiếng Việt cho Qwen2/OCR/ASR
+        translated_vi = await _translate(cleaned_query, "vi")
+        if translated_vi and _is_valid_translation(translated_vi, cleaned_query):
+            vi_query = sanitize_search_query(translated_vi)
 
     logger.info(f"Enhanced queries — EN (CLIP): '{en_query}' | VI (Qwen2): '{vi_query}'")
     return en_query, vi_query

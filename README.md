@@ -1,159 +1,104 @@
 # 🎯 Super Image Retrieval System for AIC2026
 
-Hệ thống truy vấn video keyframe real-time phục vụ cuộc thi **AI Challenge HCMC 2026**.
+Hệ thống truy vấn keyframe video real-time phục vụ cuộc thi **AI Challenge HCMC 2026**.
 
 Hỗ trợ 4 dạng task chính:
-- **KIS** (Known-Item Search) — tìm keyframe theo mô tả text/voice
-- **VQA** (Visual Question Answering) — tìm cảnh và trả lời câu hỏi
-- **TRAKE** (Temporal Retrieval) — tìm chuỗi sự kiện theo thứ tự thời gian
-- **Image Search** — tìm keyframe tương đồng với ảnh upload
+
+| Task | Mô tả |
+|---|---|
+| **KIS** (Known-Item Search) | Tìm keyframe theo mô tả text hoặc giọng nói |
+| **VQA** (Visual Question Answering) | Tìm cảnh liên quan rồi trả lời câu hỏi |
+| **TRAKE** (Temporal Retrieval) | Tìm chuỗi sự kiện theo đúng thứ tự thời gian |
+| **Image Search** | Tìm keyframe tương đồng với ảnh upload |
 
 ---
 
 ## 🏗️ Kiến trúc tổng quan
 
 ```
-ingestion (Kaggle GPU) → aggregation (Local) → indexing (Qdrant DB) → serving (FastAPI Backend)
+ingestion (Kaggle GPU) → aggregation (Local) → indexing (Qdrant DB) → serving (FastAPI)
 ```
 
-| Tầng | Mô tả | Môi trường chạy |
+| Tầng | Mô tả | Môi trường |
 |---|---|---|
-| `ingestion/` | Trích xuất keyframes, OCR, ASR và sinh Vector Embeddings | Kaggle GPU (T4/P100) |
+| `ingestion/` | Trích xuất keyframes, OCR (PaddleOCR v6), ASR (PhoWhisper), sinh vector embeddings | Kaggle GPU |
 | `aggregation/` | Gộp output của tất cả member thành 1 unified dataset | Máy Local |
-| `indexing/` | Nạp dữ liệu & 3 bộ Vector Embeddings vào Qdrant DB | Docker / Local Qdrant |
-| `serving/` | FastAPI REST API real-time cho web client / UI thi đấu | Server local / Staging |
+| `indexing/` | Định nghĩa schema, nạp unified dataset + embeddings vào Qdrant | Docker / Qdrant local |
+| `serving/` | FastAPI REST API real-time với lazy model loading + RRF fusion + rerank | Server local / Staging |
+
+Dữ liệu được biểu diễn bằng **5 named vectors** trong Qdrant (xem `shared/schemas/named_vector_spec.py`):
+
+| Vector | Loại | Dim | Nguồn |
+|---|---|---|---|
+| `image_dense` | dense | 1024 | CLIP ViT-L/14 |
+| `ocr_dense` | dense | 1536 | gte-Qwen2-1.5B (text OCR) |
+| `asr_dense` | dense | 1536 | gte-Qwen2-1.5B (transcript ASR) |
+| `ocr_sparse` | sparse | — | BM42 keyword (OCR) |
+| `asr_sparse` | sparse | — | BM42 keyword (ASR) |
+
+Kết quả retrieval tổng hợp bằng **Weighted RRF** (`k=60`, prefetch=200, trọng số đọc từ `configs/fusion_config.yaml`), sau đó rerank bằng `BAAI/bge-reranker-v2-m3` (text) và `jinaai/jina-reranker-m0` (crossmodal).
 
 ---
 
-## 🚀 Hướng Dẫn Cài Đặt & Khởi Chạy Dự Án Siêu Tốc Bằng `uv` (Cho Windows & Apple macOS)
+## 🚀 Cài Đặt & Khởi Chạy
 
-Dự án chuẩn hóa sử dụng **`uv`** (Trình quản lý gói Python bằng Rust siêu nhanh, gấp 10-100 lần pip thông thường) giúp cài đặt môi trường chỉ trong vài giây.
+Dự án dùng **`uv`** để quản lý 1 môi trường ảo `.venv` duy nhất cho cả serving + ingestion + dev.
 
----
+### 1. Cài `uv`
 
-### 1. Clone Repository (Dùng chung cho Win & Mac)
+- **Windows:** `pip install uv`
+- **macOS:** `brew install uv`
 
-```bash
-git clone https://github.com/ThanhDanh1510/Super-Image-Retrieval-System-for-AIC2026.git
-cd Super-Image-Retrieval-System-for-AIC2026
-```
+### 2. Tạo môi trường & cài dependencies
 
----
-
-### 2. Cài Đặt `uv`
-
-#### 🪟 Trên Windows:
 ```powershell
-pip install uv
-```
-
-#### 🍎 Trên macOS (Apple Silicon M1/M2/M3/M4 & Intel Macs):
-```bash
-brew install uv
-```
-
----
-
-### 3. Khởi Tạo Môi Trường Ảo `.venv` & Cài Đặt PyTorch GPU Acceleration
-
-#### 🪟 Dành cho Windows (Có Card GPU NVIDIA RTX / GTX):
-```powershell
-# 1. Tạo môi trường ảo .venv
 uv venv .venv
 
-# 2. Kích hoạt môi trường ảo (PowerShell)
+# Windows (kích hoạt)
 .\.venv\Scripts\Activate.ps1
+# macOS
+# source .venv/bin/activate
 
-# 3. Cài đặt PyTorch CUDA GPU cho NVIDIA Card (RTX 5060 Ti, 40xx, 30xx...)
+# Windows có card NVIDIA (PyTorch CUDA) — xem thêm: https://pytorch.org/get-started/locally/
 uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
 
-# 4. Cài toàn bộ dependencies còn lại & package dự án
-uv pip install transformers accelerate sentencepiece qdrant-client fastapi "uvicorn[standard]" pydantic pydantic-settings python-multipart pyyaml python-dotenv pandas numpy pillow scipy pyarrow fastparquet deep-translator -e .
+# Cài TOÀN BỘ dependencies (serving + ingestion + dev)
+uv pip install -e ".[all]"
 ```
 
-#### 🍎 Dành cho macOS / Apple Silicon (M1/M2/M3/M4):
-```bash
-# 1. Tạo môi trường ảo .venv
-uv venv .venv
+### 3. Khởi động Qdrant (Docker)
 
-# 2. Kích hoạt môi trường ảo
-source .venv/bin/activate
-
-# 3. Cài đặt toàn bộ dependencies (Tự động tối ưu PyTorch cho Apple Metal MPS GPU)
-uv pip install torch torchvision torchaudio transformers accelerate sentencepiece qdrant-client fastapi "uvicorn[standard]" pydantic pydantic-settings python-multipart pyyaml python-dotenv pandas numpy pillow scipy pyarrow fastparquet deep-translator -e .
-```
-
-> 💡 **Mẹo:** Mỗi lần mở terminal mới để làm việc với dự án, hãy kích hoạt `.venv`:
-> - Windows: `.\.venv\Scripts\Activate.ps1`
-> - macOS: `source .venv/bin/activate`
-
----
-
-### 4. Khởi Động Qdrant Vector Database (Bằng Docker)
-
-Yêu cầu máy tính đã bật **Docker Desktop**.
-
-#### 🪟 Trên Windows (PowerShell / CMD):
 ```powershell
-# 🔹 Nếu là LẦN ĐẦU TIÊN chạy:
+# Lần đầu:
 docker run -d -p 6333:6333 -p 6334:6334 -v ${PWD}/data/qdrant_storage:/qdrant/storage --name qdrant_aic2026 qdrant/qdrant
-
-# 🔹 Nếu container ĐÃ TỒN TẠI (những lần sau):
+# Lần sau:
 docker start qdrant_aic2026
-```
-
-#### 🍎 Trên macOS (zsh / bash):
-```bash
-# 🔹 Nếu là LẦN ĐẦU TIÊN chạy:
-docker run -d -p 6333:6333 -p 6334:6334 -v $(pwd)/data/qdrant_storage:/qdrant/storage --name qdrant_aic2026 qdrant/qdrant
-
-# 🔹 Nếu container ĐÃ TỒN TẠI (những lần sau):
-docker start qdrant_aic2026
-```
-
-#### 🧪 Kiểm Tra Qdrant Server:
-```bash
+# Kiểm tra:
 curl.exe http://localhost:6333/
 ```
 
-> 💡 *Nếu chưa bật Docker Desktop, hệ thống indexing sẽ tự động fallback sang **Local Embedded Qdrant** tại `./data/qdrant_db/` mà vẫn chạy mượt 100%!*
+> 💡 Nếu không có Docker, indexing/serving tự động fallback sang **Local Embedded Qdrant** tại `./data/qdrant_db/`.
 
----
-
-### 📂 Cấu Trúc Dữ Liệu Yêu Cầu Trong Thư Mục `data/`
-
-Để hệ thống hoạt động chính xác (tổng hợp dữ liệu thô, indexing, và serving API), bạn cần tổ chức cấu trúc thư mục `data/` ở thư mục gốc của dự án theo định dạng dưới đây:
+### 4. Cấu trúc dữ liệu `data/`
 
 ```text
 data/
-├── image/                     # Chứa các folder ảnh keyframe thô phân theo Group
-│   ├── L21/L21/V001/*.webp    # Cấu trúc thư mục ảnh: data/image/{Group}/{Group}/{Video}/*.webp
-│   ├── L22/L22/V001/*.webp
-│   └── ...
-├── OCR/                       # Chứa các file JSON kết quả trích xuất chữ viết OCR
-│   ├── L21/L21_V001.json      # File JSON OCR của từng video (L21_V001.json, L21_V002.json...)
-│   ├── L22/L22_V001.json
-│   └── ...
-├── ASR/                       # Chứa file kết quả nhận dạng giọng nói ASR
-│   └── asr.json               # File JSON chứa toàn bộ audio transcripts kèm start/end frame
-├── unified/                   # [QUAN TRỌNG] Dataset hợp nhất và Vector Embeddings (cho Indexing)
-│   ├── scene_metadata.parquet # Metadata toàn bộ keyframes (scene_id, video_id, timestamp_mid...)
-│   ├── ocr_text.parquet       # Text OCR của từng scene (scene_id, video_id, ocr_text)
-│   ├── asr_text.parquet       # Transcript ASR của từng scene (scene_id, video_id, asr_text)
-│   ├── image_vectors.npy      # Dense vectors của keyframes (CLIP, kích thước: N x 1024)
-│   ├── ocr_vectors.npy        # Dense vectors của OCR text (gte-Qwen2, kích thước: N x 1536)
-│   ├── asr_vectors.npy        # Dense vectors của ASR transcript (gte-Qwen2, kích thước: N x 1536)
-│   └── scene_ids.txt          # File text chứa danh sách scene_id tương ứng với index của các file .npy
-└── unified_raw/               # Thư mục đầu ra được tạo tự động sau khi chạy aggregation
+├── image/                     # Keyframes thô: data/image/{Group}/{Group}/{Video}/*.webp
+├── OCR/                       # JSON OCR từng video: L21/L21_V001.json ...
+├── ASR/                       # File JSON transcript: asr.json
+├── unified/                   # [Quan trọng] Dataset hợp nhất + embeddings cho indexing
+│   ├── scene_metadata.parquet # Metadata keyframes (scene_id, video_id, timestamps...)
+│   ├── ocr_text.parquet       # Text OCR theo scene
+│   ├── asr_text.parquet       # Transcript ASR theo scene
+│   ├── image_vectors.npy      # N x 1024 (CLIP)
+│   ├── ocr_vectors.npy        # N x 1536 (gte-Qwen2)
+│   ├── asr_vectors.npy        # N x 1536 (gte-Qwen2)
+│   ├── scene_ids.txt          # Danh sách scene_id ứng với index các file .npy
+│   └── keyframes/             # Ảnh keyframe đã map vào unified (L01_V001-L01_V001_S000.webp)
+└── unified_raw/               # Đầu ra của aggregation (gộp từ các shard)
 ```
 
----
-
-### 5. Nạp Dữ Liệu Unified Dataset Vào Qdrant DB (Indexing)
-
-Tải file `unified_dataset.zip` hoặc tập dữ liệu unified hoàn chỉnh (gồm 3 file `.parquet`, 3 file `.npy` và file `scene_ids.txt`) và đặt vào thư mục `./data/unified/` theo đúng cấu trúc thư mục ở trên.
-
-Chạy lệnh nạp toàn bộ 108,413 scenes vào Vector DB:
+### 5. Nạp dữ liệu vào Qdrant (Indexing)
 
 ```bash
 python -m indexing.run_index \
@@ -162,60 +107,117 @@ python -m indexing.run_index \
     --create-collection
 ```
 
-Gắn alias `production` cho collection:
+Gắn alias `production` (serving luôn truy vấn qua alias này để swap collection không downtime):
+
 ```bash
 python -m indexing.collection_alias --action set --collection collection_v1
 ```
 
----
-
-### 6. Khởi Chạy FastAPI Server (Serving API)
+### 6. Chạy FastAPI server
 
 ```bash
-# Chạy API Server ở Dev mode (tự động reload khi sửa code)
+# Cách 1 (khuyên dùng): in-process, tải model lazy (tiết kiệm RAM)
+python start_api.py
+
+# Cách 2: dev mode
 python -m uvicorn serving.api.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-* 🌐 **Swagger UI Interactive API Docs:** `http://localhost:8000/docs`
-* 🩺 **Healthcheck API:** `http://localhost:8000/health`
+- 🌐 **Swagger UI:** `http://localhost:8000/docs`
+- 🩺 **Healthcheck:** `http://localhost:8000/health`
 
 ---
 
-## 📁 Cấu Trúc Thư Mục Dự Án
+## 🔌 API Endpoints
+
+| Endpoint | Body | Mô tả |
+|---|---|---|
+| `POST /api/v1/kis` | `{query, input_type: "text"\|"voice", top_k (1-200), user_choices?}` | Known-Item Search |
+| `POST /api/v1/vqa` | `{query, question, input_type, top_k, user_choices?}` | Visual QA — trả `results` + `answers` |
+| `POST /api/v1/trake` | `{query, num_events (2-10), input_type, top_k}` | Temporal Retrieval — trả `list[list[CandidateResult]]` |
+| `POST /api/v1/similar-image` | multipart `file` + query param `top_k` | Image Search |
+
+Tất cả response trả về `CandidateResult`: `video_id`, `scene_id`, `frame_id`, `timestamp_start/mid/end`, `keyframe_path`, `ocr_text`, `asr_text`, `score`.
+
+---
+
+## 🧠 AI Models
+
+Model **tự động tải về** từ HuggingFace Hub lần đầu được dùng (lazy-load).
+
+| Model | Dùng cho | HuggingFace / Nguồn |
+|---|---|---|
+| **TransNetV2** | Shot detection (tách scene) | `transnetv2-pytorch-weights.pth` |
+| **PaddleOCR v6** | OCR tiếng Việt | `paddleocr` |
+| **PhoWhisper-medium** | ASR tiếng Việt | `vinai/phowhisper-medium` |
+| **CLIP ViT-L/14** | Image embedding (dim 1024) | `openai/clip-vit-large-patch14` |
+| **gte-Qwen2-1.5B-instruct** | Text embedding OCR + ASR (dim 1536) | `Alibaba-NLP/gte-Qwen2-1.5B-instruct` |
+| **bge-reranker-v2-m3** | Text rerank (KIS/VQA/TRAKE) | `BAAI/bge-reranker-v2-m3` |
+| **jina-reranker-m0** | Crossmodal rerank (Image Search) | `jinaai/jina-reranker-m0` |
+
+Tất cả phiên bản model được khai báo tập trung tại `configs/model_versions.yaml` — **single source of truth** cho cả ingestion lẫn serving. Ingestion và serving phải khớp version, nếu lệch thì vector không tương thích.
+
+---
+
+## 📁 Cấu trúc dự án
 
 ```
 Super-Image-Retrieval-System-for-AIC2026/
-├── .venv/                # Môi trường ảo Python được quản lý bởi uv (đã .gitignore)
-├── configs/              # Cấu hình tập trung (model versions, shard, fusion)
-├── ingestion/            # Pipeline trích xuất keyframes & sinh vector trên Kaggle
-│   └── notebooks/        # Notebooks Kaggle (04_kaggle_generate_all_embeddings.ipynb)
-├── aggregation/          # Gộp output từ các member thành unified raw
-├── indexing/             # Quản lý schema, alias và index data vào Qdrant
-├── serving/              # FastAPI API (controller → service → repo)
-├── shared/               # Code dùng chung (schemas, model wrappers, text normalizer)
-├── data/                 # Thư mục lưu dữ liệu local (unified, qdrant_storage, hf_cache,...)
-├── scratch/              # Thư mục script chạy thử nghiệm/debug
-├── AGENT_CONTEXT.md      # Quy chuẩn và ngữ cảnh dự án cho AI Assistant
-├── pyproject.toml
-└── README.md
+├── configs/              # Cấu hình tập trung (model_versions, fusion_config, shard_assignment)
+├── ingestion/            # Pipeline Kaggle GPU (skeletons + notebooks)
+│   ├── skeletons/        # 01a keyframe, 01b text, 01c embeddings, 02 export shard
+│   └── notebooks/        # Kaggle notebooks (gitignored)
+├── aggregation/          # pull_shards, verify_shards, merge, publish_unified, map_keyframes...
+├── indexing/             # index_data, schema, upsert, collection_alias
+├── serving/              # FastAPI: controller → service → repo (+ temporal_aligner, reranker)
+├── shared/               # Dùng chung: named_vector_spec, config_loader, model wrappers
+├── eval/                 # Offline benchmark + metrics (r_score, final_score)
+├── tests/                # Unit tests + integration tests (cần server :8000)
+├── start_api.py          # Entry point run server in-process
+├── Makefile              # Các lệnh thường dùng (make serve / lint / test / ...)
+├── pyproject.toml        # Dependencies (uv/pip install -e ".[all]")
+└── .env.example          # Template biến môi trường (prefix AIC_)
 ```
 
 ---
 
-## 🤖 AI Models Trong Baseline & Cơ Chế Tự Động Tải
+## ⚙️ Biến môi trường (`.env`)
 
-Các mô hình AI trong hệ thống sẽ **TỰ ĐỘNG TẢI VỀ** từ Hugging Face Hub ở lần đầu tiên khởi chạy Backend API Server (`python -m uvicorn ...`). Bạn **KHÔNG cần tải thủ công** từng mô hình về máy.
+Copy `.env.example` → `.env`. Một số biến quan trọng:
 
-| Model | Dùng cho | Repositories trên HuggingFace | Dim | Gia tốc phần cứng |
-|---|---|---|---|---|
-| **CLIP ViT-L/14** | Image embedding | `openai/clip-vit-large-patch14` | 1024 | CUDA / MPS / CPU |
-| **gte-Qwen2-1.5B-instruct** | Text embedding (OCR + ASR) | `Alibaba-NLP/gte-Qwen2-1.5B-instruct` | 1536 | CUDA / MPS / CPU |
-| **PhoWhisper-medium** | Voice ASR (Nhận dạng giọng nói) | `vinai/phowhisper-medium` | — | CUDA / MPS / CPU |
-| **BEiT-large** | Visual feature extractor (Indexing) | `microsoft/beit-large-patch16-224` | 1024 | CUDA / MPS / CPU |
-
-> 💡 **Cấu Hình Tùy Chọn (Biến Môi Trường HuggingFace):**
-> - **Tăng tốc độ tải mô hình:** Đăng ký HuggingFace Token miễn phí và thiết lập `$env:HF_TOKEN="your_token_here"` để tránh bị giới hạn băng thông (Rate limit).
-> - **Đổi ổ đĩa lưu cache mô hình:** Mặc định cache nằm ở `C:\Users\<user>\.cache\huggingface`. Nếu muốn đổi sang ổ D, set biến môi trường: `$env:HF_HOME="D:\data\hf_cache"`.
+| Biến | Mặc định | Ý nghĩa |
+|---|---|---|
+| `AIC_QDRANT_URL` | `http://localhost:6333` | URL Qdrant server |
+| `AIC_QDRANT_COLLECTION_ALIAS` | `production` | Alias collection dùng để query |
+| `AIC_DEVICE` | `cuda` | `cuda` / `mps` / `cpu` |
+| `AIC_PRELOAD_MODELS` | `false` | `true` = warmup toàn bộ model lúc startup |
+| `AIC_MODEL_UNLOAD_TTL_S` | `0` | Unload model sau N giây idle (`0` = không unload) |
+| `AIC_CORS_ORIGINS` | `["*"]` | Allowed origins |
+| `AIC_DATA_DIR` / `AIC_KEYFRAME_DIR` | `data/` | Mount dữ liệu nếu chạy server riêng |
 
 ---
 
+## 🧪 Test & Code Quality
+
+```bash
+# Unit tests (không cần server):
+pytest tests/test_retrieval_serving.py tests/test_query_parsing.py tests/test_rerank_service.py
+
+# Integration tests (cần Qdrant + server đang chạy tại :8000):
+pytest tests/test_search_services.py tests/test_edge_cases.py
+
+# Lint & typecheck:
+ruff check .          # hoặc: make lint
+mypy shared/ serving/ indexing/ --ignore-missing-imports   # hoặc: make typecheck
+```
+
+> 💡 Toàn bộ lệnh hay dùng có sẵn trong `Makefile` (`make help` để xem danh sách).
+
+---
+
+## 🔄 Pipeline dữ liệu đầy đủ (tổng hợp)
+
+1. **Ingestion (Kaggle GPU):** mỗi member chạy notebook trên shard của mình → xuất `keyframes/`, `scene_metadata.parquet`, `ocr_text.parquet`, `asr_text.parquet`, embeddings `.npy` → upload lên Kaggle Dataset (`shard_assignment.yaml`).
+2. **Aggregation (Local):** `pull_shards --owner`, `verify_shards`, `merge_datasets`, `map_keyframes_to_unified` → `data/unified/`.
+3. **Indexing (Qdrant):** `run_index` nạp toàn bộ + sparse (BM42) vectors → gắn alias `production`.
+4. **Serving (FastAPI):** query text/voice/ảnh → embeddings → Weighted RRF trên 5 branches → rerank → trả kết quả. TRAKE thêm bước temporal alignment (DANTE) để đảm bảo thứ tự thời gian.

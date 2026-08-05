@@ -31,15 +31,19 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-ingestion = [
-    # Kaggle-only, không dùng trong serving
+# MỘT extra duy nhất — cài tất cả trong 1 virtual environment duy nhất
+# (serving + ingestion + dev tools + Kaggle CLI). Không tách venv riêng.
+all = [
+    # --- Ingestion (Kaggle) ---
     "paddlepaddle-gpu",
     "paddleocr>=2.8.0",
     "faster-whisper>=1.0.0",
     "underthesea>=6.8.0",
-]
 
-dev = [
+    # --- Kaggle CLI (aggregation: pull/publish shards) ---
+    "kaggle>=1.6.0",
+
+    # --- Dev tools ---
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
     "httpx>=0.27.0",             # TestClient cho FastAPI

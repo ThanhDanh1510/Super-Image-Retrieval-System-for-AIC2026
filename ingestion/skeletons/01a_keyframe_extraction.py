@@ -25,13 +25,12 @@ CONSTRAINTS (KHÔNG ĐƯỢC THAY ĐỔI):
     - Output path: /kaggle/working/shard_output/ (KHÔNG hardcode path khác)
     - Checkpoint granularity: scene-level (không phải video-level)
     - scene_id format bắt buộc: {video_id}_S{scene_idx:03d}  (3 chữ số)
-    - Point ID: sha256(video_id + "_" + scene_id)[:16] — xem shared/schemas/named_vector_spec.py
+    - Point ID: UUIDv5 theo shared/schemas/named_vector_spec.py (make_point_id)
 """
 
 from __future__ import annotations
 
 import argparse
-import hashlib
 import logging
 import os
 import sys
@@ -65,15 +64,6 @@ from ingestion.skeletons.checkpoint_manifest import CheckpointManifest
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
-
-
-# =============================================================================
-# Helper: Point ID
-# =============================================================================
-
-def make_point_id(video_id: str, scene_id: str) -> str:
-    key = f"{video_id}_{scene_id}"
-    return hashlib.sha256(key.encode()).hexdigest()[:16]
 
 
 # =============================================================================
