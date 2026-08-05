@@ -1,18 +1,27 @@
 """
 serving/api/core/dependencies.py
-=================================
+==================================
 FastAPI Dependency Injection functions.
 
 Cung cấp các model singleton và database client từ app.state
 cho các routes endpoints.
+
+Model được lazy-load qua ModelRegistry (chỉ tải khi endpoint đầu tiên
+cần đến) để tiết kiệm RAM — xem serving/api/core/models.py.
 """
 
 from __future__ import annotations
 
 from fastapi import Request
 from qdrant_client import AsyncQdrantClient
-from shared.models.text_embedding_wrapper import TextEmbeddingWrapper
-from shared.models.image_embedding_wrapper import ImageEmbeddingWrapper
+from serving.api.core.models import ModelRegistry
+
+ModelT = object
+
+
+def _get_registry(request: Request) -> ModelRegistry:
+    """Lấy ModelRegistry singleton từ app.state."""
+    return request.app.state.model_registry
 
 
 def get_qdrant_client(request: Request) -> AsyncQdrantClient:
@@ -20,16 +29,16 @@ def get_qdrant_client(request: Request) -> AsyncQdrantClient:
     return request.app.state.qdrant_client
 
 
-def get_text_embedder(request: Request) -> TextEmbeddingWrapper:
-    """Inject TextEmbeddingWrapper singleton."""
-    return request.app.state.text_embedder
+async def get_text_embedder(request: Request) -> ModelT:
+    """Inject TextEmbeddingWrapper — lazy-load lần đầu dùng."""
+    return await _get_registry(request).aget_text_embedder()
 
 
-def get_image_embedder(request: Request) -> ImageEmbeddingWrapper:
-    """Inject ImageEmbeddingWrapper singleton."""
-    return request.app.state.image_embedder
+async def get_image_embedder(request: Request) -> ModelT:
+    """Inject ImageEmbeddingWrapper — lazy-load lần đầu dùng."""
+    return await _get_registry(request).aget_image_embedder()
 
 
-def get_asr_model(request: Request):
-    """Inject ASR model singleton (PhoWhisper)."""
-    return request.app.state.asr_model
+async def get_asr_model(request: Request) -> ModelT:
+    """Inject ASR model (PhoWhisper) — lazy-load lần đầu dùng."""
+    return await _get_registry(request).aget_asr_model()

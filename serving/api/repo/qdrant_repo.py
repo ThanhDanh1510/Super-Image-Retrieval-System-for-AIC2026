@@ -15,18 +15,16 @@ Members KHÔNG cần sửa file này trừ khi có yêu cầu từ Leader.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+import socket
+from urllib.parse import urlparse
 
 from qdrant_client import QdrantClient, AsyncQdrantClient
 from qdrant_client.models import (
-    NamedVector,
-    NamedSparseVector,
     SparseVector,
-    Prefetch,
-    FusionQuery,
-    Fusion,
     Filter,
-    QueryResponse,
+    FieldCondition,
+    MatchText,
+    MatchValue,
 )
 
 from serving.api.schema.retrieval import CandidateResult
@@ -36,12 +34,7 @@ from shared.schemas.named_vector_spec import (
     ASR_DENSE,
     OCR_SPARSE,
     ASR_SPARSE,
-    VECTOR_SPEC_MAP,
-    KeyframePayload,
 )
-
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger(__name__)
 
@@ -56,34 +49,49 @@ _DEFAULT_PREFETCH_LIMIT = 200
 # Client Initialization
 # =============================================================================
 
+def _is_server_reachable(url: str) -> bool:
+    try:
+        parsed = urlparse(url)
+        host = parsed.hostname or "localhost"
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        with socket.create_connection((host, port), timeout=0.5):
+            return True
+    except Exception:
+        return False
+
+
 def get_qdrant_client(url: str, api_key: str | None = None) -> QdrantClient:
     """
-    Tạo synchronous Qdrant client.
-
-    Args:
-        url: URL của Qdrant server, ví dụ 'http://localhost:6333'
-        api_key: API key nếu Qdrant được bảo vệ bằng authentication
-
-    Returns:
-        QdrantClient instance đã kết nối.
+    Tạo synchronous Qdrant client. Tự động fallback sang Local Embedded Qdrant nếu remote server không kết nối được.
     """
-    logger.info(f"Connecting to Qdrant (sync): {url}")
-    return QdrantClient(url=url, api_key=api_key, timeout=30)
+    if (url.startswith("http://") or url.startswith("https://")) and _is_server_reachable(url):
+        logger.info(f"Connected to Qdrant server (sync): {url}")
+        return QdrantClient(url=url, api_key=api_key, timeout=30)
+    
+    if url.startswith("http://") or url.startswith("https://"):
+        logger.warning(
+            f"Không thể kết nối Qdrant server tại {url}. "
+            f"Tự động chuyển sang Local Embedded Qdrant tại './data/qdrant_db'..."
+        )
+        return QdrantClient(path="./data/qdrant_db")
+    return QdrantClient(path=url)
 
 
 def get_async_qdrant_client(url: str, api_key: str | None = None) -> AsyncQdrantClient:
     """
-    Tạo async Qdrant client cho FastAPI async endpoints.
-
-    Args:
-        url: URL của Qdrant server
-        api_key: API key nếu cần
-
-    Returns:
-        AsyncQdrantClient instance.
+    Tạo async Qdrant client cho FastAPI async endpoints. Tự động fallback sang Local Embedded Qdrant nếu remote server không kết nối được.
     """
-    logger.info(f"Connecting to Qdrant (async): {url}")
-    return AsyncQdrantClient(url=url, api_key=api_key, timeout=30)
+    if (url.startswith("http://") or url.startswith("https://")) and _is_server_reachable(url):
+        logger.info(f"Connected to Qdrant server (async): {url}")
+        return AsyncQdrantClient(url=url, api_key=api_key, timeout=30)
+
+    if url.startswith("http://") or url.startswith("https://"):
+        logger.warning(
+            f"Không thể kết nối Qdrant server tại {url}. "
+            f"Tự động chuyển sang Local Embedded Qdrant tại './data/qdrant_db'..."
+        )
+        return AsyncQdrantClient(path="./data/qdrant_db")
+    return AsyncQdrantClient(path=url)
 
 
 # =============================================================================
@@ -148,7 +156,9 @@ async def search_by_text_vectors(
         )
         task_weights.append(w_image)
 
-    # Nhánh ocr_dense
+    # Nhánh ocr_dense — loại bỏ keyframe có ocr_text rỗng ('' )
+    # Lý do: các frame không có chữ đều có embedding giống hệt nhau (của chuỗi rỗng),
+    # chúng tự tụ lại thành 1 cụm và xếp hạng cao mọi query OCR -> nhiễu kết quả.
     tasks.append(
         client.query_points(
             collection_name=collection_name,
@@ -156,12 +166,17 @@ async def search_by_text_vectors(
             using=OCR_DENSE.name,
             limit=_DEFAULT_PREFETCH_LIMIT,
             score_threshold=score_threshold,
+            query_filter=Filter(
+                must_not=[
+                    FieldCondition(key="ocr_text", match=MatchValue(value=""))
+                ]
+            ),
             with_payload=True,
         )
     )
     task_weights.append(w_ocr_dense)
 
-    # Nhánh asr_dense
+    # Nhánh asr_dense — loại bỏ keyframe có asr_text rỗng ('' ) (cùng lý do như ocr_dense)
     tasks.append(
         client.query_points(
             collection_name=collection_name,
@@ -169,6 +184,11 @@ async def search_by_text_vectors(
             using=ASR_DENSE.name,
             limit=_DEFAULT_PREFETCH_LIMIT,
             score_threshold=score_threshold,
+            query_filter=Filter(
+                must_not=[
+                    FieldCondition(key="asr_text", match=MatchValue(value=""))
+                ]
+            ),
             with_payload=True,
         )
     )
@@ -240,7 +260,7 @@ async def search_by_image_vector(
     """
     Tìm kiếm keyframe tương đồng bằng image vector (Image-to-Image Search).
 
-    Chỉ dùng nhánh image_dense (BEiT-large + CLIP), không RRF vì chỉ có 1 nhánh.
+    Chỉ dùng nhánh image_dense (CLIP ViT-L/14), không RRF vì chỉ có 1 nhánh.
     """
     results = await client.query_points(
         collection_name=collection_name,
@@ -253,34 +273,6 @@ async def search_by_image_vector(
 
     logger.debug(f"search_by_image_vector: {len(results.points)} results")
     return [_scored_point_to_candidate(p) for p in results.points]
-
-
-async def search_by_all_vectors(
-    client: AsyncQdrantClient,
-    image_vector: list[float],
-    ocr_vector: list[float],
-    asr_vector: list[float],
-    ocr_sparse_vector: SparseVector | None,
-    asr_sparse_vector: SparseVector | None,
-    top_k: int = 100,
-    collection_name: str = PRODUCTION_ALIAS,
-) -> list[CandidateResult]:
-    """
-    Multimodal search: kết hợp cả image và text vectors với RRF.
-
-    Dùng khi query bao gồm cả ảnh và text mô tả.
-    """
-    # Tận dụng search_by_text_vectors — đã hỗ trợ image_vector parameter
-    return await search_by_text_vectors(
-        client=client,
-        ocr_vector=ocr_vector,
-        asr_vector=asr_vector,
-        ocr_sparse_vector=ocr_sparse_vector,
-        asr_sparse_vector=asr_sparse_vector,
-        image_vector=image_vector,
-        top_k=top_k,
-        collection_name=collection_name,
-    )
 
 
 # =============================================================================
@@ -313,49 +305,58 @@ def _scored_point_to_candidate(scored_point) -> CandidateResult:
             f"Kiểm tra lại quá trình ingestion/upsert."
         )
 
+    scene_id = payload["scene_id"]
+    frame_id = int(payload["frame_id"])
+    keyframe_path = payload.get("keyframe_path", "")
+    
+    # Chuẩn hóa keyframe_path về dạng unified/{scene_id}-{frame_id}.webp (không bị lặp video_id 2 lần)
+    ext = keyframe_path.rsplit(".", 1)[-1] if "." in keyframe_path else "webp"
+    clean_keyframe_path = f"unified/{scene_id}-{frame_id}.{ext}"
+
     return CandidateResult(
         video_id=payload["video_id"],
-        scene_id=payload["scene_id"],
-        frame_id=int(payload["frame_id"]),
+        scene_id=scene_id,
+        frame_id=frame_id,
         timestamp_start=float(payload["timestamp_start"]),
         timestamp_end=float(payload["timestamp_end"]),
         timestamp_mid=float(payload["timestamp_mid"]),
-        keyframe_path=payload["keyframe_path"],
+        keyframe_path=clean_keyframe_path,
         ocr_text=payload.get("ocr_text", ""),
         asr_text=payload.get("asr_text", ""),
-        score=float(scored_point.score) if scored_point.score is not None else 0.0,
+        score=float(getattr(scored_point, "score", 0.0) or 0.0),
     )
 
 
-async def get_point_by_id(
+
+async def get_keyframes_by_video_id(
     client: AsyncQdrantClient,
-    point_id: str,
+    video_id: str,
+    limit: int = 100,
     collection_name: str = PRODUCTION_ALIAS,
-) -> CandidateResult | None:
+) -> list[CandidateResult]:
     """
-    Lấy thông tin 1 keyframe cụ thể theo Point ID.
-
-    Dùng cho trường hợp cần fetch metadata của 1 keyframe cụ thể
-    (ví dụ: hiển thị chi tiết khi user click vào 1 kết quả).
+    Lấy tất cả keyframe thuộc 1 video cụ thể theo video_id.
     """
-    points = await client.retrieve(
-        collection_name=collection_name,
-        ids=[point_id],
-        with_payload=True,
-        with_vectors=False,
-    )
+    try:
+        res, _ = await client.scroll(
+            collection_name=collection_name,
+            scroll_filter=Filter(
+                must=[FieldCondition(key="video_id", match=MatchText(text=video_id))]
+            ),
+            limit=limit,
+            with_payload=True,
+            with_vectors=False,
+        )
+        cands = []
+        for point in res:
+            try:
+                cand = _scored_point_to_candidate(point)
+                if cand.video_id == video_id:
+                    cands.append(cand)
+            except Exception:
+                pass
+        return sorted(cands, key=lambda c: (c.timestamp_mid, c.frame_id))
+    except Exception as err:
+        logger.warning(f"Error fetching keyframes for video {video_id}: {err}")
+        return []
 
-    if not points:
-        logger.warning(f"Point not found: {point_id} in {collection_name}")
-        return None
-
-    point = points[0]
-
-    # retrieve() trả về Record (không có score), tạo fake scored_point-like object
-    class _FakeScored:
-        def __init__(self, p):
-            self.id = p.id
-            self.payload = p.payload
-            self.score = 1.0  # không có score thật khi retrieve by ID
-
-    return _scored_point_to_candidate(_FakeScored(point))

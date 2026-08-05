@@ -21,7 +21,6 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 import json
-import os
 import time
 from pathlib import Path
 from eval.skeletons.metrics.final_score import final_score

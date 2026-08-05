@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -251,7 +252,6 @@ def main() -> None:
         logger.error(f"=== Xác thực THẤT BẠI (Có {len(report.errors)} lỗi nghiêm trọng) ===")
         for e in report.errors:
             logger.error(f"  [ERROR] {e}")
-        import sys
         sys.exit(1)
     else:
         logger.info("✅ Xác thực THÀNH CÔNG! Sẵn sàng gộp dữ liệu.")

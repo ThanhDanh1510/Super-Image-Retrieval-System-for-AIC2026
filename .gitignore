@@ -75,3 +75,7 @@ htmlcov/
 # --- Misc ---
 *.bak
 *.tmp
+.agents/
+.claude/
+skills-lock.json
+

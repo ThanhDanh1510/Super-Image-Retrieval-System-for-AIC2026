@@ -21,6 +21,7 @@ IMPORT RULES:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -30,9 +31,28 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from serving.api.core.config import get_settings
+from serving.api.core.models import ModelRegistry
 from serving.api.controller import routes_kis, routes_similar_image
 
 logger = logging.getLogger(__name__)
+
+
+async def _idle_unload_loop(registry: ModelRegistry, interval_s: float) -> None:
+    """
+    Background task: định kỳ unload các model không dùng trong TTL (nếu cấu hình).
+
+    Args:
+        registry: ModelRegistry singleton.
+        interval_s: Chu kỳ kiểm tra (giây).
+    """
+    while True:
+        await asyncio.sleep(interval_s)
+        try:
+            unloaded = registry.unload_idle()
+            if unloaded:
+                logger.info(f"Idle unload: đã giải phóng {len(unloaded)} model: {unloaded}")
+        except Exception:
+            logger.warning("Idle unload loop gặp lỗi, tiếp tục vòng lặp.", exc_info=True)
 
 
 # =============================================================================
@@ -46,71 +66,70 @@ async def lifespan(app: FastAPI):
 
     STARTUP:
         1. Khởi tạo Qdrant async client
-        2. Load tất cả AI models vào GPU (text_embedder, image_embedder, asr_model)
-        3. Lưu vào app.state để inject vào endpoints qua dependencies
+        2. Tạo ModelRegistry — model CHỈ được load khi endpoint đầu tiên cần
+           (lazy loading, tiết kiệm RAM). Nếu PRELOAD_MODELS=true thì warmup.
+        3. Nếu MODEL_UNLOAD_TTL_S > 0, chạy background task unload model idle.
 
     SHUTDOWN:
-        1. Đóng Qdrant client connection
-        2. Giải phóng GPU memory (del models)
+        1. Hủy background task idle unload
+        2. Giải phóng toàn bộ model (unload_all) + GPU memory
+        3. Đóng Qdrant client connection
     """
     settings = get_settings()
     logger.info(f"Starting {settings.APP_NAME} v{settings.APP_VERSION}")
     logger.info(f"Qdrant: {settings.QDRANT_URL}")
-    logger.info(f"Device: {settings.DEVICE}")
+    logger.info(f"Device: {settings.DEVICE} | PRELOAD_MODELS={settings.PRELOAD_MODELS} | MODEL_UNLOAD_TTL_S={settings.MODEL_UNLOAD_TTL_S}")
 
-    # --- STARTUP: Load models và kết nối Qdrant ---
+    # --- STARTUP ---
     from serving.api.repo.qdrant_repo import get_async_qdrant_client
-    from shared.models.text_embedding_wrapper import TextEmbeddingWrapper
-    from shared.models.image_embedding_wrapper import ImageEmbeddingWrapper
 
     # 1. Khởi tạo Qdrant client
     app.state.qdrant_client = get_async_qdrant_client(
         settings.QDRANT_URL, settings.QDRANT_API_KEY
     )
 
-    # 2. Khởi tạo Text Embedding Wrapper
-    try:
-        app.state.text_embedder = TextEmbeddingWrapper(device=settings.DEVICE)
-        logger.info("TextEmbeddingWrapper loaded successfully.")
-    except Exception as e:
-        logger.warning(f"Could not load TextEmbeddingWrapper: {e}. Text queries may fail.")
-        app.state.text_embedder = None
+    # 2. ModelRegistry — lazy loading, không tốn RAM lúc khởi động
+    registry = ModelRegistry(
+        device=settings.DEVICE,
+        text_embedding_batch_size=settings.TEXT_EMBEDDING_BATCH_SIZE,
+        image_embedding_batch_size=settings.IMAGE_EMBEDDING_BATCH_SIZE,
+        unload_ttl_s=settings.MODEL_UNLOAD_TTL_S,
+    )
+    app.state.model_registry = registry
 
-    # 3. Khởi tạo Image Embedding Wrapper
-    try:
-        app.state.image_embedder = ImageEmbeddingWrapper(device=settings.DEVICE)
-        logger.info("ImageEmbeddingWrapper loaded successfully.")
-    except Exception as e:
-        logger.warning(f"Could not load ImageEmbeddingWrapper: {e}. Image/Similar queries may fail.")
-        app.state.image_embedder = None
-
-    # 4. Khởi tạo ASR model (PhoWhisper)
-    try:
-        from transformers import pipeline
-        logger.info(f"Loading ASR model (vinai/PhoWhisper-medium) on {settings.DEVICE}...")
-        app.state.asr_model = pipeline(
-            "automatic-speech-recognition",
-            model="vinai/PhoWhisper-medium",
-            device=0 if settings.DEVICE == "cuda" else -1
+    if settings.PRELOAD_MODELS:
+        logger.info("PRELOAD_MODELS=true — warmup toàn bộ model ngay lúc startup...")
+        await registry.warmup_async()
+    else:
+        logger.info(
+            "PRELOAD_MODELS=false — model sẽ được lazy-load khi endpoint đầu tiên cần đến (tiết kiệm RAM)."
         )
-        logger.info("ASR model loaded successfully.")
-    except Exception as e:
-        logger.warning(f"Could not load ASR model: {e}. Voice queries will be disabled.")
-        app.state.asr_model = None
+
+    # 3. Background task: unload model idle (RAM saver)
+    idle_task: asyncio.Task | None = None
+    if settings.MODEL_UNLOAD_TTL_S > 0:
+        idle_task = asyncio.create_task(
+            _idle_unload_loop(registry, interval_s=settings.MODEL_IDLE_CHECK_S)
+        )
+        logger.info(f"Idle unload loop started (TTL={settings.MODEL_UNLOAD_TTL_S}s).")
 
     yield
 
     # --- SHUTDOWN: Cleanup ---
+    if idle_task is not None:
+        idle_task.cancel()
+        try:
+            await idle_task
+        except asyncio.CancelledError:
+            pass
+        logger.info("Stopped idle unload loop.")
+
+    registry.unload_all()
+    logger.info("Released all models (RAM/VRAM freed).")
+
     if hasattr(app.state, "qdrant_client"):
         await app.state.qdrant_client.close()
         logger.info("Closed Qdrant client connection.")
-
-    if hasattr(app.state, "text_embedder"):
-        del app.state.text_embedder
-    if hasattr(app.state, "image_embedder"):
-        del app.state.image_embedder
-    if hasattr(app.state, "asr_model"):
-        del app.state.asr_model
 
     logger.info("Shutdown complete.")
 
@@ -152,7 +171,7 @@ def create_app() -> FastAPI:
     )
 
     # --- Mount Static Files (ảnh keyframe) ---
-    # URL: /static/unified_keyframes/{video_id}/{frame_idx:06d}.jpg
+    # URL: /static/{keyframe_path} — keyframe_path dạng unified/{video_id}-{scene_id}-{frame_id}.webp
     if os.path.isdir(settings.DATA_DIR):
         app.mount("/static", StaticFiles(directory=settings.DATA_DIR), name="static")
         logger.info(f"Static files mounted: {settings.DATA_DIR}")
