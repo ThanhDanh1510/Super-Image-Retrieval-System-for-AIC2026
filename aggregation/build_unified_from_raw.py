@@ -170,37 +170,38 @@ def build_scene_metadata(raw_df: pd.DataFrame, fps: float = 25.0) -> pd.DataFram
 
 def extract_ocr_for_metadata(meta_df: pd.DataFrame, ocr_dir: str | Path) -> pd.DataFrame:
     """
-    Tra cứu text OCR từ data/OCR/<group>/<video_id>.json dựa theo frame_id.
+    Tra cứu text OCR từ data/OCR/<group>/<video_id>.json sử dụng multi-fallback lookup.
     """
     ocr_dir = Path(ocr_dir)
     ocr_cache: dict[str, dict[str, str]] = {}
+    global_ocr_map: dict[str, str] = {}
+
+    if ocr_dir.exists():
+        for json_file in ocr_dir.glob("**/*.json"):
+            try:
+                v_name = json_file.stem
+                with open(json_file, "r", encoding="utf-8") as f:
+                    d = json.load(f)
+                    ocr_cache[v_name] = d
+                    global_ocr_map.update(d)
+            except Exception as e:
+                logger.warning(f"Không thể đọc OCR JSON {json_file}: {e}")
 
     ocr_rows = []
-    for _, row in meta_df.iterrows():
+    for global_idx, row in meta_df.iterrows():
         video_id = row["video_id"]
         frame_id_str = str(row["frame_id"])
+        global_idx_str = str(global_idx)
 
-        if video_id not in ocr_cache:
-            # Tìm file json của video_id này
-            # Ví dụ: video_id = 'L21_V001' -> group = 'L21'
-            group = video_id.split("_")[0] if "_" in video_id else ""
-            json_file = ocr_dir / group / f"{video_id}.json"
-            if not json_file.exists():
-                # Thử tìm trực tiếp dưới ocr_dir
-                json_file = ocr_dir / f"{video_id}.json"
+        v_ocr_dict = ocr_cache.get(video_id, {})
 
-            if json_file.exists():
-                try:
-                    with open(json_file, "r", encoding="utf-8") as f:
-                        ocr_cache[video_id] = json.load(f)
-                except Exception as e:
-                    logger.warning(f"Không thể đọc OCR JSON {json_file}: {e}")
-                    ocr_cache[video_id] = {}
-            else:
-                ocr_cache[video_id] = {}
-
-        v_ocr_dict = ocr_cache[video_id]
-        raw_ocr = v_ocr_dict.get(frame_id_str, "")
+        # Multi-fallback lookup: global_idx -> v_ocr_dict[frame_id] -> global_ocr_map[frame_id]
+        raw_ocr = (
+            global_ocr_map.get(global_idx_str)
+            or v_ocr_dict.get(frame_id_str)
+            or global_ocr_map.get(frame_id_str)
+            or ""
+        )
         clean_ocr = clean_whitespace(normalize_nfc(raw_ocr)) if raw_ocr else ""
 
         ocr_rows.append({
