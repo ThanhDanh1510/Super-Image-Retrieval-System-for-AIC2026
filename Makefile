@@ -5,7 +5,7 @@
 # Chạy: make <target>
 # =============================================================================
 
-.PHONY: help install install-dev install-ingestion serve serve-reload \
+.PHONY: help install serve serve-reload \
         lint typecheck test test-cov \
         create-collection verify-collection \
         clean
@@ -31,14 +31,8 @@ help: ## Hiển thị danh sách commands
 # Install
 # =============================================================================
 
-install: ## Cài đặt dependencies chính (serving + shared)
-	pip install -e ".[dev]"
-
-install-dev: ## Cài đặt dependencies + dev tools (pytest, ruff, mypy)
-	pip install -e ".[dev]"
-
-install-ingestion: ## Cài đặt thêm dependencies cho ingestion (Kaggle)
-	pip install -e ".[ingestion]"
+install: ## Cài đặt TẤT CẢ dependencies vào 1 venv duy nhất (serving + ingestion + dev)
+	pip install -e ".[all]"
 
 # =============================================================================
 # Serving

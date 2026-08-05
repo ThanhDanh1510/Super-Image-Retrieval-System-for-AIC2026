@@ -103,24 +103,17 @@ serving/
     │                            # khi truyền tiếp vào retrieval_service, không tạo route riêng cho voice
     ├── service/
     │   ├── retrieval/
-    │   │   ├── skeletons/              # [MLOps viết] Skeleton files cho Member_1 & Member_2 — function signatures, constraints nhúng sẵn
-    │   │   │   ├── text_query.py
-    │   │   │   ├── image_query.py
-    │   │   │   ├── voice_query.py
-    │   │   │   └── retrieval_pipeline.py
     │   │   ├── text_query.py           # Dịch thuật, tách sự kiện (event splitter cho TRAKE), tạo vector và truy vấn text
     │   │   ├── image_query.py          # Trích xuất vector ảnh và truy vấn ảnh tương đồng (Image-to-Image)
     │   │   ├── voice_query.py          # Chuyển giọng nói → text (voice-to-text) và tái sử dụng luồng của text_query
     │   │   └── retrieval_pipeline.py   # Orchestrator: nhận query đầu vào, điều hướng, trả về danh sách candidates thô
     │   ├── temporal_aligner.py         # Căn chỉnh thời gian (TRAKE) sau khi đã retrieve candidates
     │   └── reranker/
-    │       ├── skeletons/              # [MLOps viết] Skeleton files cho Member_3
+    │       ├── skeletons/              # Skeleton files cho Member_3
     │       │   ├── text_branch/viranker.py
     │       │   ├── crossmodal_branch/jina_reranker_m0.py
     │       │   └── fusion_score.py
-    │       ├── text_branch/viranker.py            # ViRanker (BGE-M3 + BPT, MMARCO-VI tuned)
-    │       ├── crossmodal_branch/jina_reranker_m0.py # Verify keyframe, lọc false positive CLIP
-    │       └── fusion_score.py                     # Hợp nhất 2 nhánh → ranking cuối
+    │       ├── rerank_service.py       # Seam duy nhất controller gọi cho rerank (text + crossmodal + fusion)
     ├── repo/                    # qdrant_repo.py (prefetch + FusionQuery RRF, hỗ trợ cả truy vấn text & image), gg_image_search_repo.py (fallback)
     └── main.py                  # FastAPI app, mount router
 ```
@@ -192,8 +185,10 @@ infra/
 data/
 ├── raw_shard/          # Video gốc CHỈ thuộc shard của mình — KHÔNG upload/chia sẻ nguyên video
 ├── shard_output_v3/    # Output (keyframe, metadata, vector) trước khi publish Kaggle Dataset riêng
-├── unified_v3/          # Bản đã gộp từ aggregation/ (gồm metadata parquet và vector npy/npz)
-└── unified_keyframes/  # Thư mục chứa toàn bộ ảnh keyframe của tất cả các shard phục vụ hiển thị UI phục vụ thi
+├── unified_v3/         # Bản đã gộp từ aggregation/ (gồm metadata parquet và vector npy/npz)
+├── unified/            # Toàn bộ ảnh keyframe của tất cả các shard phục vụ hiển thị UI — tên chuẩn
+│                       # {video_id}-{scene_id}-{frame_id}.webp (flat, không thư mục con)
+└── unified_keyframes/  # (CŨ, đã thay bằng unified/) — xóa sau khi mapping
 ```
 
 ---

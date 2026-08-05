@@ -1,11 +1,14 @@
 """
 shared/models/image_embedding_wrapper.py
 =========================================
-Wrapper chuẩn hóa cho image embedding models (BEiT-large + CLIP).
+Wrapper chuẩn hóa cho image embedding model (CLIP ViT-L/14).
 
 RÀNG BUỘC CỨNG:
   - encode() phải trả về L2-normalized vector dim=1024.
   - Dim phải khớp với named_vector_spec.IMAGE_DENSE.dim = 1024.
+
+GHI CHÚ RAM: Chỉ load CLIP (1 model duy nhất) — BEiT đã được bỏ khỏi
+wrapper để giảm bộ nhớ; fused BEiT + CLIP chỉ tồn tại phía indexing.
 """
 
 from __future__ import annotations
@@ -22,21 +25,16 @@ logger = logging.getLogger(__name__)
 
 class ImageEmbeddingWrapper:
     """
-    Wrapper load và inference BEiT-large + CLIP image embedding models.
+    Wrapper load và inference CLIP ViT-L/14 image embedding model.
 
-    Fuses 2 models để tăng chất lượng retrieval:
-      - BEiT-large-patch16-224 (semantic understanding)
-      - CLIP ViT-L/14 (cross-modal alignment)
-
-    Output: fused vector dim=1024, L2-normalized.
+    Output: vector dim=1024, L2-normalized (khớp IMAGE_DENSE).
     """
 
-    BEIT_MODEL_ID = "microsoft/BEiT-large-patch16-224-pt22k-ft22k"
     CLIP_MODEL_ID = "openai/clip-vit-large-patch14"
     VECTOR_DIM = 1024
 
     def __init__(self, device: str = "cuda") -> None:
-        """Load BEiT và CLIP model vào memory."""
+        """Load CLIP model vào memory."""
         self.device = device
         self.is_mock = False
         self.clip_model = None
@@ -179,7 +177,7 @@ class ImageEmbeddingWrapper:
             return res[0] if is_single else res
 
         try:
-            inputs = self.clip_processor(text=texts, return_tensors="pt", padding=True).to(self.device_str)
+            inputs = self.clip_processor(text=texts, return_tensors="pt", padding=True, truncation=True, max_length=77).to(self.device_str)
             with self.torch.no_grad():
                 features = self.clip_model.get_text_features(**inputs)
                 if not isinstance(features, self.torch.Tensor):

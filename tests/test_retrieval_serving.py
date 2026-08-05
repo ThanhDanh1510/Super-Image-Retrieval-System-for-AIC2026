@@ -6,6 +6,7 @@ Unit tests cho Module Retrieval Serving (TASK-SRV-01 -> TASK-SRV-05).
 
 from __future__ import annotations
 
+import time
 from unittest.mock import AsyncMock, MagicMock
 import numpy as np
 import pytest
@@ -58,6 +59,89 @@ def mock_qdrant_client():
 async def test_enhance_query_english():
     en_query, _ = await text_query._enhance_query("a man walking a dog in the park")
     assert en_query == "a man walking a dog in the park"
+
+
+def test_is_valid_translation_rejects_google_error_page():
+    # Trang lỗi Google mà deep_translator trả về như một "bản dịch" thành công
+    garbage = (
+        "Error 500 (Server Error)!!1500.That’s an error.There was an error. "
+        "Please try again later.That’s all we know."
+    )
+    assert text_query._is_valid_translation(garbage, "đoạn video mô tả cảnh trang trí bánh rán") is False
+
+
+def test_is_valid_translation_rejects_empty_and_html():
+    assert text_query._is_valid_translation("", "nguồn") is False
+    assert text_query._is_valid_translation("   \t\n  ", "nguồn") is False
+    assert text_query._is_valid_translation("<html><body>error</body></html>", "nguồn") is False
+    assert text_query._is_valid_translation(",.!?@#$%%^", "nguồn") is False
+
+
+def test_is_valid_translation_accepts_real_translation():
+    assert text_query._is_valid_translation(
+        "The video depicts the donut decoration scene.", "đoạn video mô tả cảnh trang trí bánh rán"
+    ) is True
+
+
+@pytest.mark.anyio
+async def test_enhance_query_falls_back_when_translation_is_error_page(monkeypatch):
+    """Khi Google trả về trang lỗi, enhanced_query phải giữ nguyên query gốc (không rò rỉ 'Error 500')."""
+    async def fake_translate(query, target):
+        return "Error 500 (Server Error)!!1500.That’s an error. Please try again later."
+
+    monkeypatch.setattr(text_query, "_translate", fake_translate)
+    en_query, _ = await text_query._enhance_query(
+        "Đoạn video mô tả cảnh trang trí bánh rán"
+    )
+    # KHÔNG được chứa nội dung trang lỗi
+    assert "Error 500" not in en_query
+    assert "that's an error" not in en_query.lower()
+    # Fallback: giữ nguyên query gốc đã làm sạch
+    assert "bánh rán" in en_query
+
+
+@pytest.mark.anyio
+async def test_translate_retries_then_returns_none(monkeypatch):
+    """Sau 2 lần thử đều trả về trang lỗi, _translate phải trả về None (không đổ rác ra)."""
+    calls = {"n": 0}
+
+    class FakeTranslator:
+        def __init__(self, source, target):
+            self.target = target
+
+        def translate(self, query):
+            calls["n"] += 1
+            return "Error 500 (Server Error)!!1500.That’s an error."
+
+    monkeypatch.setattr("deep_translator.GoogleTranslator", FakeTranslator)
+
+    result = await text_query._translate("đoạn video mô tả bánh rán", "en")
+    assert result is None
+    assert calls["n"] == 2
+
+
+@pytest.mark.anyio
+async def test_translate_does_not_hang_when_translation_times_out(monkeypatch):
+    """Translator treo (không timeout) phải bị asyncio.wait_for cắt, không chặn request vô hạn."""
+    import asyncio
+
+    class HangingTranslator:
+        def __init__(self, source, target):
+            self.target = target
+
+        def translate(self, query):
+            time.sleep(1.5)  # mô phỏng requests.get() treo lâu hơn timeout
+            return "never reached"
+
+    monkeypatch.setattr("deep_translator.GoogleTranslator", HangingTranslator)
+    monkeypatch.setattr(text_query, "TRANSLATE_TIMEOUT_S", 0.2)
+
+    t0 = time.time()
+    result = await text_query._translate("đoạn video mô tả bánh rán", "en")
+    elapsed = time.time() - t0
+
+    assert result is None
+    assert elapsed < 5  # không được treo 1.5s+ mỗi attempt; 2 attempts * 0.2s timeout
 
 
 def test_split_events_newline():

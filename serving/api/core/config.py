@@ -51,10 +51,19 @@ class Settings(BaseSettings):
     TEXT_EMBEDDING_BATCH_SIZE: int = 16
     IMAGE_EMBEDDING_BATCH_SIZE: int = 32
 
+    # --- RAM Saver ---
+    # Lazy-load: model CHỈ được tải khi endpoint đầu tiên cần đến (tiết kiệm RAM).
+    # Set =true nếu muốn warmup ngay lúc khởi động (giảm latency request đầu tiên).
+    PRELOAD_MODELS: bool = False
+    # Unload model không dùng sau N giây (0 = không tự unload). Càng nhỏ càng tiết kiệm RAM.
+    MODEL_UNLOAD_TTL_S: int = 0
+    # Chu kỳ (giây) background task kiểm tra model idle để unload.
+    MODEL_IDLE_CHECK_S: int = 30
+
     # --- Static Files ---
     DATA_DIR: str = str(Path(__file__).resolve().parents[3] / "data")
     KEYFRAME_DIR: str = str(
-        Path(__file__).resolve().parents[3] / "data" / "unified_keyframes"
+        Path(__file__).resolve().parents[3] / "data" / "unified"
     )
 
     # --- Server ---

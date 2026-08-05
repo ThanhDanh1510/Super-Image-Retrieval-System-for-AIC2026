@@ -76,6 +76,56 @@ def test_dante_align_selects_valid_ascending_chain(multi_event_candidates):
     assert best_chain[0].timestamp_mid < best_chain[1].timestamp_mid
 
 
+def test_dante_align_never_mixes_videos():
+    """TRAKE chain MUST stay inside one video folder (e.g. all L001_V001),
+    never mixing keyframes from two different videos (L001_V001 + L001_V002)."""
+    def _mk(video_id, frame_id, ts_mid, score):
+        return CandidateResult(
+            video_id=video_id,
+            scene_id=f"{video_id}_S{frame_id:03d}",
+            frame_id=frame_id,
+            timestamp_start=ts_mid - 0.5,
+            timestamp_end=ts_mid + 0.5,
+            timestamp_mid=ts_mid,
+            keyframe_path=f"{video_id}/{video_id}_S{frame_id:03d}.jpg",
+            score=score,
+        )
+
+    # Two videos, each with candidates for 3 events.
+    # Currently none of the events has a clear per-video winner, so the
+    # worst case is a chain mixing L001_V001 and L001_V002 — which must NOT happen.
+    ev_candidates = [
+        [
+            _mk("L001_V001", 10, 1.0, 0.9),
+            _mk("L001_V002", 110, 1.0, 0.7),
+        ],
+        [
+            _mk("L001_V001", 20, 2.0, 0.85),
+            _mk("L001_V002", 120, 2.0, 0.8),
+        ],
+        [
+            _mk("L001_V001", 30, 4.0, 0.95),
+            _mk("L001_V002", 130, 4.0, 0.9),
+        ],
+    ]
+
+    chains = temporal_aligner.align(ev_candidates, max_results=10)
+    assert len(chains) >= 1
+
+    for chain in chains:
+        assert len(chain) == 3
+        # 1. All keyframes must come from the SAME video folder
+        video_ids = {c.video_id for c in chain}
+        assert len(video_ids) == 1, (
+            f"TRAKE chain mixed videos: {video_ids}. "
+            f"Every chain must live in a single video folder like L001_V001."
+        )
+        # 2. Timestamps must be strictly ascending and distinct
+        timestamps = [round(c.timestamp_mid, 2) for c in chain]
+        assert timestamps == sorted(timestamps), f"TRAKE timestamps not ascending: {timestamps}"
+        assert len(set(timestamps)) == len(timestamps), f"TRAKE timestamps duplicated: {timestamps}"
+
+
 def test_dante_align_empty_input():
     assert temporal_aligner.align([]) == []
     assert temporal_aligner.align([[]]) == []
