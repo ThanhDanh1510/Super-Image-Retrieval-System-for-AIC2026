@@ -31,12 +31,13 @@ def _get_model():
 
             model_name = "jinaai/jina-reranker-m0"
             logger.info(f"Loading Jina Reranker M0 model: {model_name}...")
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            dtype = torch.float16 if device == "cuda" else torch.float32
             model = AutoModel.from_pretrained(
                 model_name,
-                torch_dtype="auto",
+                torch_dtype=dtype,
                 trust_remote_code=True,
             )
-            device = "cuda" if torch.cuda.is_available() else "cpu"
             model.to(device)
             model.eval()
 
