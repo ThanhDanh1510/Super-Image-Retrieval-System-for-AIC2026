@@ -52,9 +52,8 @@ class Settings(BaseSettings):
     IMAGE_EMBEDDING_BATCH_SIZE: int = 32
 
     # --- RAM Saver ---
-    # Lazy-load: model CHỈ được tải khi endpoint đầu tiên cần đến (tiết kiệm RAM).
-    # Set =true nếu muốn warmup ngay lúc khởi động (giảm latency request đầu tiên).
-    PRELOAD_MODELS: bool = False
+    # Warmup toàn bộ models ngay khi server khởi động (giúp request đầu tiên phản hồi siêu tốc ~0.3s)
+    PRELOAD_MODELS: bool = True
     # Unload model không dùng sau N giây (0 = không tự unload). Càng nhỏ càng tiết kiệm RAM.
     MODEL_UNLOAD_TTL_S: int = 0
     # Chu kỳ (giây) background task kiểm tra model idle để unload.
