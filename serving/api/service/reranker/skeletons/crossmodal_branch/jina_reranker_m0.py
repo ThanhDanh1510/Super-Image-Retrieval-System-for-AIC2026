@@ -33,11 +33,17 @@ def _get_model():
             logger.info(f"Loading Jina Reranker M0 model: {model_name}...")
             device = "cuda" if torch.cuda.is_available() else "cpu"
             dtype = torch.float16 if device == "cuda" else torch.float32
-            model = AutoModel.from_pretrained(
-                model_name,
-                torch_dtype=dtype,
-                trust_remote_code=True,
-            )
+            import transformers
+            orig_verbosity = transformers.logging.get_verbosity()
+            transformers.logging.set_verbosity_error()
+            try:
+                model = AutoModel.from_pretrained(
+                    model_name,
+                    torch_dtype=dtype,
+                    trust_remote_code=True,
+                )
+            finally:
+                transformers.logging.set_verbosity(orig_verbosity)
             model.to(device)
             model.eval()
 
