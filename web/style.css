@@ -534,15 +534,60 @@ body {
   border: 2px solid var(--spider-red);
   border-radius: 12px;
   padding: 20px;
-  max-width: 900px;
+  max-width: 950px;
+  max-height: 90vh;
   width: 90%;
   position: relative;
   cursor: default;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 0 40px var(--spider-red-glow);
 }
 
-.lightbox-content img {
+.modal-img-container {
+  max-height: 52vh;
   width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: #000;
   border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.modal-img-container img {
+  max-height: 52vh;
+  max-width: 100%;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  border-radius: 8px;
+}
+
+.modal-info {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  min-height: 0;
+}
+
+.scrollable-text-box {
+  max-height: 85px;
+  overflow-y: auto;
+  background: rgba(8, 11, 17, 0.95);
+  border: 1px solid var(--card-border);
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-family: var(--font-code);
+  color: var(--text-main);
+  word-break: break-word;
+  scrollbar-width: thin;
+  scrollbar-color: var(--spider-red) transparent;
 }
 
 /* Toast Notification */
