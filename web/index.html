@@ -154,9 +154,23 @@
       </div>
       <div class="modal-info">
         <h4 id="modal-title">L21_V001_S001</h4>
-        <div id="modal-ocr" class="scrollable-text-box"><strong>OCR:</strong> -</div>
-        <div id="modal-asr" class="scrollable-text-box"><strong>ASR:</strong> -</div>
+        <div id="modal-ocr" class="scrollable-text-box" title="🔍 Nhấp để phóng to toàn văn bản OCR"><strong>OCR:</strong> -</div>
+        <div id="modal-asr" class="scrollable-text-box" title="🔍 Nhấp để phóng to toàn văn bản ASR"><strong>ASR:</strong> -</div>
       </div>
+    </div>
+  </div>
+
+  <!-- Expanded Text Zoom Modal -->
+  <div id="text-zoom-modal" class="lightbox-modal text-zoom-modal" style="display: none;">
+    <div class="text-zoom-content">
+      <div class="text-zoom-header">
+        <h3 id="text-zoom-title">🔍 CHI TIẾT VĂN BẢN</h3>
+        <div class="text-zoom-actions">
+          <button id="copy-zoom-text-btn" class="icon-action-btn">📋 Copy Tất Cả</button>
+          <button id="close-text-zoom-btn" class="close-btn">✕</button>
+        </div>
+      </div>
+      <div id="text-zoom-body" class="text-zoom-body"></div>
     </div>
   </div>
 

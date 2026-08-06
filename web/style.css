@@ -588,6 +588,69 @@ body {
   word-break: break-word;
   scrollbar-width: thin;
   scrollbar-color: var(--spider-red) transparent;
+  cursor: zoom-in;
+  transition: all 0.2s ease;
+}
+
+.scrollable-text-box:hover {
+  border-color: var(--spider-blue);
+  box-shadow: 0 0 12px var(--spider-blue-glow);
+  background: rgba(17, 22, 34, 0.98);
+}
+
+/* Expanded Text Zoom Modal Overlay */
+.text-zoom-modal {
+  z-index: 400; /* Higher than Lightbox */
+}
+
+.text-zoom-content {
+  background: var(--card-bg);
+  border: 2px solid var(--spider-blue);
+  border-radius: 12px;
+  padding: 20px 24px;
+  max-width: 850px;
+  width: 85%;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 0 50px var(--spider-blue-glow);
+  cursor: default;
+}
+
+.text-zoom-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--card-border);
+  padding-bottom: 12px;
+  margin-bottom: 14px;
+}
+
+.text-zoom-header h3 {
+  color: var(--spider-blue);
+  font-size: 1.1rem;
+}
+
+.text-zoom-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.text-zoom-body {
+  flex: 1;
+  overflow-y: auto;
+  font-size: 1.1rem;
+  line-height: 1.7;
+  font-family: var(--font-code);
+  color: var(--spider-yellow);
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding-right: 8px;
+  background: rgba(8, 11, 17, 0.9);
+  padding: 16px;
+  border-radius: 8px;
+  border: 1px solid var(--card-border);
 }
 
 /* Toast Notification */
