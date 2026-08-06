@@ -56,19 +56,21 @@ function setupTabs() {
 
 // --- Controls Setup ---
 function setupControls() {
-  topKSlider.addEventListener("input", (e) => {
-    state.topK = parseInt(e.target.value);
-    topKVal.textContent = state.topK;
+  const topKInput = document.getElementById("top-k-input");
+  topKInput.addEventListener("input", (e) => {
+    let val = parseInt(e.target.value);
+    if (!isNaN(val) && val > 0) {
+      state.topK = val;
+    }
   });
 
-  // Grid Column Density Switcher
-  document.querySelectorAll(".density-btn").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      document.querySelectorAll(".density-btn").forEach((b) => b.classList.remove("active"));
-      btn.classList.add("active");
-      const cols = btn.dataset.cols;
-      resultsGrid.className = `results-grid grid-cols-${cols}`;
-    });
+  // Dynamic Density Slider (adjusts card min-width)
+  const densitySlider = document.getElementById("density-slider");
+  const densityVal = document.getElementById("density-val");
+  densitySlider.addEventListener("input", (e) => {
+    const pxVal = e.target.value;
+    resultsGrid.style.setProperty("--card-min-width", `${pxVal}px`);
+    densityVal.textContent = `${pxVal}px`;
   });
 
   // Image upload
@@ -330,6 +332,13 @@ function showLightbox(cand, imgUrl) {
   modal.style.display = "flex";
 }
 
+const modalEl = document.getElementById("lightbox-modal");
 document.getElementById("close-modal-btn").addEventListener("click", () => {
-  document.getElementById("lightbox-modal").style.display = "none";
+  modalEl.style.display = "none";
+});
+
+modalEl.addEventListener("click", (e) => {
+  if (e.target === modalEl) {
+    modalEl.style.display = "none";
+  }
 });

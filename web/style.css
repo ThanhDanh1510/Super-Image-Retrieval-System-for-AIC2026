@@ -219,19 +219,24 @@ body {
   font-weight: 700;
 }
 
-.density-btn {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--card-border);
-  color: var(--text-sub);
-  padding: 4px 10px;
+.number-input-field {
+  background: rgba(8, 11, 17, 0.9);
+  border: 1px solid var(--spider-red);
+  color: var(--spider-yellow);
+  font-weight: 700;
+  font-size: 0.95rem;
+  width: 80px;
+  padding: 4px 8px;
   border-radius: 6px;
-  cursor: pointer;
+  text-align: center;
+  outline: none;
+  font-family: var(--font-code);
+  box-shadow: 0 0 8px var(--spider-red-glow);
 }
 
-.density-btn.active {
-  background: var(--spider-blue);
-  color: #000;
-  font-weight: 700;
+.number-input-field:focus {
+  border-color: var(--spider-blue);
+  box-shadow: 0 0 12px var(--spider-blue-glow);
 }
 
 /* Status Bar */
@@ -255,16 +260,9 @@ body {
 /* --- High-Density Keyframe Results Grid --- */
 .results-grid {
   display: grid;
-  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(var(--card-min-width, 180px), 1fr));
+  gap: 10px;
   margin-top: 10px;
-}
-
-.results-grid.grid-cols-6 {
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
-}
-
-.results-grid.grid-cols-4 {
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
 }
 
 /* Keyframe Card (Spider Theme) */

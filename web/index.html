@@ -83,14 +83,14 @@
       <!-- Search Controls Bar -->
       <div class="search-controls">
         <div class="control-group">
-          <label for="top-k-slider">Số lượng hiển thị (Top-K): <span id="top-k-val" class="highlight-val">30</span> ảnh</label>
-          <input type="range" id="top-k-slider" min="6" max="96" step="6" value="30" />
+          <label for="top-k-input">Số lượng hiển thị (Top-K):</label>
+          <input type="number" id="top-k-input" min="1" max="500" value="30" class="number-input-field" />
         </div>
 
-        <div class="control-group density-toggle">
-          <span>Mật độ lưới:</span>
-          <button class="density-btn active" data-cols="6">Dày (6 Cột)</button>
-          <button class="density-btn" data-cols="4">Vừa (4 Cột)</button>
+        <div class="control-group">
+          <label for="density-slider">Kích thước card ảnh / Mật độ:</label>
+          <input type="range" id="density-slider" min="130" max="350" step="10" value="180" />
+          <span id="density-val" class="highlight-val">180px</span>
         </div>
 
         <div id="image-preview-chip" class="image-chip" style="display: none;">
