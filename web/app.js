@@ -208,7 +208,7 @@ function renderResults(results) {
     const itemKey = `${candidate.video_id}_${candidate.frame_id}`;
     const isSelected = state.selectedItems.has(itemKey);
 
-    const imgUrl = `${API_BASE}/static/${candidate.keyframe_path}`;
+    const imgUrl = `${API_BASE}/api/v1/image/${candidate.video_id}/${candidate.frame_id}`;
     const scorePct = (candidate.score * 100).toFixed(1);
 
     const card = document.createElement("div");
@@ -271,7 +271,7 @@ function updateDrawer() {
   state.selectedItems.forEach((cand, key) => {
     const div = document.createElement("div");
     div.className = "selected-item";
-    const imgUrl = `${API_BASE}/static/${cand.keyframe_path}`;
+    const imgUrl = `${API_BASE}/api/v1/image/${cand.video_id}/${cand.frame_id}`;
     div.innerHTML = `
       <img src="${imgUrl}" alt="${cand.scene_id}" />
       <div style="flex:1;">

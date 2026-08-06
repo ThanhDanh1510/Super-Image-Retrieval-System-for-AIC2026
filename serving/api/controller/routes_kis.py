@@ -44,9 +44,48 @@ from serving.api.core.dependencies import (
 )
 from serving.api.core.config import get_settings
 
+from pathlib import Path
+from fastapi.responses import FileResponse
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1", tags=["Retrieval"])
+
+
+def _resolve_keyframe_path(video_id: str, frame_id: int, keyframe_path: str = "") -> Path | None:
+    settings = get_settings()
+    data_dir = Path(settings.DATA_DIR)
+    frame_id_str = str(frame_id)
+
+    parts = video_id.split("_")
+    if len(parts) == 2:
+        grp, vsub = parts[0], parts[1]
+    else:
+        grp, vsub = video_id, video_id
+
+    candidates = [
+        data_dir / "image" / grp / grp / vsub / f"{frame_id_str}.webp",
+        data_dir / "image" / grp / grp / vsub / f"{frame_id_str}.jpg",
+        data_dir / "image" / grp / f"{video_id}" / f"{frame_id_str}.webp",
+        data_dir / "image" / f"{video_id}" / f"{frame_id_str}.webp",
+        data_dir / "unified" / "keyframes" / keyframe_path if keyframe_path else data_dir,
+        data_dir / keyframe_path if keyframe_path else data_dir,
+    ]
+    for p in candidates:
+        if p and p.is_file() and p.exists():
+            return p
+    return None
+
+
+@router.get("/image/{video_id}/{frame_id}", summary="Lấy file ảnh keyframe thực tế")
+async def get_keyframe_image(video_id: str, frame_id: int):
+    """
+    Endpoint phục vụ ảnh keyframe thực tế trên đĩa cứng cho Frontend/UI.
+    """
+    img_path = _resolve_keyframe_path(video_id, frame_id)
+    if not img_path or not img_path.exists():
+        raise HTTPException(status_code=404, detail=f"Không tìm thấy ảnh cho video_id={video_id}, frame_id={frame_id}")
+    return FileResponse(img_path)
 
 
 @router.post(
