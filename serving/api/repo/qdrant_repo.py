@@ -91,7 +91,15 @@ def get_async_qdrant_client(url: str, api_key: str | None = None) -> AsyncQdrant
             f"Tự động chuyển sang Local Embedded Qdrant tại './data/qdrant_db'..."
         )
         return AsyncQdrantClient(path="./data/qdrant_db")
-    return AsyncQdrantClient(path=url)
+async def _resolve_collection(client: AsyncQdrantClient, collection_name: str) -> str:
+    """Tự động chuyển 'production' sang 'collection_v1' nếu alias chưa khởi tạo."""
+    try:
+        if not await client.collection_exists(collection_name):
+            if await client.collection_exists("collection_v1"):
+                return "collection_v1"
+    except Exception:
+        pass
+    return collection_name
 
 
 # =============================================================================
@@ -132,6 +140,8 @@ async def search_by_text_vectors(
     except Exception:
         weights = {"image_dense": 2.5, "ocr_dense": 0.5, "asr_dense": 0.3, "ocr_sparse": 0.2, "asr_sparse": 0.2}
         rrf_k = 60.0
+
+    collection_name = await _resolve_collection(client, collection_name)
 
     w_image = float(weights.get("image_dense", 2.5))
     w_ocr_dense = float(weights.get("ocr_dense", 0.5))
@@ -262,6 +272,7 @@ async def search_by_image_vector(
 
     Chỉ dùng nhánh image_dense (CLIP ViT-L/14), không RRF vì chỉ có 1 nhánh.
     """
+    collection_name = await _resolve_collection(client, collection_name)
     results = await client.query_points(
         collection_name=collection_name,
         query=image_vector,
