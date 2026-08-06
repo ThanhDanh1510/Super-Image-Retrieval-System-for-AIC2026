@@ -170,20 +170,26 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # --- Mount Static Files (ảnh keyframe) ---
-    # URL: /static/{keyframe_path} — keyframe_path dạng unified/{video_id}-{scene_id}-{frame_id}.webp
+    # --- Mount Static Files (ảnh keyframe & UI) ---
     if os.path.isdir(settings.DATA_DIR):
         app.mount("/static", StaticFiles(directory=settings.DATA_DIR), name="static")
         logger.info(f"Static files mounted: {settings.DATA_DIR}")
-    else:
-        logger.warning(
-            f"DATA_DIR không tồn tại: {settings.DATA_DIR}. "
-            f"Static files sẽ không khả dụng. Tạo thư mục data/ và thêm ảnh keyframe."
-        )
+
+    web_dir = Path(__file__).resolve().parents[2] / "web"
+    if web_dir.exists():
+        app.mount("/ui", StaticFiles(directory=str(web_dir), html=True), name="ui")
+        logger.info(f"Web UI mounted: {web_dir}")
 
     # --- Register Routers ---
     app.include_router(routes_kis.router)
     app.include_router(routes_similar_image.router)
+
+    # --- Root Redirect to UI ---
+    from fastapi.responses import RedirectResponse
+
+    @app.get("/", include_in_schema=False)
+    async def root_redirect():
+        return RedirectResponse(url="/ui/index.html")
 
     # --- Health Check ---
     @app.get("/health", tags=["System"])
