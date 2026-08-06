@@ -435,8 +435,17 @@ function showLightbox(cand, imgUrl) {
   const modal = document.getElementById("lightbox-modal");
   document.getElementById("modal-img").src = imgUrl;
   document.getElementById("modal-title").textContent = `${cand.video_id} — Scene: ${cand.scene_id} (Frame ${cand.frame_id})`;
-  document.getElementById("modal-ocr").innerHTML = `<strong>OCR:</strong> ${cand.ocr_text || 'None'}`;
-  document.getElementById("modal-asr").innerHTML = `<strong>ASR:</strong> ${cand.asr_text || 'None'}`;
+
+  const ocrBox = document.getElementById("modal-ocr");
+  const asrBox = document.getElementById("modal-asr");
+
+  ocrBox.innerHTML = `<strong>OCR:</strong> ${cand.ocr_text || 'None'}`;
+  asrBox.innerHTML = `<strong>ASR:</strong> ${cand.asr_text || 'None'}`;
+
+  // Default scroll position at top
+  ocrBox.scrollTop = 0;
+  asrBox.scrollTop = 0;
+
   modal.style.display = "flex";
 }
 

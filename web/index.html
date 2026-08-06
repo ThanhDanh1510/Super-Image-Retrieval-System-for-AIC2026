@@ -149,11 +149,13 @@
   <div id="lightbox-modal" class="lightbox-modal" style="display: none;">
     <div class="lightbox-content">
       <button id="close-modal-btn" class="close-modal-btn">✕</button>
-      <img id="modal-img" src="" alt="Keyframe Fullview" />
+      <div class="modal-img-container">
+        <img id="modal-img" src="" alt="Keyframe Fullview" />
+      </div>
       <div class="modal-info">
         <h4 id="modal-title">L21_V001_S001</h4>
-        <p id="modal-ocr"><strong>OCR:</strong> -</p>
-        <p id="modal-asr"><strong>ASR:</strong> -</p>
+        <div id="modal-ocr" class="scrollable-text-box"><strong>OCR:</strong> -</div>
+        <div id="modal-asr" class="scrollable-text-box"><strong>ASR:</strong> -</div>
       </div>
     </div>
   </div>
