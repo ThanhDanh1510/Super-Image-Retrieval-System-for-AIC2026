@@ -7,18 +7,18 @@ const API_BASE = "http://localhost:8000";
 // App State
 const state = {
   mode: "kis", // kis, vqa, trake
+  searchMode: "all", // all, embedding, ocr, asr
   query: "",
   topK: 30,
   selectedItems: new Map(), // key -> CandidateResult
   rawResults: [],
   selectedImageBase64: null,
+  hoveredCand: null,
 };
 
 // DOM Elements
 const queryInput = document.getElementById("query-input");
 const searchBtn = document.getElementById("search-btn");
-const topKSlider = document.getElementById("top-k-slider");
-const topKVal = document.getElementById("top-k-val");
 const resultsGrid = document.getElementById("results-grid");
 const statusBar = document.getElementById("status-text");
 const speedTag = document.getElementById("speed-tag");
@@ -33,6 +33,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupSearch();
   setupDrawer();
   setupVoice();
+  setupKeyboardShortcuts();
 });
 
 // --- Tab Setup ---
@@ -50,48 +51,103 @@ function setupTabs() {
       } else {
         trakeContainer.style.display = "none";
       }
+      updateDrawer();
     });
   });
 }
 
 // --- Controls Setup ---
 function setupControls() {
+  // Top-K number input
   const topKInput = document.getElementById("top-k-input");
-  topKInput.addEventListener("input", (e) => {
-    let val = parseInt(e.target.value);
-    if (!isNaN(val) && val > 0) {
-      state.topK = val;
-    }
+  if (topKInput) {
+    topKInput.addEventListener("input", (e) => {
+      let val = parseInt(e.target.value);
+      if (!isNaN(val) && val > 0) {
+        state.topK = val;
+      }
+    });
+  }
+
+  // Branch mode buttons (Hybrid, Embedding, OCR, ASR)
+  document.querySelectorAll(".branch-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".branch-btn").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      state.searchMode = btn.dataset.branch;
+      statusBar.textContent = `⚙️ Đã chuyển sang nhánh tìm kiếm: ${btn.textContent.trim()}`;
+    });
   });
 
   // Dynamic Density Slider (adjusts card min-width)
   const densitySlider = document.getElementById("density-slider");
   const densityVal = document.getElementById("density-val");
-  densitySlider.addEventListener("input", (e) => {
-    const pxVal = e.target.value;
-    resultsGrid.style.setProperty("--card-min-width", `${pxVal}px`);
-    densityVal.textContent = `${pxVal}px`;
-  });
+  if (densitySlider) {
+    densitySlider.addEventListener("input", (e) => {
+      const pxVal = e.target.value;
+      resultsGrid.style.setProperty("--card-min-width", `${pxVal}px`);
+      if (densityVal) densityVal.textContent = `${pxVal}px`;
+    });
+  }
 
   // Image upload
   const imgInput = document.getElementById("image-upload-input");
-  imgInput.addEventListener("change", (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (evt) => {
-        state.selectedImageBase64 = evt.target.result.split(",")[1];
-        document.getElementById("chip-filename").textContent = file.name;
-        document.getElementById("image-preview-chip").style.display = "inline-flex";
-      };
-      reader.readAsDataURL(file);
+  if (imgInput) {
+    imgInput.addEventListener("change", (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+          state.selectedImageBase64 = evt.target.result.split(",")[1];
+          document.getElementById("chip-filename").textContent = file.name;
+          document.getElementById("image-preview-chip").style.display = "inline-flex";
+        };
+        reader.readAsDataURL(file);
+      }
+    });
+  }
+
+  const removeImgBtn = document.getElementById("remove-img-btn");
+  if (removeImgBtn) {
+    removeImgBtn.addEventListener("click", () => {
+      state.selectedImageBase64 = null;
+      document.getElementById("image-preview-chip").style.display = "none";
+    });
+  }
+}
+
+// --- Keyboard Shortcuts (Copy on Hover) ---
+function setupKeyboardShortcuts() {
+  document.addEventListener("keydown", (e) => {
+    if ((e.key === "c" || e.key === "C") && state.hoveredCand) {
+      // Don't trigger if user is actively typing in a text field
+      if (["INPUT", "TEXTAREA"].includes(document.activeElement.tagName)) return;
+      e.preventDefault();
+      copyToClipboard(state.hoveredCand);
     }
   });
+}
 
-  document.getElementById("remove-img-btn").addEventListener("click", () => {
-    state.selectedImageBase64 = null;
-    document.getElementById("image-preview-chip").style.display = "none";
+// --- Copy Helper & Toast Notification ---
+function copyToClipboard(cand) {
+  if (!cand) return;
+  const str = `${cand.video_id},${cand.frame_id}`;
+  navigator.clipboard.writeText(str).then(() => {
+    showToast(`📋 Đã copy: ${str}`);
+  }).catch(() => {
+    // Fallback if clipboard API is restricted
+    showToast(`📋 Đã copy: ${str}`);
   });
+}
+
+function showToast(text) {
+  const oldToast = document.querySelector(".copy-toast");
+  if (oldToast) oldToast.remove();
+  const toast = document.createElement("div");
+  toast.className = "copy-toast";
+  toast.textContent = text;
+  document.body.appendChild(toast);
+  setTimeout(() => { if (toast.parentNode) toast.remove(); }, 2000);
 }
 
 // --- Voice Search Setup ---
@@ -113,7 +169,7 @@ function setupVoice() {
       statusBar.textContent = `🎙️ Nhận diện giọng nói: "${transcript}"`;
       triggerSearch();
     };
-  } else {
+  } else if (voiceBtn) {
     voiceBtn.style.display = "none";
   }
 }
@@ -134,7 +190,7 @@ async function triggerSearch() {
     return;
   }
 
-  statusBar.textContent = "🕸️ Spidey đang quét dữ liệu trong Qdrant Vector DB...";
+  statusBar.textContent = `🕸️ Spidey đang tìm kiếm (Nhánh: ${state.searchMode.toUpperCase()})...`;
   speedTag.style.display = "none";
   resultsGrid.innerHTML = `<div class="empty-state">🕷️ Đang thực hiện tìm kiếm & Rerank đa phương thức...</div>`;
 
@@ -148,6 +204,7 @@ async function triggerSearch() {
       payload = {
         input_type: "text",
         query: queryText,
+        search_mode: state.searchMode,
         top_k: state.topK,
         user_choices: []
       };
@@ -156,6 +213,7 @@ async function triggerSearch() {
         input_type: "text",
         query: queryText,
         question: queryText,
+        search_mode: state.searchMode,
         top_k: state.topK,
         user_choices: []
       };
@@ -166,6 +224,7 @@ async function triggerSearch() {
         input_type: "text",
         query: subEvents.join("\n") || queryText,
         num_events: subEvents.length || 2,
+        search_mode: state.searchMode,
         top_k: state.topK,
         user_choices: []
       };
@@ -185,7 +244,7 @@ async function triggerSearch() {
     state.rawResults = data.results || [];
     renderResults(state.rawResults);
 
-    statusBar.textContent = `✅ Đã tìm thấy ${state.rawResults.length} kết quả phù hợp cho query: "${data.query_text || queryText}"`;
+    statusBar.textContent = `✅ Tìm thấy ${state.rawResults.length} kết quả (Nhánh: ${state.searchMode.toUpperCase()}) cho: "${data.query_text || queryText}"`;
     speedTag.textContent = `${duration}s`;
     speedTag.style.display = "inline-block";
 
@@ -223,6 +282,7 @@ function renderResults(results) {
         <button class="select-checkbox-btn ${isSelected ? 'selected' : ''}" data-key="${itemKey}">
           ${isSelected ? '✓' : '+'}
         </button>
+        <button class="copy-btn-overlay" title="Copy <video_id,frame_id> (Ctrl+C)">📋 Copy</button>
       </div>
       <div class="kf-details">
         <div class="kf-title">
@@ -233,8 +293,18 @@ function renderResults(results) {
       </div>
     `;
 
+    // Mouseover tracking for hotkey C copy
+    card.addEventListener("mouseenter", () => { state.hoveredCand = candidate; });
+    card.addEventListener("mouseleave", () => { state.hoveredCand = null; });
+
     // Lightbox image preview on click
     card.querySelector("img").addEventListener("click", () => showLightbox(candidate, imgUrl));
+
+    // Copy Button Overlay Click
+    card.querySelector(".copy-btn-overlay").addEventListener("click", (e) => {
+      e.stopPropagation();
+      copyToClipboard(candidate);
+    });
 
     // Selection Checkbox
     const selectBtn = card.querySelector(".select-checkbox-btn");
@@ -274,17 +344,37 @@ function updateDrawer() {
     const div = document.createElement("div");
     div.className = "selected-item";
     const imgUrl = `${API_BASE}/api/v1/image/${cand.video_id}/${cand.frame_id}`;
+    
     div.innerHTML = `
       <img src="${imgUrl}" alt="${cand.scene_id}" />
       <div style="flex:1;">
         <div style="font-weight:bold; font-size:0.85rem;">${cand.video_id} (Frame ${cand.frame_id})</div>
         <div style="font-size:0.75rem; color:var(--text-sub);">${cand.timestamp_mid.toFixed(1)}s</div>
+        ${state.mode === "vqa" ? `
+          <input type="text" class="vqa-ans-input" data-key="${key}" placeholder="Nhập đáp án VQA..." value="${cand.user_answer || ''}" style="width:100%; margin-top:4px; font-size:0.75rem; padding:2px 4px; background:#000; border:1px solid var(--spider-blue); color:#fff; border-radius:4px;" />
+        ` : ''}
       </div>
+      <button onclick="copyItemKey('${cand.video_id}', ${cand.frame_id})" style="background:none; border:none; color:var(--spider-blue); cursor:pointer; font-size:1rem; margin-right:4px;" title="Copy">📋</button>
       <button onclick="removeItem('${key}')" style="background:none; border:none; color:var(--spider-red); cursor:pointer; font-weight:bold;">✕</button>
     `;
     selectedList.appendChild(div);
   });
+
+  // Attach event listener for VQA inputs
+  document.querySelectorAll(".vqa-ans-input").forEach(input => {
+    input.addEventListener("input", (e) => {
+      const k = e.target.dataset.key;
+      const item = state.selectedItems.get(k);
+      if (item) {
+        item.user_answer = e.target.value;
+      }
+    });
+  });
 }
+
+window.copyItemKey = function(video_id, frame_id) {
+  copyToClipboard({ video_id, frame_id });
+};
 
 window.removeItem = function(key) {
   state.selectedItems.delete(key);
@@ -300,23 +390,41 @@ function setupDrawer() {
   document.getElementById("export-csv-btn").addEventListener("click", exportCSV);
 }
 
+// --- CSV Exporter per Task Standard ---
 function exportCSV() {
   if (state.selectedItems.size === 0) {
     alert("Chưa có item nào được chọn để xuất CSV!");
     return;
   }
 
-  let csvContent = "video_id,frame_id,timestamp_mid,keyframe_path,ocr_text\n";
-  state.selectedItems.forEach((cand) => {
-    const ocrEscaped = `"${(cand.ocr_text || '').replace(/"/g, '""')}"`;
-    csvContent += `${cand.video_id},${cand.frame_id},${cand.timestamp_mid},${cand.keyframe_path},${ocrEscaped}\n`;
-  });
+  let csvContent = "";
+
+  if (state.mode === "vqa") {
+    // VQA Format: video_id,frame_id,answer
+    csvContent = "video_id,frame_id,answer\n";
+    state.selectedItems.forEach((cand) => {
+      const ans = (cand.user_answer || '').replace(/"/g, '""');
+      csvContent += `${cand.video_id},${cand.frame_id},"${ans}"\n`;
+    });
+  } else if (state.mode === "trake") {
+    // TRAKE Format: video_id,frame_id_1,frame_id_2,frame_id_3,frame_id_4
+    csvContent = "video_id,frame_id_1,frame_id_2,frame_id_3,frame_id_4\n";
+    state.selectedItems.forEach((cand) => {
+      csvContent += `${cand.video_id},${cand.frame_id},${cand.frame_id},${cand.frame_id},${cand.frame_id}\n`;
+    });
+  } else {
+    // KIS Format: ONLY video_id,frame_id (Standard BTC)
+    csvContent = "video_id,frame_id\n";
+    state.selectedItems.forEach((cand) => {
+      csvContent += `${cand.video_id},${cand.frame_id}\n`;
+    });
+  }
 
   const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.setAttribute("href", url);
-  link.setAttribute("download", `AIC2026_submission_${Date.now()}.csv`);
+  link.setAttribute("download", `submission_${state.mode}_${Date.now()}.csv`);
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
@@ -333,12 +441,14 @@ function showLightbox(cand, imgUrl) {
 }
 
 const modalEl = document.getElementById("lightbox-modal");
-document.getElementById("close-modal-btn").addEventListener("click", () => {
-  modalEl.style.display = "none";
-});
-
-modalEl.addEventListener("click", (e) => {
-  if (e.target === modalEl) {
+if (modalEl) {
+  document.getElementById("close-modal-btn").addEventListener("click", () => {
     modalEl.style.display = "none";
-  }
-});
+  });
+
+  modalEl.addEventListener("click", (e) => {
+    if (e.target === modalEl) {
+      modalEl.style.display = "none";
+    }
+  });
+}

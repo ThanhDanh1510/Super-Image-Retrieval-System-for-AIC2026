@@ -142,11 +142,13 @@ async def _run_text(
     """
     raw_query = getattr(request, "query", "")
     top_k = getattr(request, "top_k", 100)
+    search_mode = getattr(request, "search_mode", "all")
 
     query_input = TextQueryInput(
         raw_query=raw_query,
         task_type=task_type,
         top_k=top_k,
+        search_mode=search_mode,
     )
 
     output: TextQueryOutput = await text_query.process(
