@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>🕷️ SPIDER-RETRIEVAL AIC2026 | High-Density Search</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;900&family=Roboto+Mono:wght@500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/ui/style.css" />
+</head>
+<body>
+
+  <!-- Top Header Navigation -->
+  <header class="spider-header">
+    <div class="header-left">
+      <div class="spider-logo">
+        <span class="spider-icon">🕷️</span>
+        <div class="logo-text">
+          <h1>SPIDER-RETRIEVAL</h1>
+          <span class="sub-text">AIC2026 HIGH-DENSITY SEARCH</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Mode Selector Tabs -->
+    <nav class="mode-tabs">
+      <button class="tab-btn active" data-mode="kis">
+        <span class="tab-icon">🎯</span> KIS (Known-Item)
+      </button>
+      <button class="tab-btn" data-mode="vqa">
+        <span class="tab-icon">❓</span> VQA (Question-Answer)
+      </button>
+      <button class="tab-btn" data-mode="trake">
+        <span class="tab-icon">⏳</span> TRAKE (Event Sequence)
+      </button>
+    </nav>
+
+    <div class="header-right">
+      <button id="toggle-drawer-btn" class="drawer-trigger-btn">
+        <span class="btn-icon">🕸️</span> Giỏ Nộp Bài (<span id="selected-count">0</span>)
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="main-container">
+
+    <!-- Multimodal Search Panel -->
+    <section class="search-panel spider-card">
+      <div class="search-input-wrapper">
+        <div class="input-glow"></div>
+        <input type="text" id="query-input" placeholder="Gõ câu miêu tả tìm kiếm... (VD: xe máy màu vàng, tiệm vàng Lê Tứ)" autocomplete="off" />
+        
+        <!-- Voice Input Button -->
+        <button id="voice-btn" class="icon-action-btn" title="Thu âm giọng nói">
+          🎙️
+        </button>
+
+        <!-- Image Upload Search Button -->
+        <label for="image-upload-input" class="icon-action-btn" title="Tìm ảnh tương đồng">
+          🖼️
+          <input type="file" id="image-upload-input" accept="image/*" style="display: none;" />
+        </label>
+
+        <!-- Main Search Button -->
+        <button id="search-btn" class="spider-primary-btn">
+          <span>TÌM KIẾM</span>
+          <span class="spidey-glow"></span>
+        </button>
+      </div>
+
+      <!-- TRAKE Multi-Event Inputs (Hidden by default) -->
+      <div id="trake-events-container" class="trake-events-wrapper" style="display: none;">
+        <div class="trake-header">📌 Nhập Chuỗi Các Sự Kiện Theo Thứ Tự Thời Gian:</div>
+        <div id="trake-event-inputs">
+          <input type="text" class="trake-event-input" placeholder="Sự kiện 1: Người bước vào ô tô" />
+          <input type="text" class="trake-event-input" placeholder="Sự kiện 2: Ô tô chạy trên đường" />
+        </div>
+        <button id="add-event-btn" class="spider-secondary-btn">+ Thêm sự kiện</button>
+      </div>
+
+      <!-- Search Controls Bar -->
+      <div class="search-controls">
+        <div class="control-group">
+          <label for="top-k-slider">Số lượng hiển thị (Top-K): <span id="top-k-val" class="highlight-val">30</span> ảnh</label>
+          <input type="range" id="top-k-slider" min="6" max="96" step="6" value="30" />
+        </div>
+
+        <div class="control-group density-toggle">
+          <span>Mật độ lưới:</span>
+          <button class="density-btn active" data-cols="6">Dày (6 Cột)</button>
+          <button class="density-btn" data-cols="4">Vừa (4 Cột)</button>
+        </div>
+
+        <div id="image-preview-chip" class="image-chip" style="display: none;">
+          <span id="chip-filename">query_image.png</span>
+          <button id="remove-img-btn">✕</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Search Status Bar -->
+    <div id="status-bar" class="status-bar">
+      <span id="status-text">🕷️ Hệ thống sẵn sàng. Nhập câu truy vấn để bắt đầu.</span>
+      <span id="speed-tag" class="speed-tag" style="display: none;">0.36s</span>
+    </div>
+
+    <!-- Results High-Density Grid -->
+    <section class="results-section">
+      <div id="results-grid" class="results-grid grid-cols-6">
+        <!-- Keyframe cards will be dynamically rendered here -->
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Submission Basket Drawer (Right Side) -->
+  <aside id="submission-drawer" class="spider-drawer">
+    <div class="drawer-header">
+      <h3>🕸️ Danh Sách Chọn Nộp Bài</h3>
+      <button id="close-drawer-btn" class="close-btn">✕</button>
+    </div>
+
+    <div class="drawer-body">
+      <div id="selected-list" class="selected-items-list">
+        <div class="empty-state">Chưa có bức ảnh nào được chọn. Click dấu ✔️ trên từng ảnh để chọn nộp.</div>
+      </div>
+    </div>
+
+    <div class="drawer-footer">
+      <button id="export-csv-btn" class="spider-export-btn">
+        📥 XUẤT FILE CSV NỘP BTC
+      </button>
+    </div>
+  </aside>
+
+  <!-- Image Lightbox Modal -->
+  <div id="lightbox-modal" class="lightbox-modal" style="display: none;">
+    <div class="lightbox-content">
+      <button id="close-modal-btn" class="close-modal-btn">✕</button>
+      <img id="modal-img" src="" alt="Keyframe Fullview" />
+      <div class="modal-info">
+        <h4 id="modal-title">L21_V001_S001</h4>
+        <p id="modal-ocr"><strong>OCR:</strong> -</p>
+        <p id="modal-asr"><strong>ASR:</strong> -</p>
+      </div>
+    </div>
+  </div>
+
+  <script src="/ui/app.js"></script>
+</body>
+</html>
