@@ -47,6 +47,9 @@ class TextQueryInput:
     top_k: int = 100
     """Số candidates trả về. Tối đa 100."""
 
+    search_mode: str = "all"
+    """Chế độ tìm kiếm: 'all', 'embedding', 'ocr', 'asr'."""
+
 
 @dataclass
 class TextQueryOutput:
@@ -101,6 +104,7 @@ async def process(
         asr_sparse_vector=asr_sparse,
         image_vector=image_vector,
         top_k=query_input.top_k,
+        search_mode=query_input.search_mode,
     )
 
     return TextQueryOutput(

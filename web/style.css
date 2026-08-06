@@ -217,6 +217,74 @@ body {
 .highlight-val {
   color: var(--spider-yellow);
   font-weight: 700;
+.branch-btn {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--card-border);
+  color: var(--text-sub);
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.branch-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-main);
+}
+
+.branch-btn.active {
+  background: var(--spider-red);
+  color: #fff;
+  border-color: var(--spider-red);
+  box-shadow: 0 0 10px var(--spider-red-glow);
+}
+
+.copy-btn-overlay {
+  position: absolute;
+  top: 6px;
+  right: 60px;
+  background: rgba(0, 0, 0, 0.7);
+  border: 1px solid var(--spider-blue);
+  color: var(--spider-blue);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+  transition: all 0.2s ease;
+}
+
+.copy-btn-overlay:hover {
+  background: var(--spider-blue);
+  color: #000;
+}
+
+/* Copy Toast Popup */
+.copy-toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--spider-blue);
+  color: #000;
+  font-weight: 800;
+  padding: 10px 20px;
+  border-radius: 8px;
+  box-shadow: 0 0 20px var(--spider-blue-glow);
+  z-index: 500;
+  font-family: var(--font-code);
+  font-size: 0.9rem;
+  animation: fadeInOut 2s forwards;
+}
+
+@keyframes fadeInOut {
+  0% { opacity: 0; transform: translate(-50%, 20px); }
+  15% { opacity: 1; transform: translate(-50%, 0); }
+  85% { opacity: 1; transform: translate(-50%, 0); }
+  100% { opacity: 0; transform: translate(-50%, -20px); }
 }
 
 .number-input-field {

@@ -116,19 +116,10 @@ async def search_by_text_vectors(
     top_k: int = 100,
     collection_name: str = PRODUCTION_ALIAS,
     score_threshold: float | None = None,
+    search_mode: str = "all",
 ) -> list[CandidateResult]:
     """
     Tìm kiếm keyframe bằng text vectors (dense + sparse) và image vector qua Weighted RRF fusion.
-
-    Thực hiện multi-vector query từ các nhánh:
-      - image_dense (CLIP text vector mô phỏng ảnh, dim=1024)
-      - ocr_dense  (gte-Qwen2-1.5B embedding của text OCR, dim=1536)
-      - asr_dense  (gte-Qwen2-1.5B embedding của transcript ASR, dim=1536)
-      - ocr_sparse (BM42 keyword matching cho OCR)
-      - asr_sparse (BM42 keyword matching cho ASR)
-
-    Áp dụng trọng số nhánh (Weighted RRF) đọc từ configs/fusion_config.yaml:
-      RRF_score(d) = Σ w_branch * (1 / (k + rank_branch(d)))
     """
     import asyncio
     from shared.utils.config_loader import load_fusion_config
@@ -152,8 +143,8 @@ async def search_by_text_vectors(
     tasks = []
     task_weights = []
 
-    # Nhánh image_dense (Text-to-Image via CLIP text encoder)
-    if image_vector is not None:
+    # Nhánh image_dense (Visual CLIP)
+    if (search_mode in ["all", "embedding"]) and (image_vector is not None):
         tasks.append(
             client.query_points(
                 collection_name=collection_name,
@@ -166,46 +157,46 @@ async def search_by_text_vectors(
         )
         task_weights.append(w_image)
 
-    # Nhánh ocr_dense — loại bỏ keyframe có ocr_text rỗng ('' )
-    # Lý do: các frame không có chữ đều có embedding giống hệt nhau (của chuỗi rỗng),
-    # chúng tự tụ lại thành 1 cụm và xếp hạng cao mọi query OCR -> nhiễu kết quả.
-    tasks.append(
-        client.query_points(
-            collection_name=collection_name,
-            query=ocr_vector,
-            using=OCR_DENSE.name,
-            limit=_DEFAULT_PREFETCH_LIMIT,
-            score_threshold=score_threshold,
-            query_filter=Filter(
-                must_not=[
-                    FieldCondition(key="ocr_text", match=MatchValue(value=""))
-                ]
-            ),
-            with_payload=True,
+    # Nhánh ocr_dense
+    if search_mode in ["all", "ocr"]:
+        tasks.append(
+            client.query_points(
+                collection_name=collection_name,
+                query=ocr_vector,
+                using=OCR_DENSE.name,
+                limit=_DEFAULT_PREFETCH_LIMIT,
+                score_threshold=score_threshold,
+                query_filter=Filter(
+                    must_not=[
+                        FieldCondition(key="ocr_text", match=MatchValue(value=""))
+                    ]
+                ),
+                with_payload=True,
+            )
         )
-    )
-    task_weights.append(w_ocr_dense)
+        task_weights.append(w_ocr_dense)
 
-    # Nhánh asr_dense — loại bỏ keyframe có asr_text rỗng ('' ) (cùng lý do như ocr_dense)
-    tasks.append(
-        client.query_points(
-            collection_name=collection_name,
-            query=asr_vector,
-            using=ASR_DENSE.name,
-            limit=_DEFAULT_PREFETCH_LIMIT,
-            score_threshold=score_threshold,
-            query_filter=Filter(
-                must_not=[
-                    FieldCondition(key="asr_text", match=MatchValue(value=""))
-                ]
-            ),
-            with_payload=True,
+    # Nhánh asr_dense
+    if search_mode in ["all", "asr"]:
+        tasks.append(
+            client.query_points(
+                collection_name=collection_name,
+                query=asr_vector,
+                using=ASR_DENSE.name,
+                limit=_DEFAULT_PREFETCH_LIMIT,
+                score_threshold=score_threshold,
+                query_filter=Filter(
+                    must_not=[
+                        FieldCondition(key="asr_text", match=MatchValue(value=""))
+                    ]
+                ),
+                with_payload=True,
+            )
         )
-    )
-    task_weights.append(w_asr_dense)
+        task_weights.append(w_asr_dense)
 
     # Nhánh ocr_sparse
-    if ocr_sparse_vector is not None:
+    if (search_mode in ["all", "ocr"]) and (ocr_sparse_vector is not None):
         tasks.append(
             client.query_points(
                 collection_name=collection_name,
@@ -218,7 +209,7 @@ async def search_by_text_vectors(
         task_weights.append(w_ocr_sparse)
 
     # Nhánh asr_sparse
-    if asr_sparse_vector is not None:
+    if (search_mode in ["all", "asr"]) and (asr_sparse_vector is not None):
         tasks.append(
             client.query_points(
                 collection_name=collection_name,
