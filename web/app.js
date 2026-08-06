@@ -461,3 +461,63 @@ if (modalEl) {
     }
   });
 }
+
+// Text Zoom Modal Handling (Click any box to enlarge OCR/ASR text)
+const textZoomModal = document.getElementById("text-zoom-modal");
+const textZoomBody = document.getElementById("text-zoom-body");
+const textZoomTitle = document.getElementById("text-zoom-title");
+let currentZoomedText = "";
+
+function openTextZoom(typeLabel, textContent) {
+  if (!textContent || textContent === 'None' || textContent === '-') return;
+  currentZoomedText = textContent;
+  textZoomTitle.textContent = `🔍 CHI TIẾT ${typeLabel.toUpperCase()}`;
+  textZoomBody.textContent = textContent;
+  textZoomModal.style.display = "flex";
+}
+
+const ocrBoxEl = document.getElementById("modal-ocr");
+if (ocrBoxEl) {
+  ocrBoxEl.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const raw = ocrBoxEl.innerText || '';
+    const cleanText = raw.replace(/^OCR:\s*/i, '').trim();
+    openTextZoom("Văn Bản OCR", cleanText);
+  });
+}
+
+const asrBoxEl = document.getElementById("modal-asr");
+if (asrBoxEl) {
+  asrBoxEl.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const raw = asrBoxEl.innerText || '';
+    const cleanText = raw.replace(/^ASR:\s*/i, '').trim();
+    openTextZoom("Lời Thoại ASR", cleanText);
+  });
+}
+
+const closeZoomBtn = document.getElementById("close-text-zoom-btn");
+if (closeZoomBtn) {
+  closeZoomBtn.addEventListener("click", () => {
+    textZoomModal.style.display = "none";
+  });
+}
+
+const copyZoomBtn = document.getElementById("copy-zoom-text-btn");
+if (copyZoomBtn) {
+  copyZoomBtn.addEventListener("click", () => {
+    if (currentZoomedText) {
+      navigator.clipboard.writeText(currentZoomedText).then(() => {
+        showToast("📋 Đã copy toàn bộ văn bản!");
+      });
+    }
+  });
+}
+
+if (textZoomModal) {
+  textZoomModal.addEventListener("click", (e) => {
+    if (e.target === textZoomModal) {
+      textZoomModal.style.display = "none";
+    }
+  });
+}
