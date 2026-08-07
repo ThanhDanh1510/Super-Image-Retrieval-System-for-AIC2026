@@ -302,8 +302,11 @@ def should_filter_text(text):
     if len(text_stripped) <= 2 and not any(ord(c) >= 0x0100 for c in text_stripped):
         return True
 
-    # 2. Exact match trong danh sách spam
+    # 2. Exact match hoặc tất cả các từ cấu thành thuộc danh sách spam keywords (vd "HTV Online", "HTV 7 HD")
     if text_stripped in SPAM_KEYWORDS or text_stripped.upper() in SPAM_KEYWORDS:
+        return True
+    words = [w.strip() for w in re.split(r'\s+', text_stripped) if w.strip()]
+    if words and all(w in SPAM_KEYWORDS or w.upper() in SPAM_KEYWORDS for w in words):
         return True
 
     # 3. Timestamp patterns
@@ -1023,6 +1026,11 @@ def ocr_image_hybrid_quality(
             errors.append(f"vlm: {err}")
 
     selected_raw = max(candidates.values(), key=_candidate_score) if candidates else ""
+    if filter_spam and selected_raw:
+        raw_lines = [line.strip() for line in selected_raw.splitlines() if line.strip()]
+        clean_lines = [line for line in raw_lines if not should_filter_text(line)]
+        selected_raw = "\n".join(clean_lines)
+
     quality = build_quality_result(selected_raw)
     return quality, "; ".join(errors) if errors else None, candidates
 
