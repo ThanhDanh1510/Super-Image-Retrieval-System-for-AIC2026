@@ -112,11 +112,11 @@ def run_general_llm_fusion(vietocr_text, vintern_text, llm_model_name="Qwen/Qwen
         ).eval()
         
         system_prompt = (
-            "Bạn là chuyên gia khôi phục văn bản biểu mẫu tiếng Việt từ kết quả OCR. "
-            "Nhiệm vụ của bạn là kết hợp thông tin chữ in và chữ viết tay. "
-            "Trích xuất danh sách gồm: Tiêu đề đơn, Tên người (ví dụ: Trần Thị Kim Trang), Giới tính, "
-            "Năm sinh (ví dụ: 2002), Ngày cấp (10/05/2021), Nơi cấp (Long An), Địa chỉ (Thạnh Vĩnh Đông, Châu Thành). "
-            "Chỉ liệt kê các dòng văn bản chính xác nhất, không giải thích dài dòng."
+            "Bạn là chuyên gia hợp nhất và khôi phục văn bản OCR tiếng Việt từ hình ảnh thực tế. "
+            "Nhiệm vụ của bạn là kết hợp các kết quả OCR thô, giữ nguyên chính xác tất cả các dòng văn bản có trong ảnh, "
+            "sửa các nét chữ bị đọc nhầm để tạo thành các từ tiếng Việt chuẩn xác có nghĩa theo ngữ cảnh bức ảnh. "
+            "Chỉ liệt kê đúng toàn bộ các dòng văn bản đã làm sạch theo thứ tự từ trên xuống dưới. "
+            "Tuyệt đối không suy đoán hay bịa ra thông tin không có trong kết quả OCR thô."
         )
         
         user_prompt = (
@@ -168,5 +168,5 @@ def test_image(img_path):
         run_general_llm_fusion(vietocr_text, vintern_text)
 
 if __name__ == "__main__":
-    target = r"D:\AIC2026\data\image\L22\L22\V013\4721.webp"
+    target = r"D:\AIC2026\data\image\L30\L30\V002\3762.webp"
     test_image(target)
