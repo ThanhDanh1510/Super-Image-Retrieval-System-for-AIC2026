@@ -62,6 +62,8 @@ if not hasattr(np, 'sctypes'):
 import cv2
 from PIL import Image
 
+from shared.ocr.quality import OCRQualityResult, build_quality_result
+
 # Nếu có sẵn bản PaddleOCR / vietocr local trong my-research/, ưu tiên dùng bản đó
 _RESEARCH_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 _LOCAL_PADDLEOCR_DIR = os.path.join(_RESEARCH_DIR, "PaddleOCR")
@@ -154,6 +156,11 @@ VIETOCR_BEAMSEARCH = False  # Pass 1 (nhanh, greedy): tắt BeamSearch, nhanh h�
 ENABLE_TWO_PASS_RECOGNITION = True
 REC_CONF_THRESHOLD = 0.7  # confidence dưới ngưỡng này mới đưa qua pass 2 (beamsearch)
 VIETOCR_DEVICE_PASS2 = "cuda:1"  # dùng khi có ≥2 GPU; tự fallback nếu không có
+
+# Optional VLM branch for hard real-world images (chalkboard, handwriting,
+# posters, low-contrast signs). Kept opt-in because it is slower than local OCR.
+DEFAULT_VLM_MODEL = "5CD-AI/Vintern-1B-v3_5"
+VLM_INPUT_SIZE = 448
 
 # Tiền xử lý crop trước khi đưa vào VietOCR: upscale ảnh nhỏ + CLAHE + unsharp mask.
 # Giúp đọc tốt hơn với chữ mờ/nhỏ. Chi phí CPU rất rẻ so với lợi ích accuracy.
@@ -817,24 +824,49 @@ def ocr_image(detector, recognizer, img_path, filter_spam=True, filter_exclude_r
     Pipeline đầy đủ: PaddleOCR detect -> lọc box theo vùng loại trừ -> VietOCR recognize -> lọc spam.
     Trả về (text, error).
     """
+    quality, error = ocr_image_quality(
+        detector,
+        recognizer,
+        img_path,
+        filter_spam=filter_spam,
+        filter_exclude_region=filter_exclude_region,
+        padding=padding,
+    )
+    return quality.text, error
+
+
+def ocr_image_quality(
+    detector,
+    recognizer,
+    img_path,
+    filter_spam=True,
+    filter_exclude_region=False,
+    padding=BOX_PADDING,
+) -> tuple[OCRQualityResult, str | None]:
+    """
+    Pipeline OCR theo kiến trúc quality layer:
+      raw line OCR -> conservative Vietnamese postprocess -> auditable metadata.
+
+    Trả về OCRQualityResult để giữ cả text raw, text đã sửa, edits và review flags.
+    """
     try:
         boxes = detect_text_regions(detector, img_path)
     except Exception as e:
-        return "", str(e)
+        return build_quality_result(""), str(e)
 
     if not boxes:
-        return "", None
+        return build_quality_result(""), None
 
     # Lọc bỏ các box nằm trong vùng loại trừ TRƯỚC khi recognize (tiết kiệm thời gian VietOCR)
     if filter_exclude_region and EXCLUDE_REGIONS:
         boxes = [b for b in boxes if not box_in_exclude_region(b, EXCLUDE_REGIONS)]
 
     if not boxes:
-        return "", None
+        return build_quality_result(""), None
 
     img = cv2.imread(str(img_path))
     if img is None:
-        return "", f"Không đọc được ảnh: {img_path}"
+        return build_quality_result(""), f"Không đọc được ảnh: {img_path}"
 
     # Không cần sort ở đây nữa — recognize_text_vietocr() tự nhóm box thành đoạn
     # (cluster_boxes_into_paragraphs) và sắp đúng thứ tự đọc trước khi trả về.
@@ -845,17 +877,169 @@ def ocr_image(detector, recognizer, img_path, filter_spam=True, filter_exclude_r
             channel_title_regions=CHANNEL_TITLE_REGIONS if filter_exclude_region else None,
         )
     except Exception as e:
-        return "", str(e)
+        return build_quality_result(""), str(e)
 
-    full_text = ", ".join(texts)
-    return full_text, None
+    raw_text = "\n".join(texts)
+    return build_quality_result(raw_text), None
+
+
+def _patch_transformers_for_local_vlm():
+    """Patch older local VLM code paths against newer transformers releases."""
+    try:
+        from transformers import PreTrainedModel
+
+        def get_tied(self):
+            return getattr(self, "_all_tied_weights_keys_val", {})
+
+        def set_tied(self, val):
+            self._all_tied_weights_keys_val = val
+
+        PreTrainedModel.all_tied_weights_keys = property(get_tied, set_tied)
+    except Exception:
+        pass
+
+
+def _build_vlm_transform(input_size=VLM_INPUT_SIZE):
+    import torchvision.transforms as T
+    from torchvision.transforms.functional import InterpolationMode
+
+    imagenet_mean = (0.485, 0.456, 0.406)
+    imagenet_std = (0.229, 0.224, 0.225)
+    return T.Compose([
+        T.Lambda(lambda img: img.convert("RGB") if img.mode != "RGB" else img),
+        T.Resize((input_size, input_size), interpolation=InterpolationMode.BICUBIC),
+        T.ToTensor(),
+        T.Normalize(mean=imagenet_mean, std=imagenet_std),
+    ])
+
+
+def _enhance_for_vlm(image_path):
+    """Light global enhancement before VLM tiling, useful for chalk/low contrast."""
+    img_bgr = cv2.imread(str(image_path))
+    if img_bgr is None:
+        return Image.open(image_path).convert("RGB")
+    try:
+        lab = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2LAB)
+        l, a, b = cv2.split(lab)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        enhanced = cv2.cvtColor(cv2.merge((clahe.apply(l), a, b)), cv2.COLOR_LAB2RGB)
+        return Image.fromarray(enhanced)
+    except Exception:
+        return Image.open(image_path).convert("RGB")
+
+
+def _load_vlm_tiles(pil_img, input_size=VLM_INPUT_SIZE):
+    """Use global + left/right crops; too many tiles can overflow Vintern context."""
+    import torch
+
+    w, h = pil_img.size
+    mid_w = w // 2
+    crops = [
+        pil_img,
+        pil_img.crop((0, 0, min(w, mid_w + 80), h)),
+        pil_img.crop((max(0, mid_w - 80), 0, w, h)),
+    ]
+    transform = _build_vlm_transform(input_size=input_size)
+    tensors = [transform(crop).unsqueeze(0) for crop in crops]
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    dtype = torch.bfloat16 if device == "cuda" else torch.float32
+    return torch.cat(tensors, dim=0).to(device=device, dtype=dtype)
+
+
+def run_vlm_ocr(image_path, model_id=DEFAULT_VLM_MODEL):
+    """
+    Run a VLM OCR branch on the whole image plus high-resolution tiles.
+
+    This branch is opt-in because model loading is slow, but it generalizes better
+    on handwriting/chalkboard images where classical detection misses text lines.
+    """
+    import torch
+    from transformers import AutoModel, AutoTokenizer
+
+    _patch_transformers_for_local_vlm()
+    pil_img = _enhance_for_vlm(image_path)
+    tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
+    device_map = "cuda" if torch.cuda.is_available() else "cpu"
+    dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
+    model = AutoModel.from_pretrained(
+        model_id,
+        torch_dtype=dtype,
+        low_cpu_mem_usage=True,
+        trust_remote_code=True,
+        device_map=device_map,
+    ).eval()
+
+    pixel_values = _load_vlm_tiles(pil_img)
+    question = (
+        "<image>\n"
+        "Trích xuất OCR tất cả các dòng chữ tiếng Việt xuất hiện trong ảnh (chữ in, chữ viết tay, bảng biểu, tiêu đề, chữ hiển thị trên màn hình). "
+        "Xuất mỗi dòng trên một dòng riêng, giữ thứ tự từ trái sang phải rồi từ trên xuống dưới. "
+        "Không lặp lại dòng, không mô tả ảnh, không thêm nội dung không nhìn thấy."
+    )
+    generation_config = dict(max_new_tokens=512, do_sample=False, repetition_penalty=1.15)
+    response = model.chat(tokenizer, pixel_values, question, generation_config=generation_config)
+    return str(response).strip()
+
+
+def _candidate_score(text: str) -> tuple[int, int, int]:
+    """Rank OCR candidates by useful line count, Vietnamese signal, then length."""
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    vietnamese_chars = sum(1 for ch in text if ch in _VIET_DIACRITICS)
+    return (len(lines), vietnamese_chars, len(text))
+
+
+def ocr_image_hybrid_quality(
+    detector,
+    recognizer,
+    img_path,
+    backend="local",
+    vlm_model=DEFAULT_VLM_MODEL,
+    filter_spam=True,
+    filter_exclude_region=False,
+) -> tuple[OCRQualityResult, str | None, dict[str, str]]:
+    """Run local/VLM/hybrid OCR and return the selected quality result plus branch raw outputs."""
+    candidates: dict[str, str] = {}
+    errors: list[str] = []
+
+    if backend in ("local", "hybrid"):
+        if detector is None or recognizer is None:
+            errors.append("local backend requested but detector/recognizer is not initialized")
+        else:
+            local_quality, local_error = ocr_image_quality(
+                detector,
+                recognizer,
+                img_path,
+                filter_spam=filter_spam,
+                filter_exclude_region=filter_exclude_region,
+            )
+            candidates["local"] = local_quality.raw_text
+            if local_error:
+                errors.append(f"local: {local_error}")
+
+    if backend in ("vlm", "hybrid"):
+        try:
+            candidates["vlm"] = run_vlm_ocr(img_path, model_id=vlm_model)
+        except Exception as err:
+            errors.append(f"vlm: {err}")
+
+    selected_raw = max(candidates.values(), key=_candidate_score) if candidates else ""
+    quality = build_quality_result(selected_raw)
+    return quality, "; ".join(errors) if errors else None, candidates
 
 # ============================================================
 # PROCESS FOLDER
 # ============================================================
 
+def _quality_record(frame_id, quality: OCRQualityResult):
+    """Convert OCRQualityResult into a JSON/parquet-friendly row."""
+    payload = quality.to_dict()
+    payload["frame_id"] = str(frame_id)
+    return payload
+
+
 def process_folder(folder_name, dataset_dir, output_dir, detector, recognizer,
-                    filter_spam=True, filter_exclude_region=False, limit_images=None):
+                    filter_spam=True, filter_exclude_region=False, limit_images=None,
+                    write_quality=False):
     """
     OCR toàn bộ ảnh trong 1 folder:
       - Detection: sequential từng ảnh (PaddleOCR chạy CPU, không benefit từ batch list)
@@ -873,26 +1057,39 @@ def process_folder(folder_name, dataset_dir, output_dir, detector, recognizer,
         img_files = img_files[:limit_images]
 
     results_json = {}
+    quality_json = {}
     results_parquet = []
+    quality_parquet = []
     errors = []
 
     for img_file in tqdm(img_files, desc=f"Processing {folder_name}"):
         frame_id = Path(img_file).stem
         img_path = os.path.join(folder_path, img_file)
-        text, err = ocr_image(
+        quality, err = ocr_image_quality(
             detector, recognizer, img_path,
             filter_spam=filter_spam,
             filter_exclude_region=filter_exclude_region,
         )
         if err:
             errors.append((img_file, err))
-        results_json[frame_id] = text
-        results_parquet.append({"frame_id": frame_id, "text": text})
+        results_json[frame_id] = quality.text
+        results_parquet.append({"frame_id": frame_id, "text": quality.text})
+        if write_quality:
+            quality_record = _quality_record(frame_id, quality)
+            quality_json[frame_id] = quality_record
+            quality_parquet.append(quality_record)
 
     # Save JSON
     json_file = os.path.join(output_dir, f"{folder_name}.json")
     with open(json_file, "w", encoding="utf-8") as f:
         json.dump(results_json, f, ensure_ascii=False, indent=2)
+
+    if write_quality:
+        quality_file = os.path.join(output_dir, f"{folder_name}.quality.json")
+        with open(quality_file, "w", encoding="utf-8") as f:
+            json.dump(quality_json, f, ensure_ascii=False, indent=2)
+    else:
+        quality_file = None
 
     # Save Parquet
     try:
@@ -905,23 +1102,146 @@ def process_folder(folder_name, dataset_dir, output_dir, detector, recognizer,
         parquet_file = os.path.join(output_dir, f"{folder_name}.parquet")
         pq.write_table(table, parquet_file)
         parquet_msg = f"✓ {parquet_file}"
+        if write_quality:
+            quality_table = pa.Table.from_pylist(quality_parquet)
+            quality_parquet_file = os.path.join(output_dir, f"{folder_name}.quality.parquet")
+            pq.write_table(quality_table, quality_parquet_file)
+            parquet_msg += f"\n     → ✓ {quality_parquet_file}"
     except Exception as e:
         parquet_msg = f"⚠️ Parquet error: {e}"
 
     print(f"  ✅ {folder_name}: {len(results_json)} frames, {len(errors)} errors")
     print(f"     → {json_file}")
+    if quality_file:
+        print(f"     → {quality_file}")
     print(f"     → {parquet_msg}")
     if errors:
         print(f"  ⚠️ Errors: {errors[:3]}")
 
     return results_json, results_parquet, errors
 
+
+def run_single_image(
+    detector,
+    recognizer,
+    img_path,
+    output_dir=None,
+    write_quality=True,
+    backend="local",
+    vlm_model=DEFAULT_VLM_MODEL,
+):
+    """Run OCR on one image and optionally save a quality JSON artifact."""
+    quality, err, candidates = ocr_image_hybrid_quality(
+        detector,
+        recognizer,
+        img_path,
+        backend=backend,
+        vlm_model=vlm_model,
+        filter_spam=True,
+        filter_exclude_region=True,
+    )
+    image_path = Path(img_path)
+    image_id = image_path.stem
+
+    print("\n" + "=" * 60)
+    print(f"OCR SINGLE IMAGE: {image_path}")
+    print(f"BACKEND: {backend}")
+    print("=" * 60)
+    if err:
+        print(f"ERROR: {err}")
+    for name, raw in candidates.items():
+        print(f"\n[{name.upper()} RAW]")
+        print(raw)
+    print("\n[RAW OCR]")
+    print(quality.raw_text)
+    print("\n[POSTPROCESSED OCR]")
+    print(quality.text)
+    if quality.edits:
+        print("\n[EDITS]")
+        for edit in quality.edits:
+            print(f"- {edit['type']}: {edit['before']} -> {edit['after']}")
+    if quality.needs_review:
+        print(f"\n[REVIEW] {', '.join(quality.review_reasons)}")
+
+    if output_dir and write_quality:
+        os.makedirs(output_dir, exist_ok=True)
+        output_path = Path(output_dir) / f"{image_id}.quality.json"
+        payload = _quality_record(image_id, quality)
+        payload["image_path"] = str(image_path)
+        payload["backend"] = backend
+        payload["candidates"] = candidates
+        with open(output_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+        print(f"\nSaved quality output: {output_path}")
+
+    return quality, err
+
 # ============================================================
 # MAIN
 # ============================================================
 
-def main(dataset_dir, output_dir, prefix="", only_folder=None, limit_images=None):
+def _init_detector():
+    """Khởi tạo PaddleOCR TextDetection theo cấu hình local."""
+    print(f"Khởi tạo PaddleOCR TextDetection ({DET_MODEL_NAME})...")
+    try:
+        detector = TextDetection(
+            model_name=DET_MODEL_NAME,
+            enable_mkldnn=False,
+            box_thresh=DET_BOX_THRESH,
+            limit_side_len=DET_LIMIT_SIDE_LEN,
+        )
+    except TypeError:
+        detector = TextDetection(model_name=DET_MODEL_NAME)
+    print("✅ TextDetection ready.")
+    return detector
+
+
+def _init_recognizer():
+    """Khởi tạo VietOCR recognizer theo cấu hình local."""
+    print(f"Khởi tạo VietOCR (vgg_transformer, device={VIETOCR_DEVICE})...")
+    _vietocr_config_dir = os.path.join(_LOCAL_VIETOCR_DIR, "config")
+    _base_cfg_path  = os.path.join(_vietocr_config_dir, "base.yml")
+    _vgg_cfg_path   = os.path.join(_vietocr_config_dir, "vgg-transformer.yml")
+    if os.path.isfile(_base_cfg_path) and os.path.isfile(_vgg_cfg_path):
+        import yaml as _yaml
+        with open(_base_cfg_path, encoding="utf-8") as _f:
+            _base_cfg = _yaml.safe_load(_f)
+        with open(_vgg_cfg_path, encoding="utf-8") as _f:
+            _vgg_cfg = _yaml.safe_load(_f)
+        _base_cfg.update(_vgg_cfg)
+        vietocr_config = Cfg(_base_cfg)
+    else:
+        vietocr_config = Cfg.load_config_from_name('vgg_transformer')
+
+    vietocr_config['cnn']['pretrained'] = True
+    vietocr_config['predictor']['beamsearch'] = VIETOCR_BEAMSEARCH
+    vietocr_config['device'] = VIETOCR_DEVICE
+    recognizer = Predictor(vietocr_config)
+    print("✅ VietOCR ready.\n")
+    return recognizer
+
+
+def main(dataset_dir, output_dir, prefix="", only_folder=None, limit_images=None,
+         image_path=None, write_quality=False, backend="local", vlm_model=DEFAULT_VLM_MODEL):
     """Main function."""
+    detector = recognizer = None
+    if backend in ("local", "hybrid"):
+        detector = _init_detector()
+        recognizer = _init_recognizer()
+
+    if image_path:
+        return run_single_image(
+            detector,
+            recognizer,
+            image_path,
+            output_dir,
+            write_quality=True,
+            backend=backend,
+            vlm_model=vlm_model,
+        )
+
+    if backend != "local":
+        print("⚠️ Batch folder mode hiện chỉ dùng backend local để tránh load VLM cho hàng nghìn frame.")
 
     if not os.path.isdir(dataset_dir):
         print(f"❌ Dataset dir không tồn tại: {dataset_dir}")
@@ -961,45 +1281,6 @@ def main(dataset_dir, output_dir, prefix="", only_folder=None, limit_images=None
     print(f"Folders ({len(video_folders)}): {video_folders[:5]}")
     print()
 
-    # Khởi tạo PaddleOCR TextDetection (chỉ detect, không recognize)
-    # Lưu ý: trên Windows CPU, backend oneDNN (mkldnn) đôi khi gây lỗi
-    # "ConvertPirAttribute2RuntimeAttribute not support [...]" khi chạy inference.
-    # Tắt enable_mkldnn để tránh lỗi này (chậm hơn một chút nhưng ổn định).
-    print(f"Khởi tạo PaddleOCR TextDetection ({DET_MODEL_NAME})...")
-    try:
-        detector = TextDetection(
-            model_name=DET_MODEL_NAME,
-            enable_mkldnn=False,
-            box_thresh=DET_BOX_THRESH,
-            limit_side_len=DET_LIMIT_SIDE_LEN,
-        )
-    except TypeError:
-        # Một số phiên bản không nhận tham số mở rộng trong constructor
-        detector = TextDetection(model_name=DET_MODEL_NAME)
-    print("✅ TextDetection ready.")
-
-    # Khởi tạo VietOCR
-    print(f"Khởi tạo VietOCR (vgg_transformer, device={VIETOCR_DEVICE})...")
-    _vietocr_config_dir = os.path.join(_LOCAL_VIETOCR_DIR, "config")
-    _base_cfg_path  = os.path.join(_vietocr_config_dir, "base.yml")
-    _vgg_cfg_path   = os.path.join(_vietocr_config_dir, "vgg-transformer.yml")
-    if os.path.isfile(_base_cfg_path) and os.path.isfile(_vgg_cfg_path):
-        import yaml as _yaml
-        with open(_base_cfg_path, encoding="utf-8") as _f:
-            _base_cfg = _yaml.safe_load(_f)
-        with open(_vgg_cfg_path, encoding="utf-8") as _f:
-            _vgg_cfg = _yaml.safe_load(_f)
-        _base_cfg.update(_vgg_cfg)
-        vietocr_config = Cfg(_base_cfg)
-    else:
-        vietocr_config = Cfg.load_config_from_name('vgg_transformer')
-
-    vietocr_config['cnn']['pretrained'] = True
-    vietocr_config['predictor']['beamsearch'] = VIETOCR_BEAMSEARCH
-    vietocr_config['device'] = VIETOCR_DEVICE
-    recognizer = Predictor(vietocr_config)
-    print("✅ VietOCR ready.\n")
-
     total_start = time.time()
     total_frames = 0
     all_errors = {}
@@ -1012,7 +1293,8 @@ def main(dataset_dir, output_dir, prefix="", only_folder=None, limit_images=None
         start = time.time()
         json_res, parquet_res, errors = process_folder(
             folder_name, dataset_dir, output_dir, detector, recognizer,
-            filter_spam=True, filter_exclude_region=True, limit_images=limit_images
+            filter_spam=True, filter_exclude_region=True, limit_images=limit_images,
+            write_quality=write_quality,
         )
         elapsed = time.time() - start
 
@@ -1057,6 +1339,20 @@ if __name__ == "__main__":
     parser.add_argument("prefix", nargs="?", default=PREFIX, help="Prefix to filter folders, vd 'L21' (để trống = xử lý tất cả)")
     parser.add_argument("--only-folder", default=ONLY_FOLDER, help="Chỉ xử lý 1 folder cụ thể, vd 'L22_V001'")
     parser.add_argument("--limit", type=int, default=LIMIT_IMAGES, help="Giới hạn số ảnh xử lý mỗi folder (dùng để test nhanh)")
+    parser.add_argument("--image", default=None, help="Chạy OCR cho một ảnh cụ thể, vd data/image/L30/L30/V002/3762.webp")
+    parser.add_argument("--write-quality", action="store_true", help="Lưu thêm *.quality.json/parquet chứa raw/corrected/edits/review.")
+    parser.add_argument("--backend", choices=["local", "vlm", "hybrid"], default="local", help="OCR backend cho --image.")
+    parser.add_argument("--vlm-model", default=DEFAULT_VLM_MODEL, help="HuggingFace model ID cho backend vlm/hybrid.")
     args = parser.parse_args()
 
-    main(args.dataset_dir, args.output_dir, args.prefix, args.only_folder, args.limit)
+    main(
+        args.dataset_dir,
+        args.output_dir,
+        args.prefix,
+        args.only_folder,
+        args.limit,
+        image_path=args.image,
+        write_quality=args.write_quality,
+        backend=args.backend,
+        vlm_model=args.vlm_model,
+    )
