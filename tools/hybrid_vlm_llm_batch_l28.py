@@ -28,11 +28,13 @@ from ocr_local import _init_detector, _init_recognizer, ocr_image_hybrid_quality
 def natural_sort_key(s):
     return [int(text) if text.isdigit() else text.lower() for text in re.split(r'(\d+)', s)]
 
-def run_hybrid_batch_l28(dataset_dir: str, output_dir: str):
+def run_hybrid_batch_l28(dataset_dir: str, output_dir: str, only_folder: str = None):
     print("=" * 80)
     print("🚀 KHỞI CHẠY BATCH OCR 2 TẦNG SOTA (VIETOCR + VINTERN VLM + LLM POST-PROCESSING)")
     print(f"📁 Dataset Dir : {dataset_dir}")
     print(f"💾 Output Dir  : {output_dir}")
+    if only_folder:
+        print(f"🎯 Test Folder  : {only_folder}")
     print(f"⚡ GPU Device  : {torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'}")
     print("=" * 80)
 
@@ -53,7 +55,13 @@ def run_hybrid_batch_l28(dataset_dir: str, output_dir: str):
         key=natural_sort_key
     )
 
-    print(f"📹 Tìm thấy {len(video_folders)} video folders trong L28.")
+    if only_folder:
+        video_folders = [f for f in video_folders if f == only_folder or f == f"V{only_folder.lstrip('V')}"]
+        if not video_folders:
+            print(f"❌ Không tìm thấy folder: {only_folder}")
+            return
+
+    print(f"📹 Xử lý {len(video_folders)} video folders trong L28.")
 
     all_records = []
     total_start = time.time()
@@ -96,36 +104,24 @@ def run_hybrid_batch_l28(dataset_dir: str, output_dir: str):
             })
             total_frames += 1
 
-    # Save single consolidated Parquet for L28
+    # Save consolidated Parquet
     df_consolidated = pd.DataFrame(all_records)
-    output_parquet_path = os.path.join(output_dir, "L28_ocr.parquet")
+    output_parquet_path = os.path.join(output_dir, "L28_V001_test_hybrid.parquet" if only_folder else "L28_ocr.parquet")
     df_consolidated.to_parquet(output_parquet_path, index=False)
 
     elapsed = time.time() - total_start
     print("\n" + "=" * 80)
-    print("✅ HOÀN THÀNH XỬ LÝ OCR 2 TẦNG SOTA CHO L28!")
+    print("✅ HOÀN THÀNH XỬ LÝ OCR 2 TẦNG SOTA CHO TEST FOLDER!")
     print(f"📊 Tổng số frames  : {total_frames} frames")
     print(f"⏱️ Tổng thời gian   : {elapsed:.1f}s ({elapsed/max(1, total_frames):.2f}s/frame)")
     print(f"💾 File Parquet Gộp: {output_parquet_path}")
     print("=" * 80)
 
-    # Update unified dataset
-    unified_path = "data/unified/ocr_text.parquet"
-    if os.path.exists(unified_path):
-        try:
-            df_unified = pd.read_parquet(unified_path)
-            print(f"🔄 Đang cập nhật kết quả 2 tầng mới vào {unified_path}...")
-            df_filtered = df_unified[~df_unified["video_id"].str.startswith("L28")]
-            new_unified = pd.concat([
-                df_filtered,
-                df_consolidated[["scene_id", "video_id", "ocr_text"]]
-            ], ignore_index=True)
-            new_unified.to_parquet(unified_path, index=False)
-            print(f"🎉 Cập nhật thành công {unified_path}! (Tổng scenes: {len(new_unified)})")
-        except Exception as e:
-            print(f"⚠️ Lỗi khi cập nhật file hệ thống: {e}")
-
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--only-folder", default="V001", help="Folder video test")
+    args = parser.parse_args()
+
     dataset_dir = os.path.join(PROJECT_ROOT, "data", "image", "L28", "L28")
     output_dir = os.path.join(PROJECT_ROOT, "data", "ocr_output")
-    run_hybrid_batch_l28(dataset_dir, output_dir)
+    run_hybrid_batch_l28(dataset_dir, output_dir, only_folder=args.only_folder)
