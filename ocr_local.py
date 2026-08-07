@@ -947,18 +947,18 @@ def _load_vlm_tiles(pil_img, input_size=VLM_INPUT_SIZE):
     return torch.cat(tensors, dim=0).to(device=device, dtype=dtype)
 
 
-def run_vlm_ocr(image_path, model_id=DEFAULT_VLM_MODEL):
-    """
-    Run a VLM OCR branch on the whole image plus high-resolution tiles.
+_VLM_CACHE = {}
 
-    This branch is opt-in because model loading is slow, but it generalizes better
-    on handwriting/chalkboard images where classical detection misses text lines.
-    """
+def get_vlm_engine(model_id=DEFAULT_VLM_MODEL):
+    """Load VLM model & tokenizer đúng 1 LẦN duy nhất vào VRAM."""
+    if model_id in _VLM_CACHE:
+        return _VLM_CACHE[model_id]
+
     import torch
     from transformers import AutoModel, AutoTokenizer
 
     _patch_transformers_for_local_vlm()
-    pil_img = _enhance_for_vlm(image_path)
+    print(f"📦 Loading Vintern VLM model weights ({model_id}) vào GPU VRAM (LOAD 1 LẦN)...")
     tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
     device_map = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
@@ -969,6 +969,22 @@ def run_vlm_ocr(image_path, model_id=DEFAULT_VLM_MODEL):
         trust_remote_code=True,
         device_map=device_map,
     ).eval()
+
+    _VLM_CACHE[model_id] = (model, tokenizer)
+    print("✅ Vintern VLM model weights ready in VRAM.\n")
+    return model, tokenizer
+
+def run_vlm_ocr(image_path, model_id=DEFAULT_VLM_MODEL, model=None, tokenizer=None):
+    """
+    Run a VLM OCR branch on the whole image plus high-resolution tiles.
+    Uses cached global VLM model instance to prevent reloading weights.
+    """
+    import torch
+
+    if model is None or tokenizer is None:
+        model, tokenizer = get_vlm_engine(model_id)
+
+    pil_img = _enhance_for_vlm(image_path)
 
     pixel_values = _load_vlm_tiles(pil_img)
     question = (
@@ -1019,7 +1035,8 @@ def ocr_image_hybrid_quality(
 
     if backend in ("vlm", "hybrid"):
         try:
-            candidates["vlm"] = run_vlm_ocr(img_path, model_id=vlm_model)
+            v_model, v_tok = get_vlm_engine(vlm_model)
+            candidates["vlm"] = run_vlm_ocr(img_path, model_id=vlm_model, model=v_model, tokenizer=v_tok)
         except Exception as err:
             errors.append(f"vlm: {err}")
 
