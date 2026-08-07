@@ -173,15 +173,13 @@ PREPROCESS_TARGET_HEIGHT = 48  # chiều cao sau khi upscale
 BOX_PADDING = 8
 
 # ============================================================
-# BATCH CONFIG (tối ưu GPU)
+# BATCH CONFIG (tối ưu GPU 16GB VRAM)
 # ============================================================
-# Số ảnh gửi 1 lần vào PaddleOCR để detect (càng cao càng tận dụng GPU tốt hơn,
-# nhưng tiêu thụ VRAM nhiều hơn). Khuyến nghị: 4–16 tùy VRAM.
-BATCH_DET_SIZE = 8
+# Số ảnh gửi 1 lần vào PaddleOCR để detect
+BATCH_DET_SIZE = 16
 
-# Số crop-box gửi 1 lần vào VietOCR predict_batch() (tận dụng GPU cho recognition).
-# Khuyến nghị: 16–64 tùy VRAM. Đặt 0 để tắt batch (dùng predict từng cái).
-BATCH_REC_SIZE = 32
+# Số crop-box gửi 1 lần vào VietOCR predict_batch() (tận dụng GPU cho recognition)
+BATCH_REC_SIZE = 128
 
 # ============================================================
 # VÙNG LOẠI TRỪ (banner tin tức + watermark)
