@@ -13,21 +13,22 @@ DATASETS = [
 
 def run_queue():
     python_exe = sys.executable
-    batch_script = os.path.join(PROJECT_ROOT, "tools", "ocr_batch_dataset.py")
+    batch_script = os.path.join(PROJECT_ROOT, "tools", "fast_gpu_ocr.py")
     output_dir = os.path.join(PROJECT_ROOT, "data", "ocr_output")
 
     print("=" * 70)
-    print("🚀 KHỞI CHẠY HÀNG ĐỢI XỬ LÝ OCR GỘP TẬP TRUNG (L28 -> L30)")
+    print("🚀 KHỞI CHẠY HÀNG ĐỢI XỬ LÝ FAST GPU OCR GỘP TẬP TRUNG (L28 -> L30)")
     print("=" * 70)
 
     for prefix, dataset_dir in DATASETS:
-        print(f"\n▶️ ĐANG CHẠY BATCH OCR CHO: {prefix} ({dataset_dir})")
+        print(f"\n▶️ ĐANG CHẠY BATCH FAST GPU OCR CHO: {prefix} ({dataset_dir})")
         cmd = [
             python_exe,
             batch_script,
             "--dataset-dir", dataset_dir,
             "--output-dir", output_dir,
-            "--prefix", prefix
+            "--prefix", prefix,
+            "--threads", "8"
         ]
 
         try:
