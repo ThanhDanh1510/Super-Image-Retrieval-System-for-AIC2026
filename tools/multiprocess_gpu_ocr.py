@@ -76,8 +76,7 @@ def worker_process(worker_id: int, folder_chunk: list, dataset_dir: str, return_
     return_dict[worker_id] = worker_records
     print(f"✅ Worker #{worker_id} hoàn thành ({len(worker_records)} frames)!")
 
-def run_multiprocess_l28(num_workers: int = 4, only_folder: str = None):
-    mp.set_start_method("spawn", force=True)
+def run_multiprocess_l28(num_workers: int = 6, only_folder: str = None):
     dataset_dir = os.path.join(PROJECT_ROOT, "data", "image", "L28", "L28")
     output_dir = os.path.join(PROJECT_ROOT, "data", "ocr_output")
 
@@ -140,8 +139,13 @@ def run_multiprocess_l28(num_workers: int = 4, only_folder: str = None):
     print("=" * 80)
 
 if __name__ == "__main__":
+    try:
+        mp.set_start_method("spawn", force=True)
+    except Exception:
+        pass
+
     parser = argparse.ArgumentParser()
-    parser.add_argument("--workers", type=int, default=4, help="Số tiến trình GPU/CPU chạy song song")
+    parser.add_argument("--workers", type=int, default=2, help="Số tiến trình GPU/CPU chạy song song")
     parser.add_argument("--only-folder", default=None, help="Chạy test cho 1 folder cụ thể")
     args = parser.parse_args()
 
