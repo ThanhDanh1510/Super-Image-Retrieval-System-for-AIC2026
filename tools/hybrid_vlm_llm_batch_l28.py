@@ -23,7 +23,7 @@ if not hasattr(np, "sctypes"):
     }
 
 from tqdm import tqdm
-from ocr_local import _init_detector, _init_recognizer, ocr_image_hybrid_quality
+from ocr_local import _init_detector, _init_recognizer, ocr_image_hybrid_quality, get_vlm_engine
 
 def natural_sort_key(s):
     return [int(text) if text.isdigit() else text.lower() for text in re.split(r'(\d+)', s)]
@@ -42,9 +42,10 @@ def run_hybrid_batch_l28(dataset_dir: str, output_dir: str):
 
     os.makedirs(output_dir, exist_ok=True)
 
-    # Initialize engines
+    # Initialize engines (LOAD WEIGHTS 1 LẦN DUY NHẤT VÀO VRAM)
     detector = _init_detector()
     recognizer = _init_recognizer()
+    vlm_model, vlm_tokenizer = get_vlm_engine()
 
     all_entries = os.listdir(dataset_dir)
     video_folders = sorted(
