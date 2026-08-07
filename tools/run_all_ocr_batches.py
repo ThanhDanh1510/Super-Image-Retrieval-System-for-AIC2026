@@ -6,11 +6,9 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 DATASETS = [
-    ("L21", os.path.join(PROJECT_ROOT, "data", "image", "L21", "L21")),
-    ("L22", os.path.join(PROJECT_ROOT, "data", "image", "L22", "L22")),
-    ("L23", os.path.join(PROJECT_ROOT, "data", "image", "L23", "L23")),
-    ("L24", os.path.join(PROJECT_ROOT, "data", "image", "L24", "L24")),
-    ("L25", os.path.join(PROJECT_ROOT, "data", "image", "L25", "L25")),
+    ("L28", os.path.join(PROJECT_ROOT, "data", "image", "L28", "L28")),
+    ("L29", os.path.join(PROJECT_ROOT, "data", "image", "L29", "L29")),
+    ("L30", os.path.join(PROJECT_ROOT, "data", "image", "L30", "L30")),
 ]
 
 def run_queue():
@@ -19,7 +17,7 @@ def run_queue():
     output_dir = os.path.join(PROJECT_ROOT, "data", "ocr_output")
 
     print("=" * 70)
-    print("🚀 KHỞI CHẠY HÀNG ĐỢI XỬ LÝ OCR GỘP TẬP TRUNG (L21 -> L25)")
+    print("🚀 KHỞI CHẠY HÀNG ĐỢI XỬ LÝ OCR GỘP TẬP TRUNG (L28 -> L30)")
     print("=" * 70)
 
     for prefix, dataset_dir in DATASETS:
@@ -39,7 +37,7 @@ def run_queue():
             print(f"❌ Lỗi khi xử lý {prefix}: {e}")
 
     print("\n" + "=" * 70)
-    print("🎉 TẤT CẢ CÁC TẬP DỮ LIỆU L21, L22, L23, L24, L25 ĐÃ HOÀN THÀNH XỬ LÝ!")
+    print("🎉 TẤT CẢ CÁC TẬP DỮ LIỆU L28, L29, L30 ĐÃ HOÀN THÀNH XỬ LÝ!")
     print("=" * 70)
 
 if __name__ == "__main__":
