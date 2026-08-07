@@ -76,7 +76,7 @@ def run_vintern_branch(img_path, model_id="5CD-AI/Vintern-1B-v3_5"):
         ).eval()
         
         pixel_values = load_image(img_path, input_size=448)
-        question = "<image>\nHãy đọc và trích xuất tất cả các dòng chữ tiếng Việt có trên bảng phấn trong bức hình này."
+        question = "<image>\nHãy đọc và trích xuất tất cả các dòng chữ tiếng Việt có trong hình ảnh này."
         
         generation_config = dict(max_new_tokens=512, do_sample=False)
         response = model.chat(tokenizer, pixel_values, question, generation_config=generation_config)
@@ -86,42 +86,66 @@ def run_vintern_branch(img_path, model_id="5CD-AI/Vintern-1B-v3_5"):
         print(f"   ❌ Vintern Error: {e}")
         return ""
 
-def run_llm_post_correction(vietocr_text, vintern_text):
-    print("\n🔹 [Nhánh 3] Đang chạy LLM Post-Correction (Sửa lỗi chính tả & Ghép ngữ cảnh tiếng Việt)...")
-    prompt = f"""Bạn là chuyên gia khôi phục văn bản tiếng Việt từ kết quả OCR. Dưới đây là kết quả OCR từ bức ảnh bảng phấn trường học:
-
-[Kết quả OCR Vintern VLM]:
-{vintern_text}
-
-[Kết quả OCR VietOCR]:
-{vietocr_text}
-
-Hãy sửa các lỗi gõ nhầm (ví dụ: 'Công số' -> 'Tổng số', 'Chủ từ' -> 'Thứ tư', 'Cập - đọc' -> 'Tập đọc', 'Cập chóp' -> 'Tập chép'), giữ nguyên các từ đúng (như 'Chuỗi ngọc lam'), và xuất ra danh sách văn bản tiếng Việt hoàn chỉnh, chuẩn xác 100%."""
-
-    print("   ➔ LLM Prompt Payload ready.")
-    # Sử dụng quy tắc quy chuẩn thông minh để minh họa kết quả sau Post-Correction
-    corrected_lines = []
-    for line in vintern_text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        line = line.replace("Công số", "Tổng số")
-        line = line.replace("Chủ từ", "Thứ tư")
-        line = line.replace("Cập - đọc", "Tập đọc").replace("Cập đọc", "Tập đọc")
-        line = line.replace("Cập chóp", "Tập chép").replace("Cập chép", "Tập chép")
-        corrected_lines.append(line)
-    
-    final_output = "\n".join(corrected_lines)
-    print("\n" + "=" * 60)
-    print("🏆 KẾT QUẢ COMBO TỐI THƯỢNG HOÀN CHỈNH (SAU LLM POST-CORRECTION):")
-    print("=" * 60)
-    print(final_output)
-    print("=" * 60)
-    return final_output
+def run_llm_post_correction(vietocr_text, vintern_text, llm_model_name="Qwen/Qwen2.5-1.5B-Instruct"):
+    print(f"\n🔹 [Nhánh 3] Đang nạp và chạy LLM Post-Correction thật ({llm_model_name})...")
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(llm_model_name, trust_remote_code=True)
+        model = AutoModelForCausalLM.from_pretrained(
+            llm_model_name,
+            torch_dtype=torch.bfloat16,
+            device_map="cuda",
+            trust_remote_code=True
+        ).eval()
+        
+        system_prompt = (
+            "Bạn là chuyên gia khôi phục và sửa lỗi chính tả văn bản tiếng Việt từ các nguồn OCR thô. "
+            "Nhiệm vụ của bạn là kết hợp 2 nguồn kết quả OCR thô, tự động sửa các nét chữ bị đọc nhầm "
+            "để tạo thành các từ tiếng Việt chuẩn xác có nghĩa theo ngữ cảnh. "
+            "Chỉ xuất ra danh sách các dòng văn bản tiếng Việt đã được sửa hoàn chỉnh, không kèm giải thích."
+        )
+        
+        user_prompt = (
+            f"Dưới đây là 2 kết quả OCR từ cùng 1 bức ảnh keyframe:\n\n"
+            f"[Nguồn 1 - Vintern VLM]:\n{vintern_text}\n\n"
+            f"[Nguồn 2 - VietOCR]:\n{vietocr_text}\n\n"
+            f"Hãy khôi phục và xuất ra văn bản tiếng Việt chuẩn xác nhất:"
+        )
+        
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
+        
+        prompt_text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        model_inputs = tokenizer([prompt_text], return_tensors="pt").to("cuda")
+        
+        with torch.no_grad():
+            generated_ids = model.generate(
+                **model_inputs,
+                max_new_tokens=512,
+                do_sample=False,
+                temperature=0.0
+            )
+        
+        input_len = model_inputs.input_ids.shape[1]
+        response_ids = generated_ids[0][input_len:]
+        final_output = tokenizer.decode(response_ids, skip_special_tokens=True).strip()
+        
+        print("\n" + "=" * 60)
+        print("🏆 KẾT QUẢ SỬA LỖI CHÍNH TẢ TỪ THỰC TẾ NEURAL LLM (Qwen2.5-1.5B):")
+        print("=" * 60)
+        print(final_output)
+        print("=" * 60)
+        return final_output
+    except Exception as e:
+        print(f"❌ Error in LLM Post-Correction: {e}")
+        import traceback
+        traceback.print_exc()
+        return vintern_text
 
 def main():
     print("=" * 60)
-    print("🚀 COMBO TỐI THƯỢNG OCR TEST (VietOCR + Vintern VLM + LLM Corrector)")
+    print("🚀 COMBO TỐI THƯỢNG OCR TEST (GENUINE NEURAL PIPELINE)")
     print("=" * 60)
     print(f"📷 Target image: {IMAGE_PATH}")
     
