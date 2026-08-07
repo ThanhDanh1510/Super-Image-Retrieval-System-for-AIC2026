@@ -72,10 +72,9 @@ htmlcov/
 # --- Docker ---
 *.tar
 
-# --- Misc ---
-*.bak
-*.tmp
-.agents/
-.claude/
-skills-lock.json
+# --- Temporary debug & test output files ---
+*_zoom.webp
+temp_*.json
+*.quality.tmp
+data/ocr_test_output/
 
