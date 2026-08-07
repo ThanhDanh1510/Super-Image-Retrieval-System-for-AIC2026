@@ -71,8 +71,6 @@ def run_hybrid_batch_l28(dataset_dir: str, output_dir: str, only_folder: str = N
     total_start = time.time()
     total_frames = 0
 
-    from concurrent.futures import ThreadPoolExecutor
-
     for idx, v_folder in enumerate(video_folders, 1):
         folder_path = os.path.join(dataset_dir, v_folder)
         img_files = sorted(
@@ -81,11 +79,12 @@ def run_hybrid_batch_l28(dataset_dir: str, output_dir: str, only_folder: str = N
         )
 
         v_id = f"L28_{v_folder}" if not v_folder.startswith("L28") else v_folder
-        print(f"\n🎬 [{idx}/{len(video_folders)}] Xử lý Max GPU CUDA + 12 CPU Workers cho {v_id} ({len(img_files)} frames)...")
+        print(f"\n🎬 [{idx}/{len(video_folders)}] Xử lý CUDA Stream 2 Tầng cho {v_id} ({len(img_files)} frames)...")
 
-        def process_frame_hybrid(img_file):
+        for img_file in tqdm(img_files, desc=f"Dual-Track SOTA CUDA {v_id}"):
             frame_id = Path(img_file).stem
             img_path = os.path.join(folder_path, img_file)
+
             quality, err, candidates = ocr_image_hybrid_quality(
                 detector,
                 recognizer,
@@ -94,26 +93,19 @@ def run_hybrid_batch_l28(dataset_dir: str, output_dir: str, only_folder: str = N
                 filter_spam=True,
                 filter_exclude_region=True,
             )
+
             ocr_text = quality.text.strip()
             scene_id = f"{v_id}_S{int(frame_id):03d}" if frame_id.isdigit() else f"{v_id}_{frame_id}"
-            return {
+
+            all_records.append({
                 "scene_id": scene_id,
                 "video_id": v_id,
                 "frame_id": frame_id,
                 "ocr_text": ocr_text,
                 "local_raw": candidates.get("local", ""),
                 "vlm_raw": candidates.get("vlm", "")
-            }
-
-        with ThreadPoolExecutor(max_workers=12) as executor:
-            folder_records = list(tqdm(
-                executor.map(process_frame_hybrid, img_files),
-                total=len(img_files),
-                desc=f"Dual-Track SOTA CUDA {v_id}"
-            ))
-
-        all_records.extend(folder_records)
-        total_frames += len(folder_records)
+            })
+            total_frames += 1
 
     # Save consolidated Parquet
     df_consolidated = pd.DataFrame(all_records)

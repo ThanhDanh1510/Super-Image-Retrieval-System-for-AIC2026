@@ -301,7 +301,13 @@ def should_filter_text(text):
         return True
 
     # 2. Exact match hoặc tất cả các từ cấu thành thuộc danh sách spam keywords (vd "HTV Online", "HTV 7 HD")
-    if text_stripped in SPAM_KEYWORDS or text_stripped.upper() in SPAM_KEYWORDS:
+    t_upper = text_stripped.upper()
+    if "HTV" in t_upper and "ONLINE" in t_upper:
+        return True
+    if t_upper in ("HTV", "ONLINE", "HTV ONLINE", "VTV", "VTV ONLINE", "HTV7", "HTV9", "HTV7 HD", "HTV9 HD"):
+        return True
+
+    if text_stripped in SPAM_KEYWORDS or t_upper in SPAM_KEYWORDS:
         return True
     words = [w.strip() for w in re.split(r'\s+', text_stripped) if w.strip()]
     if words and all(w in SPAM_KEYWORDS or w.upper() in SPAM_KEYWORDS for w in words):
@@ -974,6 +980,31 @@ def get_vlm_engine(model_id=DEFAULT_VLM_MODEL):
     print("✅ Vintern VLM model weights ready in VRAM.\n")
     return model, tokenizer
 
+def clean_vlm_response(response_text: str) -> str:
+    """Loại bỏ hoàn toàn các câu trò chuyện/giải thích rác của VLM/LLM (vd: 'Vì OCR không thể...', 'Dòng đầu tiên:')."""
+    if not response_text:
+        return ""
+    lines = [line.strip() for line in response_text.splitlines() if line.strip()]
+    cleaned_lines = []
+
+    explanation_prefixes = (
+        "vì ocr", "dưới đây là", "dòng đầu tiên", "dòng thứ", "tôi chỉ trích xuất",
+        "ảnh không có chữ", "không có văn bản", "không tìm thấy", "nói chung",
+        "lưu ý:", "ghi chú:", "chữ viết tay", "không thể đọc", "chữ có khả năng"
+    )
+
+    for line in lines:
+        line_lower = line.lower()
+        if any(prefix in line_lower for prefix in explanation_prefixes):
+            continue
+        # Clean inline prefixes like 'Dòng đầu tiên: "Việt Nam"' -> 'Việt Nam'
+        line = re.sub(r'^(dòng\s+\d+:\s*|dòng\s+đầu\s+tiên:\s*|dòng\s+thứ\s+\w+:\s*)', '', line, flags=re.IGNORECASE)
+        line = line.strip(' "“’\'')
+        if line and not should_filter_text(line):
+            cleaned_lines.append(line)
+
+    return "\n".join(cleaned_lines)
+
 def run_vlm_ocr(image_path, model_id=DEFAULT_VLM_MODEL, model=None, tokenizer=None):
     """
     Run a VLM OCR branch on the whole image plus high-resolution tiles.
@@ -995,7 +1026,8 @@ def run_vlm_ocr(image_path, model_id=DEFAULT_VLM_MODEL, model=None, tokenizer=No
     )
     generation_config = dict(max_new_tokens=512, do_sample=False, repetition_penalty=1.15)
     response = model.chat(tokenizer, pixel_values, question, generation_config=generation_config)
-    return str(response).strip()
+    raw_response = str(response).strip()
+    return clean_vlm_response(raw_response)
 
 
 def _candidate_score(text: str) -> tuple[int, int, int]:
@@ -1035,8 +1067,19 @@ def ocr_image_hybrid_quality(
 
     if backend in ("vlm", "hybrid"):
         try:
-            v_model, v_tok = get_vlm_engine(vlm_model)
-            candidates["vlm"] = run_vlm_ocr(img_path, model_id=vlm_model, model=v_model, tokenizer=v_tok)
+            # Cascade Gating: Chỉ chạy VLM khi backend='vlm' hoặc khi đã phát hiện có vùng chữ trong ảnh
+            has_boxes = False
+            if detector is not None:
+                try:
+                    boxes = detect_text_regions(detector, img_path)
+                    has_boxes = len(boxes) > 0
+                except Exception:
+                    has_boxes = False
+
+            should_run_vlm = (backend == "vlm") or (candidates.get("local", "").strip() != "") or has_boxes
+            if should_run_vlm:
+                v_model, v_tok = get_vlm_engine(vlm_model)
+                candidates["vlm"] = run_vlm_ocr(img_path, model_id=vlm_model, model=v_model, tokenizer=v_tok)
         except Exception as err:
             errors.append(f"vlm: {err}")
 
