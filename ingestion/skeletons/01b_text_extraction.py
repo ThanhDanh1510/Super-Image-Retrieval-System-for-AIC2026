@@ -59,6 +59,7 @@ except ImportError:
                     return yaml.safe_load(f)
         raise FileNotFoundError("Không tìm thấy configs/model_versions.yaml")
 
+from shared.ocr.quality import build_quality_result
 from ingestion.skeletons.checkpoint_manifest import CheckpointManifest
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -233,9 +234,9 @@ def _collect_ocr_text(node: Any, out: list[str]) -> None:
                 _collect_ocr_text(item, out)
 
 
-def run_ocr(ocr_engine: Any, image_path: str) -> str:
+def run_ocr_raw(ocr_engine: Any, image_path: str) -> str:
     """
-    Chạy OCR trên một ảnh keyframe và trả về text nhận dạng được.
+    Chạy OCR trên một ảnh keyframe và trả về text raw nhận dạng được.
 
     Args:
         ocr_engine: PaddleOCR instance từ init_ocr_engine().
@@ -266,12 +267,27 @@ def run_ocr(ocr_engine: Any, image_path: str) -> str:
         texts: list[str] = []
         _collect_ocr_text(result, texts)
 
-        return " ".join(texts).strip()
+        return "\n".join(texts).strip()
     except FileNotFoundError:
         raise
     except Exception as err:
         logger.warning(f"Lỗi khi chạy OCR trên {image_path}: {err}")
         return ""
+
+
+def run_ocr_quality(ocr_engine: Any, image_path: str):
+    """Run OCR and return corrected text plus quality metadata."""
+    return build_quality_result(run_ocr_raw(ocr_engine, image_path))
+
+
+def run_ocr(ocr_engine: Any, image_path: str) -> str:
+    """
+    Chạy OCR trên một ảnh keyframe và trả về text đã chuẩn hóa/correct conservative.
+
+    Giữ interface cũ cho downstream retrieval, nhưng nội bộ có quality layer để
+    những lỗi chắc chắn theo ngữ cảnh như "vq" trong dòng điểm danh được sửa.
+    """
+    return run_ocr_quality(ocr_engine, image_path).text
 
 
 def extract_audio_segment(
@@ -370,6 +386,7 @@ def process_text_extraction(
     video_dir: str,
     output_dir: str,
     checkpoint_path: str | None = None,
+    write_ocr_quality: bool = False,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Entry point chính: Chạy OCR + ASR cho toàn bộ scenes trong metadata.
@@ -380,6 +397,7 @@ def process_text_extraction(
         video_dir: Thư mục chứa video gốc (dùng cho ASR).
         output_dir: Thư mục output (/kaggle/working/shard_output/).
         checkpoint_path: Đường dẫn checkpoint.json. None → mặc định.
+        write_ocr_quality: Nếu True, lưu thêm ocr_quality.parquet với raw/corrected/review metadata.
 
     Returns:
         Tuple (ocr_df, asr_df):
@@ -451,6 +469,7 @@ def process_text_extraction(
                 video_file_map[v_file.stem] = v_file
 
     ocr_records = []
+    ocr_quality_records = []
     asr_records = []
     total_scenes = len(df_meta)
 
@@ -472,7 +491,19 @@ def process_text_extraction(
                     kf_path = Path(keyframe_dir) / video_id / keyframe_rel
                 if kf_path.exists():
                     try:
-                        ocr_text = run_ocr(ocr_engine, str(kf_path))
+                        quality = run_ocr_quality(ocr_engine, str(kf_path))
+                        ocr_text = quality.text
+                        if write_ocr_quality:
+                            ocr_quality_records.append({
+                                "scene_id": scene_id,
+                                "video_id": video_id,
+                                "ocr_text": quality.text,
+                                "ocr_raw_text": quality.raw_text,
+                                "needs_review": quality.needs_review,
+                                "review_reasons": quality.review_reasons,
+                                "edits": quality.edits,
+                                "lines": [line.__dict__ for line in quality.lines],
+                            })
                     except Exception as err:
                         logger.warning(f"OCR error on scene {scene_id}: {err}")
                 else:
@@ -480,6 +511,19 @@ def process_text_extraction(
 
             manifest.mark_done(scene_id, step="ocr")
             ocr_cache[scene_id] = ocr_text
+
+        if write_ocr_quality and not any(record["scene_id"] == scene_id for record in ocr_quality_records):
+            quality = build_quality_result(ocr_text)
+            ocr_quality_records.append({
+                "scene_id": scene_id,
+                "video_id": video_id,
+                "ocr_text": quality.text,
+                "ocr_raw_text": quality.raw_text,
+                "needs_review": quality.needs_review,
+                "review_reasons": quality.review_reasons,
+                "edits": quality.edits,
+                "lines": [line.__dict__ for line in quality.lines],
+            })
 
         # --- ASR Extraction ---
         if manifest.is_done(scene_id, step="asr") and scene_id in asr_cache:
@@ -526,6 +570,10 @@ def process_text_extraction(
 
     ocr_df.to_parquet(ocr_output_path, index=False)
     asr_df.to_parquet(asr_output_path, index=False)
+    if write_ocr_quality:
+        quality_output_path = out_p / "ocr_quality.parquet"
+        pd.DataFrame(ocr_quality_records).to_parquet(quality_output_path, index=False)
+        logger.info(f"Saved {quality_output_path}")
     logger.info(f"Saved {ocr_output_path} and {asr_output_path}")
 
     return ocr_df, asr_df
@@ -538,6 +586,11 @@ if __name__ == "__main__":
     parser.add_argument("--video-dir", required=True, help="Thư mục chứa video gốc.")
     parser.add_argument("--output-dir", default="/kaggle/working/shard_output", help="Thư mục lưu kết quả.")
     parser.add_argument("--checkpoint-path", default=None, help="Đường dẫn file checkpoint.")
+    parser.add_argument(
+        "--write-ocr-quality",
+        action="store_true",
+        help="Lưu thêm ocr_quality.parquet với line-level metadata/review flags.",
+    )
 
     args = parser.parse_args()
 
@@ -547,4 +600,5 @@ if __name__ == "__main__":
         video_dir=args.video_dir,
         output_dir=args.output_dir,
         checkpoint_path=args.checkpoint_path,
+        write_ocr_quality=args.write_ocr_quality,
     )
