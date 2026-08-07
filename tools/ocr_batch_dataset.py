@@ -68,28 +68,38 @@ def run_batch_dataset(dataset_dir: str, output_dir: str, prefix: str):
         )
 
         v_id = f"{prefix}_{v_folder}" if not v_folder.startswith(prefix) else v_folder
-        print(f"\n🎬 [{idx}/{len(video_folders)}] Xử lý {v_id} ({len(img_files)} frames)...")
+        print(f"\n🎬 [{idx}/{len(video_folders)}] Xử lý Siêu Tốc {v_id} ({len(img_files)} frames)...")
 
-        for img_file in tqdm(img_files, desc=f"Progress {v_id}"):
+        # Multi-threading image paths loading + GPU Batching
+        from concurrent.futures import ThreadPoolExecutor
+
+        def process_frame(img_file):
             frame_id = Path(img_file).stem
             img_path = os.path.join(folder_path, img_file)
-
             quality, err = ocr_image_quality(
                 detector, recognizer, img_path,
                 filter_spam=True,
                 filter_exclude_region=True
             )
-
             ocr_text = quality.text.strip()
             scene_id = f"{v_id}_S{int(frame_id):03d}" if frame_id.isdigit() else f"{v_id}_{frame_id}"
-
-            all_records.append({
+            return {
                 "scene_id": scene_id,
                 "video_id": v_id,
                 "frame_id": frame_id,
                 "ocr_text": ocr_text
-            })
-            total_frames += 1
+            }
+
+        # Run 8 CPU workers parallel prefetching while GPU processes CUDA batches
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            folder_records = list(tqdm(
+                executor.map(process_frame, img_files),
+                total=len(img_files),
+                desc=f"Fast CUDA Batch {v_id}"
+            ))
+
+        all_records.extend(folder_records)
+        total_frames += len(folder_records)
 
     # 3. Save single consolidated parquet for this prefix
     df_consolidated = pd.DataFrame(all_records)
