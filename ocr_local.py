@@ -1187,18 +1187,29 @@ def run_single_image(
 # ============================================================
 
 def _init_detector():
-    """Khởi tạo PaddleOCR TextDetection theo cấu hình local."""
-    print(f"Khởi tạo PaddleOCR TextDetection ({DET_MODEL_NAME})...")
+    """Khởi tạo PaddleOCR TextDetection trên GPU CUDA."""
+    print(f"Khởi tạo PaddleOCR TextDetection ({DET_MODEL_NAME}) trên GPU CUDA...")
+    try:
+        import paddle
+        use_gpu = paddle.device.cuda.device_count() > 0
+    except Exception:
+        use_gpu = True
+
     try:
         detector = TextDetection(
             model_name=DET_MODEL_NAME,
+            use_gpu=use_gpu,
+            device="gpu" if use_gpu else "cpu",
             enable_mkldnn=False,
             box_thresh=DET_BOX_THRESH,
             limit_side_len=DET_LIMIT_SIDE_LEN,
         )
     except TypeError:
-        detector = TextDetection(model_name=DET_MODEL_NAME)
-    print("✅ TextDetection ready.")
+        try:
+            detector = TextDetection(model_name=DET_MODEL_NAME, use_gpu=use_gpu)
+        except TypeError:
+            detector = TextDetection(model_name=DET_MODEL_NAME)
+    print("✅ TextDetection ready on GPU CUDA.")
     return detector
 
 
