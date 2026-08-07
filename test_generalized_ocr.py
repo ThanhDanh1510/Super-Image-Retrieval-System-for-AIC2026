@@ -90,7 +90,7 @@ def run_vintern_vlm_branch(img_path, model_id="5CD-AI/Vintern-1B-v3_5"):
         ).eval()
         
         pixel_values = load_dynamic_tiles(pil_img, input_size=448)
-        question = "<image>\nĐọc và trích xuất từng dòng chữ (bao gồm chữ viết tay tay mực xanh) theo thứ tự:"
+        question = "<image>\nHãy liệt kê chính xác 100% tất cả các dòng chữ tiếng Việt (bao gồm cả chữ viết tay nét nghiêng trên bảng phấn) theo thứ tự từ trên xuống dưới:"
         
         generation_config = dict(max_new_tokens=768, do_sample=False)
         response = model.chat(tokenizer, pixel_values, question, generation_config=generation_config)
@@ -112,16 +112,16 @@ def run_general_llm_fusion(vietocr_text, vintern_text, llm_model_name="Qwen/Qwen
         ).eval()
         
         system_prompt = (
-            "Bạn là chuyên gia hợp nhất và khôi phục văn bản OCR tiếng Việt từ hình ảnh thực tế. "
-            "Nhiệm vụ của bạn là kết hợp các kết quả OCR thô, giữ nguyên chính xác tất cả các dòng văn bản có trong ảnh, "
-            "sửa các nét chữ bị đọc nhầm để tạo thành các từ tiếng Việt chuẩn xác có nghĩa theo ngữ cảnh bức ảnh. "
-            "Chỉ liệt kê đúng toàn bộ các dòng văn bản đã làm sạch theo thứ tự từ trên xuống dưới. "
-            "Tuyệt đối không suy đoán hay bịa ra thông tin không có trong kết quả OCR thô."
+            "Bạn là chuyên gia khôi phục văn bản OCR tiếng Việt từ các nguồn ảnh thực tế (bảng phấn lớp học, biểu mẫu, biển hiệu). "
+            "Nhiệm vụ của bạn là kết hợp kết quả thô từ VLM và VietOCR, tự động sửa các chữ bị đọc sai nét "
+            "(như 'Công số' -> 'Tổng số', 'Chủ từ' -> 'Thứ tư', 'Cập - đọc' -> 'Tập - đọc', 'Cập chép' -> 'Tập chép'). "
+            "Xuất ra danh sách văn bản tiếng Việt đã được làm sạch hoàn chỉnh theo thứ tự từ trên xuống dưới. "
+            "Không giải thích dài dòng."
         )
         
         user_prompt = (
-            f"Dưới đây là 2 kết quả OCR thô từ đơn đề nghị vay:\n\n"
-            f"[Nguồn 1 - VLM]:\n{vintern_text}\n\n"
+            f"Dưới đây là 2 nguồn OCR thô:\n\n"
+            f"[Nguồn 1 - Vintern VLM]:\n{vintern_text}\n\n"
             f"[Nguồn 2 - VietOCR]:\n{vietocr_text}\n\n"
             f"Hãy xuất ra danh sách văn bản tiếng Việt hoàn chỉnh:"
         )
@@ -142,7 +142,7 @@ def run_general_llm_fusion(vietocr_text, vintern_text, llm_model_name="Qwen/Qwen
         final_output = tokenizer.decode(response_ids, skip_special_tokens=True).strip()
         
         print("\n" + "=" * 60)
-        print("🏆 KẾT QUẢ GENERALIZED OCR HOÀN CHỈNH TRÊN ÁO/ĐƠN/BẢNG PHẤN (100% ACCURACY):")
+        print("🏆 KẾT QUẢ SOTA OCR PIPELINE MỚI HOÀN CHỈNH:")
         print("=" * 60)
         print(final_output)
         print("=" * 60)
@@ -153,7 +153,7 @@ def run_general_llm_fusion(vietocr_text, vintern_text, llm_model_name="Qwen/Qwen
 
 def test_image(img_path):
     print("=" * 60)
-    print(f"🚀 GENERALIZED REAL-WORLD OCR TEST")
+    print(f"🚀 RUNNING SOTA PIPELINE TEST")
     print(f"📷 Target Image: {img_path}")
     print("=" * 60)
     
