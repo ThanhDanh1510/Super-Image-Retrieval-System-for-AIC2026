@@ -28,8 +28,8 @@ from ocr_local import _init_detector, _init_recognizer, ocr_image_hybrid_quality
 def natural_sort_key(s):
     return [int(text) if text.isdigit() else text.lower() for text in re.split(r'(\d+)', s)]
 
-def worker_process(worker_id: int, folder_chunk: list, dataset_dir: str, return_dict: dict):
-    print(f"🚀 Worker GPU/CPU Process #{worker_id} đã khởi động với {len(folder_chunk)} folders...")
+def worker_process(worker_id: int, folder_chunk: list, dataset_dir: str, return_dict: dict, checkpoint_dir: str):
+    print(f"🚀 Worker GPU/CPU Process #{worker_id} khởi động với {len(folder_chunk)} folders...")
 
     if torch.cuda.is_available():
         torch.backends.cudnn.benchmark = True
@@ -40,14 +40,27 @@ def worker_process(worker_id: int, folder_chunk: list, dataset_dir: str, return_
 
     worker_records = []
     for idx, v_folder in enumerate(folder_chunk, 1):
+        v_id = f"L28_{v_folder}" if not v_folder.startswith("L28") else v_folder
+        folder_ckpt_path = os.path.join(checkpoint_dir, f"{v_id}.parquet")
+
+        # 1. Khôi phục từ checkpoint folder nếu đã có
+        if os.path.exists(folder_ckpt_path):
+            try:
+                df_existing = pd.read_parquet(folder_ckpt_path)
+                print(f"⏩ [Worker #{worker_id}] [{idx}/{len(folder_chunk)}] Đã có checkpoint {v_id} ({len(df_existing)} frames) -> Bỏ qua!")
+                worker_records.extend(df_existing.to_dict("records"))
+                continue
+            except Exception:
+                pass
+
         folder_path = os.path.join(dataset_dir, v_folder)
         img_files = sorted(
             [f for f in os.listdir(folder_path) if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp'))],
             key=natural_sort_key
         )
-        v_id = f"L28_{v_folder}" if not v_folder.startswith("L28") else v_folder
         print(f"⚡ [Worker #{worker_id}] [{idx}/{len(folder_chunk)}] Xử lý {v_id} ({len(img_files)} frames)...")
 
+        folder_records = []
         for img_file in img_files:
             frame_id = Path(img_file).stem
             img_path = os.path.join(folder_path, img_file)
@@ -64,30 +77,40 @@ def worker_process(worker_id: int, folder_chunk: list, dataset_dir: str, return_
             ocr_text = quality.text.strip()
             scene_id = f"{v_id}_S{int(frame_id):03d}" if frame_id.isdigit() else f"{v_id}_{frame_id}"
 
-            worker_records.append({
+            rec = {
                 "scene_id": scene_id,
                 "video_id": v_id,
                 "frame_id": frame_id,
                 "ocr_text": ocr_text,
                 "local_raw": candidates.get("local", ""),
                 "vlm_raw": candidates.get("vlm", "")
-            })
+            }
+            folder_records.append(rec)
+            worker_records.append(rec)
+
+        # 2. LƯU NGAY SAU KHI XỬ LÝ XONG 1 VIDEO FOLDER (INCREMENTAL SAVE)
+        df_folder = pd.DataFrame(folder_records)
+        df_folder.to_parquet(folder_ckpt_path, index=False)
+        print(f"💾 [Worker #{worker_id}] Đã lưu checkpoint tức thì cho {v_id} ({len(folder_records)} frames) -> {folder_ckpt_path}")
 
     return_dict[worker_id] = worker_records
     print(f"✅ Worker #{worker_id} hoàn thành ({len(worker_records)} frames)!")
 
-def run_multiprocess_l28(num_workers: int = 6, only_folder: str = None):
+def run_multiprocess_l28(num_workers: int = 2, only_folder: str = None):
     dataset_dir = os.path.join(PROJECT_ROOT, "data", "image", "L28", "L28")
     output_dir = os.path.join(PROJECT_ROOT, "data", "ocr_output")
+    checkpoint_dir = os.path.join(output_dir, "checkpoints_L28")
 
     print("=" * 80)
     print(f"🔥 MULTIPROCESSING MAX HARDWARE ENGINE ({num_workers} PARALLEL GPU/CPU WORKERS)")
-    print(f"📁 Dataset Dir : {dataset_dir}")
-    print(f"💾 Output Dir  : {output_dir}")
-    print(f"⚡ GPU Device  : {torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'}")
+    print(f"📁 Dataset Dir    : {dataset_dir}")
+    print(f"💾 Output Dir     : {output_dir}")
+    print(f"🛡️ Checkpoint Dir : {checkpoint_dir}")
+    print(f"⚡ GPU Device     : {torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'}")
     print("=" * 80)
 
     os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(checkpoint_dir, exist_ok=True)
 
     all_entries = os.listdir(dataset_dir)
     video_folders = sorted(
@@ -98,7 +121,7 @@ def run_multiprocess_l28(num_workers: int = 6, only_folder: str = None):
     if only_folder:
         video_folders = [f for f in video_folders if f == only_folder or f == f"V{only_folder.lstrip('V')}"]
 
-    print(f"📹 Tổng số video folders cần xử lý: {len(video_folders)}")
+    print(f"📹 Tổng số video folders trong danh sách: {len(video_folders)}")
 
     # Split video folders across workers
     chunks = [[] for _ in range(num_workers)]
@@ -114,7 +137,7 @@ def run_multiprocess_l28(num_workers: int = 6, only_folder: str = None):
     for w_id in range(num_workers):
         if not chunks[w_id]:
             continue
-        p = mp.Process(target=worker_process, args=(w_id, chunks[w_id], dataset_dir, return_dict))
+        p = mp.Process(target=worker_process, args=(w_id, chunks[w_id], dataset_dir, return_dict, checkpoint_dir))
         processes.append(p)
         p.start()
 
