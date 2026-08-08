@@ -96,13 +96,16 @@ def worker_process(worker_id: int, folder_chunk: list, dataset_dir: str, return_
     return_dict[worker_id] = worker_records
     print(f"✅ Worker #{worker_id} hoàn thành ({len(worker_records)} frames)!")
 
-def run_multiprocess_l28(num_workers: int = 2, only_folder: str = None):
-    dataset_dir = os.path.join(PROJECT_ROOT, "data", "image", "L28", "L28")
+def run_multiprocess_dataset(prefix: str = "L27", num_workers: int = 2, only_folder: str = None):
+    prefix_upper = prefix.upper()
+    base_image_dir = os.path.join(PROJECT_ROOT, "data", "image", prefix_upper)
+    dataset_dir = os.path.join(base_image_dir, prefix_upper) if os.path.exists(os.path.join(base_image_dir, prefix_upper)) else base_image_dir
+
     output_dir = os.path.join(PROJECT_ROOT, "data", "ocr_output")
-    checkpoint_dir = os.path.join(output_dir, "checkpoints_L28")
+    checkpoint_dir = os.path.join(output_dir, f"checkpoints_{prefix_upper}")
 
     print("=" * 80)
-    print(f"🔥 MULTIPROCESSING MAX HARDWARE ENGINE ({num_workers} PARALLEL GPU/CPU WORKERS)")
+    print(f"🔥 MULTIPROCESSING MAX HARDWARE ENGINE FOR {prefix_upper} ({num_workers} PARALLEL GPU/CPU WORKERS)")
     print(f"📁 Dataset Dir    : {dataset_dir}")
     print(f"💾 Output Dir     : {output_dir}")
     print(f"🛡️ Checkpoint Dir : {checkpoint_dir}")
@@ -121,7 +124,7 @@ def run_multiprocess_l28(num_workers: int = 2, only_folder: str = None):
     if only_folder:
         video_folders = [f for f in video_folders if f == only_folder or f == f"V{only_folder.lstrip('V')}"]
 
-    print(f"📹 Tổng số video folders trong danh sách: {len(video_folders)}")
+    print(f"📹 Tổng số video folders trong {prefix_upper}: {len(video_folders)}")
 
     # Split video folders across workers
     chunks = [[] for _ in range(num_workers)]
@@ -149,17 +152,33 @@ def run_multiprocess_l28(num_workers: int = 2, only_folder: str = None):
         all_records.extend(records)
 
     df_consolidated = pd.DataFrame(all_records)
-    output_parquet_path = os.path.join(output_dir, "L28_V001_test_hybrid.parquet" if only_folder else "L28_ocr.parquet")
+    output_parquet_path = os.path.join(output_dir, f"{prefix_upper}_ocr.parquet")
     df_consolidated.to_parquet(output_parquet_path, index=False)
 
     elapsed = time.time() - total_start
     print("\n" + "=" * 80)
-    print(f"✅ HOÀN THÀNH MULTIPROCESSING MAX HARDWARE FOR L28!")
+    print(f"✅ HOÀN THÀNH MULTIPROCESSING MAX HARDWARE FOR {prefix_upper}!")
     print(f"📊 Tổng số frames  : {len(all_records)} frames")
     print(f"⏱️ Tổng thời gian   : {elapsed:.1f}s ({elapsed/max(1, len(all_records)):.2f}s/frame)")
     print(f"🚀 Tốc độ trích xuất: {len(all_records)/max(1, elapsed):.2f} frames/giây")
     print(f"💾 File Parquet Gộp: {output_parquet_path}")
     print("=" * 80)
+
+    # Automatically update system unified ocr parquet
+    unified_path = os.path.join(PROJECT_ROOT, "data", "unified", "ocr_text.parquet")
+    if os.path.exists(unified_path):
+        try:
+            print(f"\n🔄 Đang tự động cập nhật kết quả {prefix_upper} mới vào {unified_path}...")
+            df_unified = pd.read_parquet(unified_path)
+            df_filtered = df_unified[~df_unified["video_id"].str.startswith(prefix_upper)]
+            new_unified = pd.concat([
+                df_filtered,
+                df_consolidated[["scene_id", "video_id", "ocr_text"]]
+            ], ignore_index=True)
+            new_unified.to_parquet(unified_path, index=False)
+            print(f"🎉 Cập nhật thành công {unified_path}! (Tổng scenes toàn hệ thống: {len(new_unified)})")
+        except Exception as e:
+            print(f"⚠️ Lỗi khi cập nhật file hệ thống: {e}")
 
 if __name__ == "__main__":
     try:
@@ -168,8 +187,9 @@ if __name__ == "__main__":
         pass
 
     parser = argparse.ArgumentParser()
+    parser.add_argument("--prefix", default="L27", help="Tên tập dữ liệu (L27, L28, L29, L30...)")
     parser.add_argument("--workers", type=int, default=2, help="Số tiến trình GPU/CPU chạy song song")
     parser.add_argument("--only-folder", default=None, help="Chạy test cho 1 folder cụ thể")
     args = parser.parse_args()
 
-    run_multiprocess_l28(num_workers=args.workers, only_folder=args.only_folder)
+    run_multiprocess_dataset(prefix=args.prefix, num_workers=args.workers, only_folder=args.only_folder)
