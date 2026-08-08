@@ -1031,10 +1031,12 @@ def run_vlm_ocr(image_path, model_id=DEFAULT_VLM_MODEL, model=None, tokenizer=No
 
 
 def _candidate_score(text: str) -> tuple[int, int, int]:
-    """Rank OCR candidates by useful line count, Vietnamese signal, then length."""
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    """Rank OCR candidates by Vietnamese diacritics count, total words, then length."""
+    if not text:
+        return (0, 0, 0)
     vietnamese_chars = sum(1 for ch in text if ch in _VIET_DIACRITICS)
-    return (len(lines), vietnamese_chars, len(text))
+    words = len([w for w in text.split() if len(w) >= 2])
+    return (vietnamese_chars, words, len(text))
 
 
 def ocr_image_hybrid_quality(
