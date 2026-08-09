@@ -28,7 +28,7 @@ from ocr_local import _init_detector, _init_recognizer, ocr_image_hybrid_quality
 def natural_sort_key(s):
     return [int(text) if text.isdigit() else text.lower() for text in re.split(r'(\d+)', s)]
 
-def worker_process(worker_id: int, folder_chunk: list, dataset_dir: str, return_dict: dict, checkpoint_dir: str):
+def worker_process(worker_id: int, folder_chunk: list, dataset_dir: str, return_dict: dict, checkpoint_dir: str, prefix: str):
     print(f"🚀 Worker GPU/CPU Process #{worker_id} khởi động với {len(folder_chunk)} folders...")
 
     if torch.cuda.is_available():
@@ -40,7 +40,7 @@ def worker_process(worker_id: int, folder_chunk: list, dataset_dir: str, return_
 
     worker_records = []
     for idx, v_folder in enumerate(folder_chunk, 1):
-        v_id = f"L28_{v_folder}" if not v_folder.startswith("L28") else v_folder
+        v_id = f"{prefix}_{v_folder}" if not v_folder.startswith(prefix) else v_folder
         folder_ckpt_path = os.path.join(checkpoint_dir, f"{v_id}.parquet")
 
         # 1. Khôi phục từ checkpoint folder nếu đã có
@@ -140,7 +140,7 @@ def run_multiprocess_dataset(prefix: str = "L27", num_workers: int = 2, only_fol
     for w_id in range(num_workers):
         if not chunks[w_id]:
             continue
-        p = mp.Process(target=worker_process, args=(w_id, chunks[w_id], dataset_dir, return_dict, checkpoint_dir))
+        p = mp.Process(target=worker_process, args=(w_id, chunks[w_id], dataset_dir, return_dict, checkpoint_dir, prefix_upper))
         processes.append(p)
         p.start()
 
