@@ -31,6 +31,15 @@ Cần cài: pip install paddleocr paddlepaddle pyarrow tqdm opencv-python pillow
 
 import os
 import sys
+
+# Thiết lập mặc định 100% lưu trữ mô hình AI sang ổ D:
+os.environ.setdefault("HF_HOME", r"D:\huggingface_cache")
+os.environ.setdefault("HF_HUB_CACHE", r"D:\huggingface_cache\hub")
+os.environ.setdefault("TRANSFORMERS_CACHE", r"D:\huggingface_cache\hub")
+os.environ.setdefault("PADDLE_HOME", r"D:\paddle_cache")
+os.environ.setdefault("PADDLEOCR_BASE_DIR", r"D:\paddle_cache")
+os.environ.setdefault("TORCH_HOME", r"D:\torch_cache")
+
 import re
 import time
 import json
