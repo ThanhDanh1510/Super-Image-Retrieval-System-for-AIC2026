@@ -1,0 +1,26 @@
+{
+  "annotations": [
+    {
+      "image_path": "data/image/L30/L30/V002/3762.webp",
+      "image_id": "L30_V002_3762",
+      "split": "regression",
+      "tags": ["chalkboard", "handwriting", "vietnamese", "classroom", "partial-writing"],
+      "regions": [
+        {
+          "region_id": "left_attendance",
+          "region_type": "chalk_handwriting",
+          "visibility": "partially_occluded",
+          "notes": "Teacher shorthand 'vq' is normalized to 'vắng' for semantic text.",
+          "text": "Tổng số : 22\nLớp 1 : 9 đủ\nLớp 3 : 6 vắng 1 (Nghĩa)\nLớp"
+        },
+        {
+          "region_id": "right_lesson",
+          "region_type": "chalk_handwriting",
+          "visibility": "clear",
+          "text": "Thứ tư , 14 tháng 10 năm 2020 .\nTập đọc .\nChuỗi ngọc lam ( trang 134 ) .\nTập chép\nChuỗi ngọc lam ."
+        }
+      ],
+      "raw_text": "Tổng số : 22\nLớp 1 : 9 đủ\nLớp 3 : 6 vắng 1 (Nghĩa)\nLớp\nThứ tư , 14 tháng 10 năm 2020 .\nTập đọc .\nChuỗi ngọc lam ( trang 134 ) .\nTập chép\nChuỗi ngọc lam ."
+    }
+  ]
+}

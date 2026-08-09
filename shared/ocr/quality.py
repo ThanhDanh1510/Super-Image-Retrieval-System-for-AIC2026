@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+from typing import Protocol
 
 from shared.ocr.normalization import postprocess_lines
 
 
+class TextRecognizer(Protocol):
+    def __call__(self, image_path: str) -> str:
+        ...
 @dataclass(frozen=True)
 class OCRLine:
     text: str

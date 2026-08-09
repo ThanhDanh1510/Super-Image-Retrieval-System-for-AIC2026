@@ -35,6 +35,14 @@ def normalize_line(text: str, *, collapse_case: bool = False) -> str:
     return value
 
 
+def normalize_text(text: str, *, collapse_case: bool = False) -> str:
+    """Normalize multiline OCR text for metric comparison and retrieval indexing."""
+    if not text:
+        return ""
+    lines = [normalize_line(line, collapse_case=collapse_case) for line in str(text).splitlines()]
+    return "\n".join(line for line in lines if line)
+
+
 def conservative_vietnamese_corrections(line: str) -> tuple[str, list[str]]:
     """
     Apply high-precision corrections only when local context makes the edit obvious.

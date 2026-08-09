@@ -30,8 +30,26 @@ def test_run_ocr_mock_engine(tmp_path):
     ]
 
     result = text_extractor.run_ocr(mock_ocr, str(img_path))
-    assert result == "CỬA HÀNG TIỆN LỢI"
+    assert result == "CỬA HÀNG\nTIỆN LỢI"
     mock_ocr.ocr.assert_called_once_with(str(img_path), cls=True)
+
+
+def test_run_ocr_quality_applies_conservative_correction(tmp_path):
+    img_path = tmp_path / "attendance.jpg"
+    img_path.touch()
+
+    mock_ocr = MagicMock()
+    mock_ocr.ocr.return_value = [
+        [
+            [[[0, 0], [10, 0], [10, 10], [0, 10]], ("Lớp 3 : 6 vq 1 (Nghĩa)", 0.61)]
+        ]
+    ]
+
+    quality = text_extractor.run_ocr_quality(mock_ocr, str(img_path))
+
+    assert quality.raw_text == "Lớp 3 : 6 vq 1 (Nghĩa)"
+    assert quality.text == "Lớp 3 : 6 vắng 1 (Nghĩa)"
+    assert quality.edits[0]["type"] == "expanded_class_attendance_vq_to_vang"
 
 
 def test_run_ocr_empty_result(tmp_path):
@@ -124,3 +142,50 @@ def test_process_text_extraction_end_to_end(tmp_path, monkeypatch):
     # Verify saved files
     assert (out_dir / "ocr_text.parquet").exists()
     assert (out_dir / "asr_text.parquet").exists()
+
+
+def test_process_text_extraction_writes_ocr_quality(tmp_path, monkeypatch):
+    meta_dir = tmp_path / "input"
+    meta_dir.mkdir()
+    keyframe_dir = tmp_path / "keyframes" / "L01_V001"
+    keyframe_dir.mkdir(parents=True)
+    out_dir = tmp_path / "output"
+    out_dir.mkdir()
+
+    df_meta = pd.DataFrame([
+        {
+            "scene_id": "L01_V001_S001",
+            "video_id": "L01_V001",
+            "frame_id": 15,
+            "timestamp_start": 0.0,
+            "timestamp_end": 5.0,
+            "timestamp_mid": 2.5,
+            "fps": 25.0,
+            "keyframe_path": "L01_V001/L01_V001_S001_000015.jpg",
+        }
+    ])
+    meta_path = meta_dir / "scene_metadata.parquet"
+    df_meta.to_parquet(meta_path)
+    (keyframe_dir / "L01_V001_S001_000015.jpg").touch()
+
+    mock_ocr = MagicMock()
+    mock_ocr.ocr.return_value = [
+        [
+            [[[0, 0], [10, 0], [10, 10], [0, 10]], ("Lớp 3 : 6 vq 1 (Nghĩa)", 0.61)]
+        ]
+    ]
+    monkeypatch.setattr(text_extractor, "init_ocr_engine", lambda cfg: mock_ocr)
+    monkeypatch.setattr(text_extractor, "init_asr_model", lambda cfg: None)
+
+    ocr_df, _ = text_extractor.process_text_extraction(
+        metadata_path=str(meta_path),
+        keyframe_dir=str(tmp_path / "keyframes"),
+        video_dir=str(tmp_path),
+        output_dir=str(out_dir),
+        write_ocr_quality=True,
+    )
+
+    quality_df = pd.read_parquet(out_dir / "ocr_quality.parquet")
+    assert ocr_df.iloc[0]["ocr_text"] == "Lớp 3 : 6 vắng 1 (Nghĩa)"
+    assert quality_df.iloc[0]["ocr_raw_text"] == "Lớp 3 : 6 vq 1 (Nghĩa)"
+    assert quality_df.iloc[0]["ocr_text"] == "Lớp 3 : 6 vắng 1 (Nghĩa)"
