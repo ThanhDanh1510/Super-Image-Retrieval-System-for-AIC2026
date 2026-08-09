@@ -189,48 +189,28 @@ async function triggerSearch() {
   const startTime = performance.now();
 
   try {
-    let resultsList = [];
+    let endpoint = `${API_BASE}/api/v1/${state.mode}`;
+    let payload = {
+      input_type: "text",
+      query: queryText,
+      search_mode: state.searchMode,
+      top_k: state.topK,
+      user_choices: []
+    };
 
-    if (state.mode === "kis") {
-      const modeParam = state.searchMode || "all";
-      const url = `${API_BASE}/api/v1/search/hybrid?query_vi=${encodeURIComponent(queryText)}&mode=${encodeURIComponent(modeParam)}&top_k=${state.topK}`;
-      const resp = await fetch(url);
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const data = await resp.json();
-      resultsList = data.data || [];
-    } else {
-      let endpoint = `${API_BASE}/api/v1/${state.mode}`;
-      let payload = {};
-
-      if (state.mode === "vqa") {
-        payload = {
-          input_type: "text",
-          query: queryText,
-          question: queryText,
-          search_mode: state.searchMode,
-          top_k: state.topK,
-          user_choices: []
-        };
-      } else if (state.mode === "trake") {
-        payload = {
-          input_type: "text",
-          query: queryText,
-          search_mode: state.searchMode,
-          top_k: state.topK,
-          user_choices: []
-        };
-      }
-
-      const resp = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const data = await resp.json();
-      resultsList = data.results || [];
+    if (state.mode === "vqa") {
+      payload.question = queryText;
     }
+
+    const resp = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    resultsList = data.results || [];
 
     const duration = ((performance.now() - startTime) / 1000).toFixed(2);
     state.rawResults = resultsList;
