@@ -290,8 +290,20 @@ _REQUIRED_PAYLOAD_FIELDS = [
     "keyframe_path",
 ]
 
+_SCENE_DESC_MAP: dict[str, str] = {}
 
-def _scored_point_to_candidate(scored_point) -> CandidateResult:
+def _get_scene_desc(scene_id: str) -> str:
+    global _SCENE_DESC_MAP
+    if not _SCENE_DESC_MAP:
+        try:
+            import pandas as pd
+            desc_df = pd.read_parquet("data/unified/scene_descriptions.parquet")
+            _SCENE_DESC_MAP = dict(zip(desc_df["scene_id"], desc_df["description"].fillna("")))
+        except Exception:
+            pass
+    return _SCENE_DESC_MAP.get(scene_id, "")
+
+def _scored_point_to_candidate(scored_point: any) -> CandidateResult:
     """
     Convert Qdrant ScoredPoint → CandidateResult.
 
@@ -317,6 +329,11 @@ def _scored_point_to_candidate(scored_point) -> CandidateResult:
     ext = keyframe_path.rsplit(".", 1)[-1] if "." in keyframe_path else "webp"
     clean_keyframe_path = f"unified/{scene_id}-{frame_id}.{ext}"
 
+    # Lấy description từ payload hoặc tra cứu trực tiếp từ scene_descriptions.parquet
+    desc = payload.get("description", "") or payload.get("scene_description", "")
+    if not desc:
+        desc = _get_scene_desc(scene_id)
+
     return CandidateResult(
         video_id=payload["video_id"],
         scene_id=scene_id,
@@ -327,6 +344,7 @@ def _scored_point_to_candidate(scored_point) -> CandidateResult:
         keyframe_path=clean_keyframe_path,
         ocr_text=payload.get("ocr_text", ""),
         asr_text=payload.get("asr_text", ""),
+        description=desc,
         score=float(getattr(scored_point, "score", 0.0) or 0.0),
     )
 
