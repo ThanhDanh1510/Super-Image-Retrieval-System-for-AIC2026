@@ -1043,22 +1043,29 @@ def select_best_candidate(candidates: dict[str, str], filter_spam: bool = True) 
     if not candidates:
         return ""
 
+    vlm_text = candidates.get("vlm", "").strip()
+    local_text = candidates.get("local", "").strip()
+
     selected_raw = ""
-    if "vlm" in candidates and "local" in candidates:
-        vlm_text = candidates["vlm"].strip()
-        local_text = candidates["local"].strip()
+    if vlm_text and local_text:
+        vlm_score = _candidate_score(vlm_text)
+        local_score = _candidate_score(local_text)
 
-        if vlm_text:
-            vlm_words = len([w for w in vlm_text.split() if len(w) >= 2])
-            local_words = len([w for w in local_text.split() if len(w) >= 2])
-            vlm_viet = sum(1 for ch in vlm_text if ch in _VIET_DIACRITICS)
+        vlm_words = vlm_score[1]
+        local_words = local_score[1]
 
-            # Ưu tiên VLM khi VLM trích xuất câu từ Tiếng Việt hoàn chỉnh/có nghĩa
-            if vlm_viet >= 2 or (local_words > 0 and vlm_words / local_words >= 0.3):
-                selected_raw = vlm_text
-
-    if not selected_raw:
-        selected_raw = max(candidates.values(), key=_candidate_score) if candidates else ""
+        # Trường hợp 1: Local OCR trích xuất được nhiều chữ hơn rõ rệt (VLM bỏ sót chữ nhỏ/banner >50% số từ)
+        if local_words >= 4 and local_words > vlm_words * 1.8:
+            selected_raw = local_text
+        # Trường hợp 2: VLM trích xuất câu từ chuẩn hóa Tiếng Việt và có độ bao phủ chữ tốt (>= 40% số từ Local)
+        elif vlm_score[0] >= 2 and vlm_words >= (local_words * 0.4):
+            selected_raw = vlm_text
+        else:
+            selected_raw = vlm_text if vlm_score >= local_score else local_text
+    elif vlm_text:
+        selected_raw = vlm_text
+    else:
+        selected_raw = local_text
 
     if filter_spam and selected_raw:
         raw_lines = [line.strip() for line in selected_raw.splitlines() if line.strip()]
