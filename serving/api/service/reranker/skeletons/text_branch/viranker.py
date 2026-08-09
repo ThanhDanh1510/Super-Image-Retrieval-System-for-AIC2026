@@ -74,7 +74,10 @@ def score(query: str, candidates: list[CandidateResult]) -> list[float]:
         # Chuẩn bị cặp (query, doc_text)
         pairs = []
         for c in candidates:
-            doc = (c.ocr_text + " " + c.asr_text).strip()
+            desc = getattr(c, "description", "") or ""
+            ocr = getattr(c, "ocr_text", "") or ""
+            asr = getattr(c, "asr_text", "") or ""
+            doc = f"{desc} {ocr} {asr}".strip()
             if not doc:
                 doc = "[EMPTY]"
             pairs.append([query, doc])

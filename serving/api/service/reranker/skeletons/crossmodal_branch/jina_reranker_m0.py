@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any
+from transformers import AutoModel
 from serving.api.schema.retrieval import CandidateResult
 
 logger = logging.getLogger(__name__)
@@ -24,10 +25,9 @@ _MODEL_CACHE: dict[str, Any] = {}
 
 def _get_model():
     """Lazy load model Jina Reranker v1 (hoặc M0) vào cache."""
-    if "model" not in _MODEL_CACHE:
+    if "model" not in _MODEL_CACHE and "mock" not in _MODEL_CACHE:
         try:
             import torch
-            from transformers import AutoModel
 
             model_name = "jinaai/jina-reranker-m0"
             logger.info(f"Loading Jina Reranker M0 model: {model_name}...")
@@ -88,13 +88,15 @@ def score(
         model = cache["model"]
         root_path = Path(keyframes_root_dir) if keyframes_root_dir else Path(".")
 
+        from serving.api.controller.routes_kis import _resolve_keyframe_path
+
         # Chuẩn bị ảnh và text pairs
         sentence_pairs = []
         for c in candidates:
-            img_path = root_path / c.keyframe_path
-            if img_path.exists():
+            resolved = _resolve_keyframe_path(c.video_id, c.frame_id, getattr(c, "keyframe_path", ""))
+            if resolved and resolved.exists():
                 try:
-                    img = Image.open(img_path).convert("RGB")
+                    img = Image.open(resolved).convert("RGB")
                     sentence_pairs.append([query, img])
                 except Exception:
                     sentence_pairs.append([query, None])
