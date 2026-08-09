@@ -56,7 +56,8 @@ def align_l_json_with_clip(model_name: str = "openai/clip-vit-base-patch32", bat
         for i in tqdm(range(0, len(l_descriptions), text_batch_size), desc="Mã hóa L.json Text"):
             batch_texts = l_descriptions[i:i + text_batch_size]
             inputs = processor(text=batch_texts, return_tensors="pt", padding=True, truncation=True, max_length=77).to(device)
-            embeds = model.get_text_features(**inputs)
+            out = model.get_text_features(**inputs)
+            embeds = out.text_embeds if hasattr(out, 'text_embeds') else (out[0] if isinstance(out, (tuple, list)) else out)
             embeds = embeds / embeds.norm(dim=-1, keepdim=True)
             text_embeds_list.append(embeds.cpu())
 
@@ -93,7 +94,8 @@ def align_l_json_with_clip(model_name: str = "openai/clip-vit-base-patch32", bat
                 try:
                     pil_img = Image.open(img_path).convert("RGB")
                     inputs = processor(images=pil_img, return_tensors="pt").to(device)
-                    img_embed = model.get_image_features(**inputs)
+                    out = model.get_image_features(**inputs)
+                    img_embed = out.image_embeds if hasattr(out, 'image_embeds') else (out[0] if isinstance(out, (tuple, list)) else out)
                     img_embed = img_embed / img_embed.norm(dim=-1, keepdim=True)
 
                     # Search window: [current_search_idx - 10, current_search_idx + window_size]
