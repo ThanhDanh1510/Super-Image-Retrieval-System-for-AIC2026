@@ -52,9 +52,11 @@ _DEFAULT_PREFETCH_LIMIT = 200
 def _is_server_reachable(url: str) -> bool:
     try:
         parsed = urlparse(url)
-        host = parsed.hostname or "localhost"
+        host = parsed.hostname or "127.0.0.1"
+        if host == "localhost":
+            host = "127.0.0.1"
         port = parsed.port or (443 if parsed.scheme == "https" else 80)
-        with socket.create_connection((host, port), timeout=0.5):
+        with socket.create_connection((host, port), timeout=1.5):
             return True
     except Exception:
         return False

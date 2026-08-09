@@ -417,3 +417,34 @@ async def search_trake(
         logger.error(f"Error in search_trake: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@router.get("/search/hybrid", summary="Hybrid Search (Weighted Convex + RRF Fusion)")
+async def search_hybrid(
+    query_vi: str,
+    query_en: str | None = None,
+    mode: str = "all",
+    top_k: int = 36
+):
+    """
+    Hybrid Search Endpoint supporting weighted convex + RRF fusion
+    across description (Dense BGE), OCR (Sparse BM25), and ASR (Sparse BM25).
+    """
+    allowed_modes = {"all", "description", "ocr", "asr"}
+    if mode.lower() not in allowed_modes:
+        raise HTTPException(status_code=400, detail=f"Invalid mode '{mode}'. Allowed: {allowed_modes}")
+    if top_k < 1 or top_k > 200:
+        raise HTTPException(status_code=400, detail="top_k must be between 1 and 200")
+
+    try:
+        from serving.api.service.retrieval.hybrid_search import get_hybrid_search_engine
+        engine = get_hybrid_search_engine()
+        results = engine.search(query_vi=query_vi, query_en=query_en, mode=mode.lower(), top_k=top_k)
+        return {
+            "mode": mode.lower(),
+            "count": len(results),
+            "data": results
+        }
+    except Exception as err:
+        logger.error(f"Error in hybrid search: {err}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(err))
+

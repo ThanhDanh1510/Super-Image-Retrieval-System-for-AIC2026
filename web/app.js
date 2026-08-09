@@ -197,60 +197,65 @@ async function triggerSearch() {
   const startTime = performance.now();
 
   try {
-    let endpoint = `${API_BASE}/api/v1/${state.mode}`;
-    let payload = {};
+    let resultsList = [];
+    let queryDisplay = queryText;
 
     if (state.mode === "kis") {
-      payload = {
-        input_type: "text",
-        query: queryText,
-        search_mode: state.searchMode,
-        top_k: state.topK,
-        user_choices: []
-      };
-    } else if (state.mode === "vqa") {
-      payload = {
-        input_type: "text",
-        query: queryText,
-        question: queryText,
-        search_mode: state.searchMode,
-        top_k: state.topK,
-        user_choices: []
-      };
-    } else if (state.mode === "trake") {
-      const inputs = document.querySelectorAll(".trake-event-input");
-      const subEvents = Array.from(inputs).map(i => i.value.trim()).filter(Boolean);
-      payload = {
-        input_type: "text",
-        query: subEvents.join("\n") || queryText,
-        num_events: subEvents.length || 2,
-        search_mode: state.searchMode,
-        top_k: state.topK,
-        user_choices: []
-      };
+      const modeParam = state.searchMode || "all";
+      const url = `${API_BASE}/api/v1/search/hybrid?query_vi=${encodeURIComponent(queryText)}&mode=${encodeURIComponent(modeParam)}&top_k=${state.topK}`;
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      resultsList = data.data || [];
+    } else {
+      let endpoint = `${API_BASE}/api/v1/${state.mode}`;
+      let payload = {};
+
+      if (state.mode === "vqa") {
+        payload = {
+          input_type: "text",
+          query: queryText,
+          question: queryText,
+          search_mode: state.searchMode,
+          top_k: state.topK,
+          user_choices: []
+        };
+      } else if (state.mode === "trake") {
+        const inputs = document.querySelectorAll(".trake-event-input");
+        const subEvents = Array.from(inputs).map(i => i.value.trim()).filter(Boolean);
+        payload = {
+          input_type: "text",
+          query: subEvents.join("\n") || queryText,
+          num_events: subEvents.length || 2,
+          search_mode: state.searchMode,
+          top_k: state.topK,
+          user_choices: []
+        };
+      }
+
+      const resp = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      resultsList = data.results || [];
+      queryDisplay = data.query_text || queryText;
     }
 
-    const resp = await fetch(endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-
-    const data = await resp.json();
     const duration = ((performance.now() - startTime) / 1000).toFixed(2);
-
-    state.rawResults = data.results || [];
+    state.rawResults = resultsList;
     renderResults(state.rawResults);
 
-    statusBar.textContent = `✅ Tìm thấy ${state.rawResults.length} kết quả (Nhánh: ${state.searchMode.toUpperCase()}) cho: "${data.query_text || queryText}"`;
+    statusBar.textContent = `✅ Tìm thấy ${state.rawResults.length} kết quả (Nhánh: ${state.searchMode.toUpperCase()}) cho: "${queryDisplay}"`;
     speedTag.textContent = `${duration}s`;
     speedTag.style.display = "inline-block";
 
   } catch (err) {
     statusBar.textContent = `❌ Lỗi khi tìm kiếm: ${err.message}`;
-    resultsGrid.innerHTML = `<div class="empty-state">Không thể kết nối đến server API tại ${API_BASE}</div>`;
+    resultsGrid.innerHTML = `<div class="empty-state">Lỗi kết nối server: ${err.message}</div>`;
   }
 }
 
