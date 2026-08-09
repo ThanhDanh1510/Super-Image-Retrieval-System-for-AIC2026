@@ -32,6 +32,9 @@ Cần cài: pip install paddleocr paddlepaddle pyarrow tqdm opencv-python pillow
 import os
 import sys
 import re
+import time
+import json
+import difflib
 
 # Import PyTorch first to initialize CUDA/DLLs on Windows
 try:
@@ -1039,6 +1042,81 @@ def _candidate_score(text: str) -> tuple[int, int, int]:
     return (vietnamese_chars, words, len(text))
 
 
+def check_word_quality(w: str) -> float:
+    """Đánh giá chất lượng chính tả từ Tiếng Việt (loại bỏ từ gõ sai/typo)."""
+    w_clean = w.strip('.,:-()[]"\'').lower()
+    if not w_clean:
+        return 0.0
+    score = 1.0
+
+    # Ưu tiên các từ Tiếng Việt chuẩn diacritics
+    diacritics_count = sum(1 for ch in w if ch in _VIET_DIACRITICS)
+    score += diacritics_count * 0.5
+
+    # Trừ điểm nặng các từ gõ dính/lỗi typo phổ biến
+    if re.search(r'crephe$|khóe$|hạnh$|bửa$|sắn$|nguyễn$|liêu$|ứcga$', w_clean):
+        score -= 4.0
+
+    return score
+
+
+def merge_ocr_candidates(local_text: str, vlm_text: str) -> str:
+    """Dung hợp kết quả từ dòng-sang-dòng và từ-sang-từ giữa Local OCR và VLM."""
+    if not local_text:
+        return vlm_text
+    if not vlm_text:
+        return local_text
+
+    l_lines = [line.strip() for line in local_text.splitlines() if line.strip()]
+    v_lines = [line.strip() for line in vlm_text.splitlines() if line.strip()]
+
+    merged_lines = []
+    used_l = set()
+
+    for v_line in v_lines:
+        best_l_idx = -1
+        best_sim = 0.0
+        best_l_line = ""
+
+        for l_idx, l_line in enumerate(l_lines):
+            sim = difflib.SequenceMatcher(None, v_line.lower(), l_line.lower()).ratio()
+            if sim > best_sim:
+                best_sim = sim
+                best_l_idx = l_idx
+                best_l_line = l_line
+
+        if best_sim >= 0.50 and best_l_line:
+            used_l.add(best_l_idx)
+            v_words = v_line.split()
+            l_words = best_l_line.split()
+
+            merged_words = []
+            for w_v in v_words:
+                best_w_l = None
+                best_w_sim = 0.0
+                for w_l in l_words:
+                    w_sim = difflib.SequenceMatcher(None, w_v.lower(), w_l.lower()).ratio()
+                    if w_sim > best_w_sim:
+                        best_w_sim = w_sim
+                        best_w_l = w_l
+
+                if best_w_sim >= 0.55 and best_w_l:
+                    score_v = check_word_quality(w_v)
+                    score_l = check_word_quality(best_w_l)
+                    merged_words.append(w_v if score_v >= score_l else best_w_l)
+                else:
+                    merged_words.append(w_v)
+            merged_lines.append(" ".join(merged_words))
+        else:
+            merged_lines.append(v_line)
+
+    for l_idx, l_line in enumerate(l_lines):
+        if l_idx not in used_l and len(l_line) >= 2:
+            merged_lines.append(l_line)
+
+    return "\n".join(merged_lines)
+
+
 def select_best_candidate(candidates: dict[str, str], filter_spam: bool = True) -> str:
     if not candidates:
         return ""
@@ -1046,22 +1124,8 @@ def select_best_candidate(candidates: dict[str, str], filter_spam: bool = True) 
     vlm_text = candidates.get("vlm", "").strip()
     local_text = candidates.get("local", "").strip()
 
-    selected_raw = ""
     if vlm_text and local_text:
-        vlm_score = _candidate_score(vlm_text)
-        local_score = _candidate_score(local_text)
-
-        vlm_words = vlm_score[1]
-        local_words = local_score[1]
-
-        # Trường hợp 1: Local OCR trích xuất được nhiều chữ hơn rõ rệt (VLM bỏ sót chữ nhỏ/banner >50% số từ)
-        if local_words >= 4 and local_words > vlm_words * 1.8:
-            selected_raw = local_text
-        # Trường hợp 2: VLM trích xuất câu từ chuẩn hóa Tiếng Việt và có độ bao phủ chữ tốt (>= 40% số từ Local)
-        elif vlm_score[0] >= 2 and vlm_words >= (local_words * 0.4):
-            selected_raw = vlm_text
-        else:
-            selected_raw = vlm_text if vlm_score >= local_score else local_text
+        selected_raw = merge_ocr_candidates(local_text, vlm_text)
     elif vlm_text:
         selected_raw = vlm_text
     else:
