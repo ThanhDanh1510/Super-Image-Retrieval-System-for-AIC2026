@@ -105,12 +105,19 @@ class ModelRegistry:
 
     async def warmup_async(self) -> None:
         """Preload toàn bộ model (dùng khi PRELOAD_MODELS=true)."""
+        from serving.api.service.reranker.skeletons.text_branch import viranker
+        from serving.api.service.reranker.skeletons.crossmodal_branch import jina_reranker_m0
+        from serving.api.service.retrieval.hybrid_search import get_hybrid_search_engine
+
         await asyncio.gather(
             self.aget_text_embedder(),
             self.aget_image_embedder(),
             self.aget_asr_model(),
+            asyncio.to_thread(viranker._get_model),
+            asyncio.to_thread(jina_reranker_m0._get_model),
+            asyncio.to_thread(get_hybrid_search_engine),
         )
-        logger.info("ModelRegistry: warmup hoàn tất (cả 3 model đã load).")
+        logger.info("ModelRegistry: warmup hoàn tất (toàn bộ AI Model + Hybrid Engine đã nạp sẵn vào GPU/RAM).")
 
     def unload(self, key: str) -> None:
         """Giải phóng 1 model khỏi RAM/VRAM."""
