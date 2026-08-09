@@ -67,8 +67,12 @@ def _resolve_keyframe_path(video_id: str, frame_id: int, keyframe_path: str = ""
     candidates = [
         data_dir / "image" / grp / grp / vsub / f"{frame_id_str}.webp",
         data_dir / "image" / grp / grp / vsub / f"{frame_id_str}.jpg",
+        data_dir / "data" / "image" / grp / grp / vsub / f"{frame_id_str}.webp",
+        data_dir / "data" / "image" / grp / grp / vsub / f"{frame_id_str}.jpg",
         data_dir / "image" / grp / vsub / f"{frame_id_str}.webp",
         data_dir / "image" / grp / vsub / f"{frame_id_str}.jpg",
+        data_dir / "data" / "image" / grp / vsub / f"{frame_id_str}.webp",
+        data_dir / "data" / "image" / grp / vsub / f"{frame_id_str}.jpg",
         data_dir / "image" / grp / f"{video_id}" / f"{frame_id_str}.webp",
         data_dir / "image" / grp / f"{video_id}" / f"{frame_id_str}.jpg",
         data_dir / "image" / f"{video_id}" / f"{frame_id_str}.webp",

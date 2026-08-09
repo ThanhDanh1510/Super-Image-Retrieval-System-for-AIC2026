@@ -187,7 +187,11 @@ def create_app() -> FastAPI:
     app.include_router(routes_hybrid.router)
 
     # --- Root Redirect to UI ---
-    from fastapi.responses import RedirectResponse
+    from fastapi.responses import RedirectResponse, Response
+
+    @app.get("/favicon.ico", include_in_schema=False)
+    async def favicon():
+        return Response(status_code=204)
 
     @app.get("/", include_in_schema=False)
     async def root_redirect():
