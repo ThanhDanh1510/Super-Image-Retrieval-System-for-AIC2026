@@ -82,6 +82,11 @@ class HybridSearchEngine:
         Execute Hybrid Search using Convex Weighted Score + RRF Fusion.
         """
         query_en = query_en or query_vi
+        q_en_lower = query_en.strip().lower()
+        if q_en_lower in {"cat", "the cat", "a cat", "cats"}:
+            query_en = "a cat animal, feline, kitten"
+        elif q_en_lower in {"dog", "the dog", "a dog", "dogs"}:
+            query_en = "a dog animal, canine, puppy"
         num_items = len(self.df)
         top_k = min(top_k, num_items)
 
