@@ -64,41 +64,67 @@ def align_l_json_with_clip(model_name: str = "openai/clip-vit-base-patch32", bat
     all_text_embeds = torch.cat(text_embeds_list, dim=0)
     print(f"✅ Đã tạo xong Text Embeddings Tensor: {all_text_embeds.shape}")
 
-    # 2. Iterate image keyframes in batches, encode images, and find max similarity match in window
+    # 2. Iterate image keyframes in GPU batches, encode images, and find max similarity match in window
     print("\n📷 Đang nạp & mã hóa Keyframe Images và tìm kiếm khớp nối nữ nghĩa...")
     aligned_records = []
     total_start = time.time()
     current_search_idx = 0
 
-    img_root = os.path.join(PROJECT_ROOT, "data", "image")
+    def resolve_img_path(row):
+        v_id = str(row['video_id'])
+        f_id = str(row['frame_id'])
+        parts = v_id.split('_')
+        prefix = parts[0]
+        v_folder = parts[1] if len(parts) > 1 else parts[0]
+
+        candidate = os.path.join(PROJECT_ROOT, 'data', 'image', prefix, prefix, v_folder, f'{f_id}.webp')
+        if os.path.exists(candidate):
+            return candidate
+
+        for ext in ['.jpg', '.png', '.jpeg', '.webp']:
+            c = os.path.join(PROJECT_ROOT, 'data', 'image', prefix, prefix, v_folder, f'{f_id}{ext}')
+            if os.path.exists(c):
+                return c
+            c2 = os.path.join(PROJECT_ROOT, 'data', 'image', prefix, v_folder, f'{f_id}{ext}')
+            if os.path.exists(c2):
+                return c2
+        return None
+
+    img_batch_size = 64
+    rows = [r for _, r in df_meta.iterrows()]
 
     with torch.no_grad():
-        for row_idx, row in tqdm(df_meta.iterrows(), total=len(df_meta), desc="Semantic Alignment"):
-            s_id = row['scene_id']
-            v_id = row['video_id']
-            rel_path = row['keyframe_path']
+        for b_i in tqdm(range(0, len(rows), img_batch_size), desc="CLIP Semantic Alignment"):
+            batch_rows = rows[b_i:b_i + img_batch_size]
 
-            # Locate image path
-            img_path = os.path.join(img_root, rel_path)
-            if not os.path.exists(img_path):
-                # Fallback path search
-                parts = rel_path.split('/')
-                img_path = os.path.join(img_root, parts[0], parts[0], parts[-1])
+            batch_pil_imgs = []
+            valid_indices = []
 
-            if not os.path.exists(img_path):
-                # If image missing, pick closest window index
-                best_idx = min(current_search_idx, len(l_descriptions) - 1)
-                best_desc = l_descriptions[best_idx]
-                sim_score = 0.0
-            else:
-                try:
-                    pil_img = Image.open(img_path).convert("RGB")
-                    inputs = processor(images=pil_img, return_tensors="pt").to(device)
-                    out = model.get_image_features(**inputs)
-                    img_embed = out.pooler_output if hasattr(out, 'pooler_output') else (out.image_embeds if hasattr(out, 'image_embeds') else out)
-                    img_embed = img_embed / img_embed.norm(dim=-1, keepdim=True)
+            for r_idx, r in enumerate(batch_rows):
+                img_path = resolve_img_path(r)
+                if img_path and os.path.exists(img_path):
+                    try:
+                        pil_img = Image.open(img_path).convert("RGB")
+                        batch_pil_imgs.append(pil_img)
+                        valid_indices.append(r_idx)
+                    except Exception:
+                        pass
 
-                    # Search window: [current_search_idx - 10, current_search_idx + window_size]
+            if batch_pil_imgs:
+                inputs = processor(images=batch_pil_imgs, return_tensors="pt").to(device)
+                out = model.get_image_features(**inputs)
+                img_embeds = out.pooler_output if hasattr(out, 'pooler_output') else (out.image_embeds if hasattr(out, 'image_embeds') else out)
+                img_embeds = img_embeds / img_embeds.norm(dim=-1, keepdim=True)
+
+            valid_pos = 0
+            for r_idx, r in enumerate(batch_rows):
+                s_id = r['scene_id']
+                v_id = r['video_id']
+
+                if r_idx in valid_indices and batch_pil_imgs:
+                    img_embed = img_embeds[valid_pos:valid_pos + 1]
+                    valid_pos += 1
+
                     win_start = max(0, current_search_idx - 10)
                     win_end = min(len(l_descriptions), current_search_idx + window_size)
 
@@ -109,21 +135,19 @@ def align_l_json_with_clip(model_name: str = "openai/clip-vit-base-patch32", bat
                     best_idx = win_start + best_relative_idx
                     sim_score = sims[best_relative_idx].item()
                     best_desc = l_descriptions[best_idx]
-
-                    # Advance search index to maintain chronological order
                     current_search_idx = best_idx
-                except Exception as err:
-                    best_idx = current_search_idx
+                else:
+                    best_idx = min(current_search_idx, len(l_descriptions) - 1)
                     best_desc = l_descriptions[best_idx]
                     sim_score = 0.0
 
-            aligned_records.append({
-                "scene_id": s_id,
-                "video_id": v_id,
-                "description": best_desc,
-                "l_json_key": str(best_idx),
-                "clip_confidence": round(float(sim_score), 4)
-            })
+                aligned_records.append({
+                    "scene_id": s_id,
+                    "video_id": v_id,
+                    "description": best_desc,
+                    "l_json_key": str(best_idx),
+                    "clip_confidence": round(float(sim_score), 4)
+                })
 
     # Save outputs
     l_by_scene_id = {rec["scene_id"]: rec["description"] for rec in aligned_records}
