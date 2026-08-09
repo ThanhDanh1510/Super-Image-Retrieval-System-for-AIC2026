@@ -81,13 +81,12 @@
 
         <!-- Search Controls Bar -->
         <div class="search-controls">
-          <!-- Branch Mode Selector Buttons -->
-          <div class="control-group search-branch-group">
-            <span class="ctrl-label">Nhánh tìm kiếm:</span>
-            <button class="branch-btn active" data-branch="all" title="Kết hợp cả 3 nhánh (Hybrid RRF)">🌟 Tất cả (Hybrid)</button>
-            <button class="branch-btn" data-branch="embedding" title="Chỉ tìm theo hình ảnh visual CLIP">🖼️ Embedding</button>
-            <button class="branch-btn" data-branch="ocr" title="Chỉ tìm theo chữ xuất hiện trên màn hình">🔤 OCR</button>
-            <button class="branch-btn" data-branch="asr" title="Chỉ tìm theo lời thoại thuyết minh">🎙️ ASR</button>
+          <!-- Search Mode Pills -->
+          <div class="search-mode-pills control-group search-branch-group">
+            <button class="mode-pill branch-btn active" data-mode="all" data-branch="all" title="Kết hợp cả 3 nhánh (Hybrid RRF)">⚡ All (Hybrid)</button>
+            <button class="mode-pill branch-btn" data-mode="description" data-branch="description" title="Chỉ tìm theo hình ảnh AI Caption BGE">🖼️ Description (AI Caption)</button>
+            <button class="mode-pill branch-btn" data-mode="ocr" data-branch="ocr" title="Chỉ tìm theo chữ xuất hiện trên màn hình">📝 OCR Text</button>
+            <button class="mode-pill branch-btn" data-mode="asr" data-branch="asr" title="Chỉ tìm theo lời thoại thuyết minh">🎙️ ASR Speech</button>
           </div>
 
           <div class="control-group">

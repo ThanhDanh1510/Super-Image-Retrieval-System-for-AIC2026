@@ -1,8 +1,14 @@
 import os
+import sys
 import torch
 import pandas as pd
 from rank_bm25 import BM25Okapi
 from transformers import AutoTokenizer, AutoModel
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8")
 
 class HybridSearchEngine:
     """
@@ -93,8 +99,9 @@ class HybridSearchEngine:
         # 1. Dense Description Stream (BGE-Large-EN v1.5)
         r_desc = None
         if w_desc > 0 or lam > 0:
+            instruction_query = f"Represent this sentence for searching relevant passages: {query_en}"
             encoded = self.tokenizer(
-                query_en,
+                instruction_query,
                 padding=True,
                 truncation=True,
                 max_length=256,

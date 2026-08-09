@@ -33,7 +33,7 @@ from fastapi.staticfiles import StaticFiles
 
 from serving.api.core.config import get_settings
 from serving.api.core.models import ModelRegistry
-from serving.api.controller import routes_kis, routes_similar_image
+from serving.api.controller import routes_kis, routes_similar_image, routes_hybrid
 
 logger = logging.getLogger(__name__)
 
@@ -184,6 +184,7 @@ def create_app() -> FastAPI:
     # --- Register Routers ---
     app.include_router(routes_kis.router)
     app.include_router(routes_similar_image.router)
+    app.include_router(routes_hybrid.router)
 
     # --- Root Redirect to UI ---
     from fastapi.responses import RedirectResponse

@@ -132,8 +132,8 @@ LIMIT_IMAGES = None
 # Đổi từ "medium" sang "server" để tăng recall (2×T4 dư sức chạy bản chính xác hơn).
 # Nếu model "server" không tải được (lỗi mạng / chưa có sẵn), code sẽ tự fallback
 # về DET_MODEL_NAME_FALLBACK bên dưới.
-DET_MODEL_NAME = "PP-OCRv6_server_det"
-DET_MODEL_NAME_FALLBACK = "PP-OCRv6_medium_det"
+DET_MODEL_NAME = "PP-OCRv4_server_det"
+DET_MODEL_NAME_FALLBACK = "PP-OCRv4_mobile_det"
 # Ngưỡng score detection box: hạ từ 0.7 → 0.55 để không loại chữ mờ/bị che
 # ngay từ bước detect; rác sinh thêm sẽ được lọc lại sau recognize (should_filter_text).
 DET_BOX_THRESH = 0.55
@@ -156,9 +156,9 @@ VIETOCR_BEAMSEARCH = False  # Pass 1 (nhanh, greedy): tắt BeamSearch, nhanh h�
 # Two-pass recognition: pass 1 greedy cho toàn bộ (nhanh), pass 2 beamsearch chỉ
 # cho các box có confidence thấp (khó đọc). Nếu máy có ≥2 GPU, pass 2 chạy trên
 # GPU riêng (VIETOCR_DEVICE_PASS2) để chạy song song, không làm chậm pass 1.
-ENABLE_TWO_PASS_RECOGNITION = True
+ENABLE_TWO_PASS_RECOGNITION = False
 REC_CONF_THRESHOLD = 0.7  # confidence dưới ngưỡng này mới đưa qua pass 2 (beamsearch)
-VIETOCR_DEVICE_PASS2 = "cuda:1"  # dùng khi có ≥2 GPU; tự fallback nếu không có
+VIETOCR_DEVICE_PASS2 = "cuda"  # dùng khi có ≥2 GPU; tự fallback nếu không có
 
 # Optional VLM branch for hard real-world images (chalkboard, handwriting,
 # posters, low-contrast signs). Kept opt-in because it is slower than local OCR.
@@ -756,7 +756,18 @@ def recognize_text_vietocr(recognizer, img, items, padding=BOX_PADDING, filter_s
                 return "", 0.0
 
     # Bước 2: Pass 1 — nhận diện nhanh (greedy), theo batch, kèm confidence nếu có
-    if batch_size > 0 and hasattr(recognizer, "predict_batch_padded"):
+    if batch_size > 0 and hasattr(recognizer, "predict_batch"):
+        for i in range(0, len(all_pils), batch_size):
+            batch_pils = all_pils[i:i + batch_size]
+            try:
+                batch_texts = recognizer.predict_batch(batch_pils)
+                for j, t in enumerate(batch_texts):
+                    all_texts[i + j] = t.strip() if t else ""
+                    all_confs[i + j] = 1.0
+            except Exception:
+                for j, pil in enumerate(batch_pils):
+                    all_texts[i + j], all_confs[i + j] = _predict_single_with_prob(pil)
+    elif batch_size > 0 and hasattr(recognizer, "predict_batch_padded"):
         for i in range(0, len(all_pils), batch_size):
             batch_pils = all_pils[i:i + batch_size]
             try:
@@ -765,17 +776,6 @@ def recognize_text_vietocr(recognizer, img, items, padding=BOX_PADDING, filter_s
                     text, prob = out if isinstance(out, (tuple, list)) else (out, 1.0)
                     all_texts[i + j] = text.strip() if text else ""
                     all_confs[i + j] = float(prob) if prob is not None else 1.0
-            except TypeError:
-                # Bản predict_batch_padded không nhận kwarg return_prob
-                try:
-                    batch_texts = recognizer.predict_batch_padded(batch_pils)
-                    for j, t in enumerate(batch_texts):
-                        all_texts[i + j] = t.strip() if t else ""
-                        # Không có prob → không đưa qua pass 2 (coi như đủ tin cậy)
-                        all_confs[i + j] = 1.0
-                except Exception:
-                    for j, pil in enumerate(batch_pils):
-                        all_texts[i + j], all_confs[i + j] = _predict_single_with_prob(pil)
             except Exception:
                 for j, pil in enumerate(batch_pils):
                     all_texts[i + j], all_confs[i + j] = _predict_single_with_prob(pil)
@@ -1366,6 +1366,19 @@ def _init_detector():
             detector = TextDetection(model_name=DET_MODEL_NAME, use_gpu=use_gpu)
         except TypeError:
             detector = TextDetection(model_name=DET_MODEL_NAME)
+    except Exception as e:
+        print(f"⚠️ Không thể nạp {DET_MODEL_NAME}: {e}. Đang dùng fallback {DET_MODEL_NAME_FALLBACK}...")
+        try:
+            detector = TextDetection(
+                model_name=DET_MODEL_NAME_FALLBACK,
+                use_gpu=use_gpu,
+                device="gpu" if use_gpu else "cpu",
+                enable_mkldnn=False,
+                box_thresh=DET_BOX_THRESH,
+                limit_side_len=DET_LIMIT_SIDE_LEN,
+            )
+        except Exception:
+            detector = TextDetection(model_name=DET_MODEL_NAME_FALLBACK)
     print("✅ TextDetection ready on GPU CUDA.")
     return detector
 

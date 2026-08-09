@@ -55,6 +55,7 @@ router = APIRouter(prefix="/api/v1", tags=["Retrieval"])
 def _resolve_keyframe_path(video_id: str, frame_id: int, keyframe_path: str = "") -> Path | None:
     settings = get_settings()
     data_dir = Path(settings.DATA_DIR)
+    project_root = data_dir.parent
     frame_id_str = str(frame_id)
 
     parts = video_id.split("_")
@@ -66,11 +67,21 @@ def _resolve_keyframe_path(video_id: str, frame_id: int, keyframe_path: str = ""
     candidates = [
         data_dir / "image" / grp / grp / vsub / f"{frame_id_str}.webp",
         data_dir / "image" / grp / grp / vsub / f"{frame_id_str}.jpg",
+        data_dir / "image" / grp / vsub / f"{frame_id_str}.webp",
+        data_dir / "image" / grp / vsub / f"{frame_id_str}.jpg",
         data_dir / "image" / grp / f"{video_id}" / f"{frame_id_str}.webp",
+        data_dir / "image" / grp / f"{video_id}" / f"{frame_id_str}.jpg",
         data_dir / "image" / f"{video_id}" / f"{frame_id_str}.webp",
-        data_dir / "unified" / "keyframes" / keyframe_path if keyframe_path else data_dir,
-        data_dir / keyframe_path if keyframe_path else data_dir,
+        data_dir / "image" / f"{video_id}" / f"{frame_id_str}.jpg",
     ]
+    if keyframe_path:
+        candidates.extend([
+            data_dir / "unified" / "keyframes" / keyframe_path,
+            data_dir / keyframe_path,
+            project_root / keyframe_path,
+            data_dir / "image" / keyframe_path,
+        ])
+
     for p in candidates:
         if p and p.is_file() and p.exists():
             return p

@@ -69,13 +69,14 @@ function setupControls() {
     });
   }
 
-  // Branch mode buttons (Hybrid, Embedding, OCR, ASR)
-  document.querySelectorAll(".branch-btn").forEach((btn) => {
+  // Search mode pills / Branch mode buttons (all, description, ocr, asr)
+  document.querySelectorAll(".mode-pill, .branch-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
-      document.querySelectorAll(".branch-btn").forEach((b) => b.classList.remove("active"));
+      document.querySelectorAll(".mode-pill, .branch-btn").forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
-      state.searchMode = btn.dataset.branch;
-      statusBar.textContent = `⚙️ Đã chuyển sang nhánh tìm kiếm: ${btn.textContent.trim()}`;
+      state.searchMode = btn.dataset.mode || btn.dataset.branch || "all";
+      if (statusBar) statusBar.textContent = `⚙️ Đã chuyển sang nhánh tìm kiếm: ${btn.textContent.trim()}`;
+      triggerSearch();
     });
   });
 
@@ -182,6 +183,21 @@ function setupSearch() {
   });
 }
 
+async function translateViToEn(text) {
+  if (!text) return "";
+  try {
+    const res = await fetch(`https://translate.googleapis.com/translate_a/single?client=gtx&sl=vi&tl=en&dt=t&q=${encodeURIComponent(text)}`);
+    if (!res.ok) return text;
+    const data = await res.json();
+    if (data && data[0] && data[0][0] && data[0][0][0]) {
+      return data[0].map(item => item[0]).join('');
+    }
+    return text;
+  } catch (e) {
+    return text;
+  }
+}
+
 async function triggerSearch() {
   const queryText = queryInput.value.trim();
 
@@ -202,7 +218,8 @@ async function triggerSearch() {
 
     if (state.mode === "kis") {
       const modeParam = state.searchMode || "all";
-      const url = `${API_BASE}/api/v1/search/hybrid?query_vi=${encodeURIComponent(queryText)}&mode=${encodeURIComponent(modeParam)}&top_k=${state.topK}`;
+      const queryEn = await translateViToEn(queryText);
+      const url = `${API_BASE}/api/v1/search/hybrid?query_vi=${encodeURIComponent(queryText)}&query_en=${encodeURIComponent(queryEn)}&mode=${encodeURIComponent(modeParam)}&top_k=${state.topK}`;
       const resp = await fetch(url);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
@@ -255,7 +272,8 @@ async function triggerSearch() {
 
   } catch (err) {
     statusBar.textContent = `❌ Lỗi khi tìm kiếm: ${err.message}`;
-    resultsGrid.innerHTML = `<div class="empty-state">Lỗi kết nối server: ${err.message}</div>`;
+    if (typeof showToast === "function") showToast(`Lỗi: ${err.message}`);
+    resultsGrid.innerHTML = `<div class="empty-state">Không thể kết nối đến server API: ${err.message}</div>`;
   }
 }
 
