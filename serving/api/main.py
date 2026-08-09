@@ -76,6 +76,9 @@ async def lifespan(app: FastAPI):
         2. Giải phóng toàn bộ model (unload_all) + GPU memory
         3. Đóng Qdrant client connection
     """
+    # Tắt log kiểm tra cache mạng rườm rà của httpx/huggingface
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+
     settings = get_settings()
     logger.info(f"Starting {settings.APP_NAME} v{settings.APP_VERSION}")
     logger.info(f"Qdrant: {settings.QDRANT_URL}")
