@@ -377,10 +377,13 @@ window.removeItem = function(key) {
 function setupDrawer() {
   const sidebar = document.getElementById("submission-sidebar");
   const toggleBtn = document.getElementById("toggle-sidebar-btn");
-  const closeBtn = document.getElementById("close-sidebar-btn");
   const arrowSpan = document.getElementById("basket-arrow");
 
-  function toggleSidebar() {
+  function toggleSidebar(e) {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
     if (!sidebar) return;
     const isCollapsed = sidebar.classList.toggle("collapsed");
     if (arrowSpan) {
@@ -388,11 +391,15 @@ function setupDrawer() {
     }
   }
 
-  if (toggleBtn) toggleBtn.addEventListener("click", toggleSidebar);
-  if (closeBtn) closeBtn.addEventListener("click", toggleSidebar);
+  if (toggleBtn) {
+    toggleBtn.onclick = toggleSidebar;
+  }
 
   // CSV Exporter
-  document.getElementById("export-csv-btn").addEventListener("click", exportCSV);
+  const exportBtn = document.getElementById("export-csv-btn");
+  if (exportBtn) {
+    exportBtn.onclick = exportCSV;
+  }
 }
 
 // --- CSV Exporter per Task Standard ---
