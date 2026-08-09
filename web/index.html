@@ -37,11 +37,13 @@
     </nav>
 
     <div class="header-right">
-      <span class="basket-badge">🕸️ Giỏ Nộp Bài: <strong id="selected-count">0</strong> mục</span>
+      <button id="toggle-sidebar-btn" class="basket-badge clickable-basket-btn" title="Đóng/Mở Giỏ Nộp Bài">
+        🕸️ Giỏ Nộp Bài: <strong id="selected-count">0</strong> mục <span id="basket-arrow">▾</span>
+      </button>
     </div>
   </header>
 
-  <!-- Split Screen Layout: Left Main Workspace + Right Permanent Sidebar -->
+  <!-- Split Screen Layout: Left Main Workspace + Right Collapsible Sidebar -->
   <div class="app-layout">
 
     <!-- Left Main Workspace -->
@@ -67,16 +69,6 @@
           <button id="search-btn" class="spider-primary-btn">
             <span>TÌM KIẾM</span>
           </button>
-        </div>
-
-        <!-- TRAKE Multi-Event Inputs (Hidden by default) -->
-        <div id="trake-events-container" class="trake-events-wrapper" style="display: none;">
-          <div class="trake-header">📌 Nhập Chuỗi Các Sự Kiện Theo Thứ Tự Thời Gian:</div>
-          <div id="trake-event-inputs">
-            <input type="text" class="trake-event-input" placeholder="Sự kiện 1: Người bước vào ô tô" />
-            <input type="text" class="trake-event-input" placeholder="Sự kiện 2: Ô tô chạy trên đường" />
-          </div>
-          <button id="add-event-btn" class="spider-secondary-btn">+ Thêm sự kiện</button>
         </div>
 
         <!-- Search Controls Bar -->
@@ -123,10 +115,13 @@
 
     </main>
 
-    <!-- Right Permanent Sidebar (Giỏ Nộp Bài) -->
-    <aside class="spider-sidebar">
+    <!-- Right Collapsible Sidebar (Giỏ Nộp Bài) -->
+    <aside id="submission-sidebar" class="spider-sidebar">
       <div class="sidebar-header">
-        <h3>🕸️ GIỎ NỘP BÀI</h3>
+        <div class="sidebar-title-row">
+          <h3>🕸️ GIỎ NỘP BÀI</h3>
+          <button id="close-sidebar-btn" class="close-sidebar-btn" title="Đóng Giỏ Nộp Bài">✕</button>
+        </div>
         <span class="hotkey-tip">Tip: Rê chuột + phím C để copy nhanh</span>
       </div>
 
@@ -154,8 +149,9 @@
       </div>
       <div class="modal-info">
         <h4 id="modal-title">L21_V001_S001</h4>
-        <div id="modal-ocr" class="scrollable-text-box" title="🔍 Nhấp để phóng to toàn văn bản OCR"><strong>OCR:</strong> -</div>
-        <div id="modal-asr" class="scrollable-text-box" title="🔍 Nhấp để phóng to toàn văn bản ASR"><strong>ASR:</strong> -</div>
+        <div id="modal-desc" class="scrollable-text-box modal-expanded-box" title="🔍 Nhấp để phóng to toàn văn bản Image Description"><strong>Image Description:</strong> -</div>
+        <div id="modal-ocr" class="scrollable-text-box modal-expanded-box" title="🔍 Nhấp để phóng to toàn văn bản OCR"><strong>OCR:</strong> -</div>
+        <div id="modal-asr" class="scrollable-text-box modal-expanded-box" title="🔍 Nhấp để phóng to toàn văn bản ASR"><strong>ASR:</strong> -</div>
       </div>
     </div>
   </div>
