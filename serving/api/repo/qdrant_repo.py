@@ -119,6 +119,8 @@ async def search_by_text_vectors(
     collection_name: str = PRODUCTION_ALIAS,
     score_threshold: float | None = None,
     search_mode: str = "all",
+    raw_query_vi: str = "",
+    raw_query_en: str = "",
 ) -> list[CandidateResult]:
     """
     Tìm kiếm keyframe bằng text vectors (dense + sparse) và image vector qua Weighted RRF fusion.
@@ -224,7 +226,34 @@ async def search_by_text_vectors(
         task_weights.append(w_asr_sparse)
 
     # Thực thi tất cả nhánh bất đồng bộ
-    branch_results = await asyncio.gather(*tasks)
+    try:
+        branch_results = await asyncio.gather(*tasks)
+    except Exception as err:
+        logger.warning(f"Qdrant search failed ({err}). Falling back to HybridSearchEngine (Parquet vector index)...")
+        try:
+            from serving.api.service.retrieval.hybrid_search import get_hybrid_search_engine
+            engine = get_hybrid_search_engine()
+            q_vi = raw_query_vi or "query"
+            q_en = raw_query_en or q_vi
+            raw_results = engine.search(query_vi=q_vi, query_en=q_en, mode=search_mode, top_k=top_k)
+            cands = []
+            for item in raw_results:
+                cands.append(CandidateResult(
+                    video_id=item["video_id"],
+                    scene_id=item["scene_id"],
+                    frame_id=int(item["frame_id"]),
+                    timestamp_start=float(item.get("timestamp_start", 0.0)),
+                    timestamp_end=float(item.get("timestamp_end", 0.0)),
+                    timestamp_mid=float(item.get("timestamp_mid", 0.0)),
+                    keyframe_path=item["keyframe_path"],
+                    ocr_text=item.get("ocr_text", ""),
+                    asr_text=item.get("asr_text", ""),
+                    score=float(item["score"]),
+                ))
+            return cands
+        except Exception as fallback_err:
+            logger.error(f"Fallback search_by_text_vectors failed: {fallback_err}")
+            return []
 
     # Tích lũy điểm Weighted RRF
     rrf_scores: dict[str, float] = {}
@@ -342,6 +371,7 @@ async def get_keyframes_by_video_id(
     Lấy tất cả keyframe thuộc 1 video cụ thể theo video_id.
     """
     try:
+        collection_name = await _resolve_collection(client, collection_name)
         res, _ = await client.scroll(
             collection_name=collection_name,
             scroll_filter=Filter(
@@ -361,6 +391,35 @@ async def get_keyframes_by_video_id(
                 pass
         return sorted(cands, key=lambda c: (c.timestamp_mid, c.frame_id))
     except Exception as err:
-        logger.warning(f"Error fetching keyframes for video {video_id}: {err}")
-        return []
+        logger.warning(f"Error fetching keyframes for video {video_id}: {err}. Falling back to Parquet metadata.")
+        try:
+            import pandas as pd
+            from pathlib import Path
+            data_dir = Path("data/unified")
+            meta_path = data_dir / "scene_metadata.parquet"
+            if not meta_path.exists():
+                meta_path = Path("data/data/unified/scene_metadata.parquet")
+            df_meta = pd.read_parquet(meta_path)
+            sub = df_meta[df_meta["video_id"] == video_id].sort_values("timestamp_mid")
+            cands = []
+            for _, row in sub.head(limit).iterrows():
+                scene_id = str(row["scene_id"])
+                frame_id = int(row["frame_id"])
+                ext = str(row.get("keyframe_path", "")).rsplit(".", 1)[-1] if "." in str(row.get("keyframe_path", "")) else "webp"
+                cands.append(CandidateResult(
+                    video_id=str(row["video_id"]),
+                    scene_id=scene_id,
+                    frame_id=frame_id,
+                    timestamp_start=float(row.get("timestamp_start", 0.0)),
+                    timestamp_end=float(row.get("timestamp_end", 0.0)),
+                    timestamp_mid=float(row.get("timestamp_mid", 0.0)),
+                    keyframe_path=f"unified/{scene_id}-{frame_id}.{ext}",
+                    ocr_text="",
+                    asr_text="",
+                    score=1.0,
+                ))
+            return cands
+        except Exception as e:
+            logger.error(f"Fallback metadata search failed: {e}")
+            return []
 
