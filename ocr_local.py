@@ -1039,6 +1039,35 @@ def _candidate_score(text: str) -> tuple[int, int, int]:
     return (vietnamese_chars, words, len(text))
 
 
+def select_best_candidate(candidates: dict[str, str], filter_spam: bool = True) -> str:
+    if not candidates:
+        return ""
+
+    selected_raw = ""
+    if "vlm" in candidates and "local" in candidates:
+        vlm_text = candidates["vlm"].strip()
+        local_text = candidates["local"].strip()
+
+        if vlm_text:
+            vlm_words = len([w for w in vlm_text.split() if len(w) >= 2])
+            local_words = len([w for w in local_text.split() if len(w) >= 2])
+            vlm_viet = sum(1 for ch in vlm_text if ch in _VIET_DIACRITICS)
+
+            # Ưu tiên VLM khi VLM trích xuất câu từ Tiếng Việt hoàn chỉnh/có nghĩa
+            if vlm_viet >= 2 or (local_words > 0 and vlm_words / local_words >= 0.3):
+                selected_raw = vlm_text
+
+    if not selected_raw:
+        selected_raw = max(candidates.values(), key=_candidate_score) if candidates else ""
+
+    if filter_spam and selected_raw:
+        raw_lines = [line.strip() for line in selected_raw.splitlines() if line.strip()]
+        clean_lines = [line for line in raw_lines if not should_filter_text(line)]
+        selected_raw = "\n".join(clean_lines)
+
+    return selected_raw
+
+
 def ocr_image_hybrid_quality(
     detector,
     recognizer,
@@ -1085,12 +1114,7 @@ def ocr_image_hybrid_quality(
         except Exception as err:
             errors.append(f"vlm: {err}")
 
-    selected_raw = max(candidates.values(), key=_candidate_score) if candidates else ""
-    if filter_spam and selected_raw:
-        raw_lines = [line.strip() for line in selected_raw.splitlines() if line.strip()]
-        clean_lines = [line for line in raw_lines if not should_filter_text(line)]
-        selected_raw = "\n".join(clean_lines)
-
+    selected_raw = select_best_candidate(candidates, filter_spam=filter_spam)
     quality = build_quality_result(selected_raw)
     return quality, "; ".join(errors) if errors else None, candidates
 
