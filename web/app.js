@@ -43,14 +43,6 @@ function setupTabs() {
       document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
       state.mode = btn.dataset.mode;
-
-      // Toggle TRAKE event inputs
-      const trakeContainer = document.getElementById("trake-events-container");
-      if (state.mode === "trake") {
-        trakeContainer.style.display = "block";
-      } else {
-        trakeContainer.style.display = "none";
-      }
       updateDrawer();
     });
   });
@@ -198,7 +190,6 @@ async function triggerSearch() {
 
   try {
     let resultsList = [];
-    let queryDisplay = queryText;
 
     if (state.mode === "kis") {
       const modeParam = state.searchMode || "all";
@@ -221,12 +212,9 @@ async function triggerSearch() {
           user_choices: []
         };
       } else if (state.mode === "trake") {
-        const inputs = document.querySelectorAll(".trake-event-input");
-        const subEvents = Array.from(inputs).map(i => i.value.trim()).filter(Boolean);
         payload = {
           input_type: "text",
-          query: subEvents.join("\n") || queryText,
-          num_events: subEvents.length || 2,
+          query: queryText,
           search_mode: state.searchMode,
           top_k: state.topK,
           user_choices: []
@@ -242,14 +230,13 @@ async function triggerSearch() {
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
       resultsList = data.results || [];
-      queryDisplay = data.query_text || queryText;
     }
 
     const duration = ((performance.now() - startTime) / 1000).toFixed(2);
     state.rawResults = resultsList;
     renderResults(state.rawResults);
 
-    statusBar.textContent = `✅ Tìm thấy ${state.rawResults.length} kết quả (Nhánh: ${state.searchMode.toUpperCase()}) cho: "${queryDisplay}"`;
+    statusBar.textContent = `✅ Tìm thấy ${state.rawResults.length} kết quả (Nhánh: ${state.searchMode.toUpperCase()})`;
     speedTag.textContent = `${duration}s`;
     speedTag.style.display = "inline-block";
 
@@ -322,7 +309,7 @@ function renderResults(results) {
   });
 }
 
-// --- Selection Drawer ---
+// --- Selection Drawer & Collapsible Sidebar ---
 function toggleSelect(itemKey, candidate, btn) {
   if (state.selectedItems.has(itemKey)) {
     state.selectedItems.delete(itemKey);
@@ -388,8 +375,21 @@ window.removeItem = function(key) {
 };
 
 function setupDrawer() {
-  document.getElementById("toggle-drawer-btn").addEventListener("click", () => drawer.classList.add("open"));
-  document.getElementById("close-drawer-btn").addEventListener("click", () => drawer.classList.remove("open"));
+  const sidebar = document.getElementById("submission-sidebar");
+  const toggleBtn = document.getElementById("toggle-sidebar-btn");
+  const closeBtn = document.getElementById("close-sidebar-btn");
+  const arrowSpan = document.getElementById("basket-arrow");
+
+  function toggleSidebar() {
+    if (!sidebar) return;
+    const isCollapsed = sidebar.classList.toggle("collapsed");
+    if (arrowSpan) {
+      arrowSpan.textContent = isCollapsed ? "▸" : "▾";
+    }
+  }
+
+  if (toggleBtn) toggleBtn.addEventListener("click", toggleSidebar);
+  if (closeBtn) closeBtn.addEventListener("click", toggleSidebar);
 
   // CSV Exporter
   document.getElementById("export-csv-btn").addEventListener("click", exportCSV);
@@ -435,19 +435,22 @@ function exportCSV() {
   document.body.removeChild(link);
 }
 
-// Lightbox
+// Lightbox Modal
 function showLightbox(cand, imgUrl) {
   const modal = document.getElementById("lightbox-modal");
   document.getElementById("modal-img").src = imgUrl;
   document.getElementById("modal-title").textContent = `${cand.video_id} — Scene: ${cand.scene_id} (Frame ${cand.frame_id})`;
 
+  const descBox = document.getElementById("modal-desc");
   const ocrBox = document.getElementById("modal-ocr");
   const asrBox = document.getElementById("modal-asr");
 
+  descBox.innerHTML = `<strong>Image Description:</strong> ${cand.description || 'None'}`;
   ocrBox.innerHTML = `<strong>OCR:</strong> ${cand.ocr_text || 'None'}`;
   asrBox.innerHTML = `<strong>ASR:</strong> ${cand.asr_text || 'None'}`;
 
   // Default scroll position at top
+  descBox.scrollTop = 0;
   ocrBox.scrollTop = 0;
   asrBox.scrollTop = 0;
 
@@ -467,7 +470,7 @@ if (modalEl) {
   });
 }
 
-// Text Zoom Modal Handling (Click any box to enlarge OCR/ASR text)
+// Text Zoom Modal Handling (Click any box to enlarge Image Description/OCR/ASR text)
 const textZoomModal = document.getElementById("text-zoom-modal");
 const textZoomBody = document.getElementById("text-zoom-body");
 const textZoomTitle = document.getElementById("text-zoom-title");
@@ -479,6 +482,16 @@ function openTextZoom(typeLabel, textContent) {
   textZoomTitle.textContent = `🔍 CHI TIẾT ${typeLabel.toUpperCase()}`;
   textZoomBody.textContent = textContent;
   textZoomModal.style.display = "flex";
+}
+
+const descBoxEl = document.getElementById("modal-desc");
+if (descBoxEl) {
+  descBoxEl.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const raw = descBoxEl.innerText || '';
+    const cleanText = raw.replace(/^Image Description:\s*/i, '').trim();
+    openTextZoom("Image Description", cleanText);
+  });
 }
 
 const ocrBoxEl = document.getElementById("modal-ocr");
