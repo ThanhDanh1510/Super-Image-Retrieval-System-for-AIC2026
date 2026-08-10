@@ -142,7 +142,7 @@ python -m indexing.collection_alias --action list
 - Nếu lỗi: rollback về `collection_v1` trong 1 lệnh — không cần re-index
 - Server không bao giờ downtime vì alias đổi atomic (trong 1 operation)
 
-### 6. Chạy FastAPI server
+### 7. Chạy FastAPI server
 
 ```bash
 # Cách 1 (khuyên dùng): in-process, tải model lazy (tiết kiệm RAM)
