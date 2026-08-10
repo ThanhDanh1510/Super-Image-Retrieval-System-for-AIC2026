@@ -27,12 +27,14 @@ def _get_model():
             from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
             model_name = "BAAI/bge-reranker-v2-m3"
-            logger.info(f"Loading ViRanker text model: {model_name}...")
+            logger.info(f"Loading ViRanker text model: {model_name} on GPU...")
             tokenizer = AutoTokenizer.from_pretrained(model_name)
             device = "cuda" if torch.cuda.is_available() else "cpu"
-            dtype = torch.float16 if device == "cuda" else torch.float32
-            model = AutoModelForSequenceClassification.from_pretrained(model_name, torch_dtype=dtype)
-            model.to(device)
+            model = AutoModelForSequenceClassification.from_pretrained(
+                model_name,
+                torch_dtype=torch.float16,
+                device_map=device,
+            )
             model.eval()
 
             _MODEL_CACHE["tokenizer"] = tokenizer
@@ -47,7 +49,7 @@ def _get_model():
 
 def score(query: str, candidates: list[CandidateResult]) -> list[float]:
     """
-    Tính điểm tương đồng ngữ nghĩa giữa query và ocr_text + asr_text của từng candidate.
+    Tính điểm tương đồng ngữ nghĩa giữa query và description + ocr_text + asr_text của từng candidate.
 
     Args:
         query: Query text tiếng Anh hoặc tiếng Việt đã chuẩn hóa.
@@ -71,12 +73,17 @@ def score(query: str, candidates: list[CandidateResult]) -> list[float]:
         tokenizer = cache["tokenizer"]
         device = cache["device"]
 
-        # Chuẩn bị cặp (query, doc_text)
+        # Chuẩn bị cặp (query, doc_text) bao gồm description + OCR + ASR (giới hạn độ dài)
         pairs = []
         for c in candidates:
-            doc = (c.ocr_text + " " + c.asr_text).strip()
+            desc_text = getattr(c, "description", "") or ""
+            ocr_text = getattr(c, "ocr_text", "") or ""
+            asr_text = getattr(c, "asr_text", "") or ""
+            doc = f"{desc_text} {ocr_text} {asr_text}".strip()
             if not doc:
                 doc = "[EMPTY]"
+            if len(doc) > 2000:
+                doc = doc[:2000]
             pairs.append([query, doc])
 
         inputs = tokenizer(
@@ -85,9 +92,9 @@ def score(query: str, candidates: list[CandidateResult]) -> list[float]:
             truncation=True,
             max_length=512,
             return_tensors="pt",
-        ).to(device)
+        ).to(model.device)
 
-        with torch.no_grad():
+        with torch.no_grad(), torch.cuda.amp.autocast(enabled=(device == "cuda")):
             outputs = model(**inputs)
             logits = outputs.logits
             if logits.dim() > 1:

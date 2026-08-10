@@ -50,19 +50,24 @@ async def rerank(
         Danh sách candidates đã fusion & sắp xếp giảm dần theo score.
         Nếu rerank lỗi → trả về candidates gốc (fallback an toàn).
     """
+    import time
+    _t_start = time.time()
     if not candidates:
         return []
 
     query_for_rerank = enhanced_query or query
 
+    # Chỉ rerank top 20 candidates để tăng tốc
+    rerank_candidates = candidates[:20] if len(candidates) > 20 else candidates
+
     try:
-        text_scores, crossmodal_scores = await asyncio.gather(
-            asyncio.to_thread(viranker.score, query_for_rerank, candidates),
-            asyncio.to_thread(
-                jina_reranker_m0.score, query_for_rerank, candidates, keyframes_root_dir
-            ),
-        )
-        return fusion_score.fuse(text_scores, crossmodal_scores, candidates)
+        text_scores = await asyncio.to_thread(viranker.score, query_for_rerank, rerank_candidates)
+        _t1 = time.time()
+        logger.info(f"[PROFILE] viranker: {_t1 - _t_start:.2f}s")
+        fused = fusion_score.fuse(text_scores, None, rerank_candidates)
+        if len(candidates) > 20:
+            return fused + candidates[20:]
+        return fused
     except Exception as e:
-        logger.warning(f"Reranking error (falling back to RRF scores): {e}")
+        logger.warning(f"Reranking error: {e}")
         return candidates

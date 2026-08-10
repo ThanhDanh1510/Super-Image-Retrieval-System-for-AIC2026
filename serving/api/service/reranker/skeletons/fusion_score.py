@@ -67,7 +67,7 @@ def fuse(
     # 2. Xử lý khớp length
     n = len(candidates)
     t_scores = list(text_scores) if len(text_scores) == n else [c.score for c in candidates]
-    c_scores = list(crossmodal_scores) if len(crossmodal_scores) == n else [c.score for c in candidates]
+    c_scores = list(crossmodal_scores) if (crossmodal_scores is not None and len(crossmodal_scores) == n) else [c.score for c in candidates]
 
     # 3. Min-Max Normalization
     t_norm = _normalize(t_scores)
