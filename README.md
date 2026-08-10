@@ -145,17 +145,58 @@ Tất cả response trả về `CandidateResult`: `video_id`, `scene_id`, `frame
 
 Model **tự động tải về** từ HuggingFace Hub lần đầu được dùng (lazy-load).
 
-| Model | Dùng cho | HuggingFace / Nguồn |
-|---|---|---|
-| **TransNetV2** | Shot detection (tách scene) | `transnetv2-pytorch-weights.pth` |
-| **PaddleOCR v6** | OCR tiếng Việt | `paddleocr` |
-| **PhoWhisper-medium** | ASR tiếng Việt | `vinai/phowhisper-medium` |
-| **CLIP ViT-L/14** | Image embedding (dim 1024) | `openai/clip-vit-large-patch14` |
-| **gte-Qwen2-1.5B-instruct** | Text embedding OCR + ASR (dim 1536) | `Alibaba-NLP/gte-Qwen2-1.5B-instruct` |
-| **bge-reranker-v2-m3** | Text rerank (KIS/VQA/TRAKE) | `BAAI/bge-reranker-v2-m3` |
-| **jina-reranker-m0** | Crossmodal rerank (Image Search) | `jinaai/jina-reranker-m0` |
+| Model | Dùng cho | HuggingFace / Nguồn | Device | RAM |
+|---|---|---|---|---|
+| **TransNetV2** | Shot detection (tách scene) | `transnetv2-pytorch-weights.pth` | — | — |
+| **PaddleOCR v6** | OCR tiếng Việt | `paddleocr` | — | — |
+| **PhoWhisper-medium** | ASR tiếng Việt | `vinai/phowhisper-medium` | CPU | ~1.5GB |
+| **CLIP ViT-L/14** | Image embedding (dim 1024) | `openai/clip-vit-large-patch14` | GPU | ~1.7GB |
+| **gte-Qwen2-1.5B-instruct** | Text embedding OCR + ASR (dim 1536) | `Alibaba-NLP/gte-Qwen2-1.5B-instruct` | GPU | ~3GB |
+| **bge-reranker-v2-m3** | Text rerank (KIS/VQA/TRAKE) | `BAAI/bge-reranker-v2-m3` | GPU | ~2.3GB |
+| **jina-reranker-m0** | Crossmodal rerank (Image Search) | `jinaai/jina-reranker-m0` | CPU | ~2.5GB |
+| **bge-large-en-v1.5** | Hybrid search description | `BAAI/bge-large-en-v1.5` | CPU | ~2GB |
 
 Tất cả phiên bản model được khai báo tập trung tại `configs/model_versions.yaml` — **single source of truth** cho cả ingestion lẫn serving. Ingestion và serving phải khớp version, nếu lệch thì vector không tương thích.
+
+### Tự động tải models (Auto-download)
+
+Models được tải tự động từ HuggingFace Hub lần đầu chạy. Mặc định cache tại `~/.cache/huggingface/`.
+
+**Pre-download tất cả models (khuyên dùng):**
+
+```powershell
+# Đặt thư mục cache (tùy chọn)
+$env:HF_HOME = "D:\AIC2026\data\hf_cache"
+
+# Tải tất cả models
+python -c "
+from transformers import AutoModel, AutoTokenizer, AutoModelForSequenceClassification
+import torch
+
+models = [
+    'openai/clip-vit-large-patch14',
+    'Alibaba-NLP/gte-Qwen2-1.5B-instruct',
+    'BAAI/bge-reranker-v2-m3',
+    'jinaai/jina-reranker-m0',
+    'BAAI/bge-large-en-v1.5',
+    'vinai/PhoWhisper-medium',
+]
+
+for m in models:
+    print(f'Downloading {m}...')
+    AutoTokenizer.from_pretrained(m, trust_remote_code=True)
+    try:
+        AutoModelForSequenceClassification.from_pretrained(m, trust_remote_code=True)
+    except:
+        AutoModel.from_pretrained(m, trust_remote_code=True)
+    print(f'  Done!')
+"
+```
+
+**Lưu ý:**
+- Tổng dung lượng models: ~15GB
+- Lần đầu chạy sẽ chậm do tải models
+- Nếu không có Internet, cần tải trước và đặt vào `data/hf_cache/`
 
 ---
 
@@ -197,6 +238,39 @@ Copy `.env.example` → `.env`. Một số biến quan trọng:
 
 ---
 
+## 🔧 Xử lý sự cố (Troubleshooting)
+
+### GPU Out of Memory
+**Triệu chứng:** `RuntimeError: CUDA out of memory`
+**Giải pháp:** Đã tối ưu — chỉ CLIP + Qwen2 trên GPU, còn lại chạy CPU:
+- GPU: CLIP ViT-L/14 (~1.7GB) + gte-Qwen2-1.5B (~3GB) + bge-reranker-v2-m3 (~2.3GB) = ~7GB
+- CPU: PhoWhisper, Jina M0, BGE-Large
+
+### Lỗi dtype mismatch (Float vs Half)
+**Triệu chứng:** `mat1 and mat2 must have the same dtype, but got Float and Half`
+**Giải pháp:** Đã sửa — model được ép sang float16 sau khi load
+
+### Lỗi "paging file is too small" (Windows)
+**Triệu chứng:** `OSError: The paging file is too small for this operation to complete`
+**Giải pháp:** Đã sửa — dùng `device_map="cuda"` để auto offload
+
+### Search chậm (>30s)
+**Giảu pháp:** Kiểm tra rerangker đang chạy trên GPU hay CPU:
+```powershell
+# Xem log profiling
+Get-Content "server.log" | Select-String "PROFILE"
+```
+- Nếu `viranker` > 5s → cần chuyển sang GPU
+- Nếu `qdrant_search` > 2s → kiểm tra Qdrant container
+
+### Update scene_descriptions.parquet
+Sau khi update file parquet, cần restart server để load descriptions mới:
+```powershell
+Get-Process -Name "python" | Stop-Process -Force; Start-Sleep -Seconds 2; python start_api.py
+```
+
+---
+
 ## 🧪 Test & Code Quality
 
 ```bash
@@ -212,6 +286,22 @@ mypy shared/ serving/ indexing/ --ignore-missing-imports   # hoặc: make typech
 ```
 
 > 💡 Toàn bộ lệnh hay dùng có sẵn trong `Makefile` (`make help` để xem danh sách).
+
+---
+
+## 📊 Hiệu năng (Performance)
+
+Profile mỗi request (xem trong `server.log`):
+
+| Bước | Thời gian | Device |
+|---|---|---|
+| enhance_query (dịch EN/VI) | ~0.4s | API call |
+| encode_text+image | ~0.8s | GPU |
+| qdrant_search (RRF fusion) | ~0.3s | CPU |
+| viranker (rerank) | ~0.2s | GPU |
+| **Tổng** | **~2s** | — |
+
+**GPU Memory:** ~7.9GB / 16GB (RTX 5060 Ti)
 
 ---
 
