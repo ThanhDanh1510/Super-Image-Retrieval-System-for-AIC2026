@@ -100,18 +100,47 @@ data/
 
 ### 5. Nạp dữ liệu vào Qdrant (Indexing)
 
-```bash
-python -m indexing.run_index \
-    --dataset-dir ./data/unified \
-    --collection collection_v1 \
-    --create-collection
+**Indexing** = Đưa toàn bộ vectors (CLIP, OCR, ASR) + metadata từ `data/unified/` vào Qdrant database.
+
+```powershell
+# Tạo collection mới + nạp dữ liệu
+python -m indexing.run_index --dataset-dir ./data/unified --collection collection_v1 --create-collection
+
+# Chỉ nạp thêm (collection đã tồn tại)
+python -m indexing.run_index --dataset-dir ./data/unified --collection collection_v1
+
+# Nạp xong nhưng KHÔNG đổi alias (để verify trước)
+python -m indexing.run_index --dataset-dir ./data/unified --collection collection_v1 --skip-alias
 ```
 
-Gắn alias `production` (serving luôn truy vấn qua alias này để swap collection không downtime):
+**Giải thích:**
+- `--dataset-dir`: Thư mục chứa file parquet và vectors (.npy)
+- `--collection`: Tên collection trong Qdrant (VD: `collection_v1`, `collection_v2`)
+- `--create-collection`: Tạo collection mới (dùng lần đầu)
+- Collection cũ giữ nguyên khi tạo mới → rollback dễ dàng
 
-```bash
+### 6. Gắn alias "production" (Zero-downtime swap)
+
+**Alias** = Tên logic trỏ tới collection thật. Server luôn query qua alias `production`.
+
+```powershell
+# Chuyển production → collection_v1
 python -m indexing.collection_alias --action set --collection collection_v1
+
+# Xem collection nào đang ở production
+python -m indexing.collection_alias --action get
+
+# Rollback về collection cũ (nếu collection mới có lỗi)
+python -m indexing.collection_alias --action rollback --collection collection_v1
+
+# Xem tất cả aliases
+python -m indexing.collection_alias --action list
 ```
+
+**Tại sao dùng alias?**
+- Khi update dữ liệu: index vào `collection_v2` → verify → đổi alias sang `collection_v2`
+- Nếu lỗi: rollback về `collection_v1` trong 1 lệnh — không cần re-index
+- Server không bao giờ downtime vì alias đổi atomic (trong 1 operation)
 
 ### 6. Chạy FastAPI server
 
