@@ -10,9 +10,9 @@ class HybridSearchEngine:
     across Description (Dense BGE), OCR (Sparse BM25), and ASR (Sparse BM25).
     """
 
-    def __init__(self, data_dir: str, device: str = "cuda"):
+    def __init__(self, data_dir: str, device: str = "cpu"):
         self.data_dir = data_dir
-        self.device = device if torch.cuda.is_available() else "cpu"
+        self.device = "cpu"
 
         print(f"⚡ Initializing HybridSearchEngine from '{data_dir}' on device '{self.device}'...")
 
@@ -49,7 +49,7 @@ class HybridSearchEngine:
         self.model_id = "BAAI/bge-large-en-v1.5"
         print(f"📥 Loading BGE model '{self.model_id}'...")
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_id)
-        self.bge_model = AutoModel.from_pretrained(self.model_id).to(self.device)
+        self.bge_model = AutoModel.from_pretrained(self.model_id).to(self.device).float()
         self.bge_model.eval()
 
         # Build Sparse BM25 Indexes

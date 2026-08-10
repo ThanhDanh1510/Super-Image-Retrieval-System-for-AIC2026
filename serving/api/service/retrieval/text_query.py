@@ -81,8 +81,12 @@ async def process(
     Xử lý toàn bộ luồng text query: song ngữ EN/VI → encode (text + image vectors) → retrieve.
     """
     import asyncio
+    import time
 
+    _t0 = time.time()
     en_query, vi_query = await _enhance_query(query_input.raw_query)
+    _t1 = time.time()
+    logger.info(f"[PROFILE] enhance_query: {_t1 - _t0:.2f}s")
 
     sub_events: list[str] | None = None
     if query_input.task_type == TaskType.TRAKE:
@@ -94,6 +98,9 @@ async def process(
         _encode_text(vi_query, text_embedder),
         _encode_text_to_image_vector(en_query, image_embedder),
     )
+    _t2 = time.time()
+    logger.info(f"[PROFILE] encode_text+image: {_t2 - _t1:.2f}s")
+
     ocr_sparse, asr_sparse = _encode_sparse(vi_query)
 
     candidates = await qdrant_repo.search_by_text_vectors(
@@ -106,6 +113,8 @@ async def process(
         top_k=query_input.top_k,
         search_mode=query_input.search_mode,
     )
+    _t3 = time.time()
+    logger.info(f"[PROFILE] qdrant_search: {_t3 - _t2:.2f}s, candidates: {len(candidates)}")
 
     return TextQueryOutput(
         candidates=candidates,

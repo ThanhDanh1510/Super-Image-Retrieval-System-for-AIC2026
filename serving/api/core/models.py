@@ -189,14 +189,13 @@ class ModelRegistry:
             import torch
             from transformers import pipeline
 
-            device_id = 0 if (self._device == "cuda" and torch.cuda.is_available()) else -1
             logger.info(
-                f"ModelRegistry: lazy-loading ASR model (vinai/PhoWhisper-medium, device={device_id})..."
+                "ModelRegistry: lazy-loading ASR model (vinai/PhoWhisper-medium, device=cpu)..."
             )
             return pipeline(
                 "automatic-speech-recognition",
                 model="vinai/PhoWhisper-medium",
-                device=device_id,
+                device=-1,
             )
         except Exception as e:
             logger.warning(

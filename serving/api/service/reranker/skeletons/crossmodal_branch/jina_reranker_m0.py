@@ -30,9 +30,9 @@ def _get_model():
             from transformers import AutoModel
 
             model_name = "jinaai/jina-reranker-m0"
-            logger.info(f"Loading Jina Reranker M0 model: {model_name}...")
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-            dtype = torch.float16 if device == "cuda" else torch.float32
+            logger.info(f"Loading Jina Reranker M0 model: {model_name} on CPU...")
+            device = "cpu"
+            dtype = torch.float32
             import transformers
             orig_verbosity = transformers.logging.get_verbosity()
             transformers.logging.set_verbosity_error()
@@ -45,6 +45,7 @@ def _get_model():
             finally:
                 transformers.logging.set_verbosity(orig_verbosity)
             model.to(device)
+            model = model.to(dtype)
             model.eval()
 
             _MODEL_CACHE["model"] = model
@@ -54,6 +55,36 @@ def _get_model():
             _MODEL_CACHE["mock"] = True
 
     return _MODEL_CACHE
+
+
+def _resolve_img_path(c: CandidateResult, keyframes_root_dir: str = "") -> Path | None:
+    from pathlib import Path
+
+    data_dir = Path(keyframes_root_dir) if keyframes_root_dir else Path("data")
+    video_id = c.video_id
+    frame_id = c.frame_id
+    keyframe_path = c.keyframe_path
+    frame_id_str = str(frame_id)
+
+    parts = video_id.split("_")
+    if len(parts) == 2:
+        grp, vsub = parts[0], parts[1]
+    else:
+        grp, vsub = video_id, video_id
+
+    candidates = [
+        data_dir / "image" / grp / grp / vsub / f"{frame_id_str}.webp",
+        data_dir / "image" / grp / grp / vsub / f"{frame_id_str}.jpg",
+        data_dir / "image" / grp / f"{video_id}" / f"{frame_id_str}.webp",
+        data_dir / "image" / f"{video_id}" / f"{frame_id_str}.webp",
+        data_dir / "unified" / "keyframes" / keyframe_path if keyframe_path else None,
+        data_dir / keyframe_path if keyframe_path else None,
+        Path(keyframe_path) if keyframe_path else None,
+    ]
+    for p in candidates:
+        if p and p.exists() and p.is_file():
+            return p
+    return None
 
 
 def score(
@@ -86,13 +117,12 @@ def score(
         from PIL import Image
 
         model = cache["model"]
-        root_path = Path(keyframes_root_dir) if keyframes_root_dir else Path(".")
 
         # Chuẩn bị ảnh và text pairs
         sentence_pairs = []
         for c in candidates:
-            img_path = root_path / c.keyframe_path
-            if img_path.exists():
+            img_path = _resolve_img_path(c, keyframes_root_dir)
+            if img_path and img_path.exists():
                 try:
                     img = Image.open(img_path).convert("RGB")
                     sentence_pairs.append([query, img])

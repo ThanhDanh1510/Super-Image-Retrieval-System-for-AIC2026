@@ -66,7 +66,8 @@ class TextEmbeddingWrapper:
                     torch_dtype=dtype,
                     trust_remote_code=False,
                     low_cpu_mem_usage=True,
-                ).to(device_str)
+                    device_map=device_str if device_str == "cuda" else None,
+                )
             except Exception as e_native:
                 logger.info(f"Native load failed ({e_native}), trying with trust_remote_code...")
                 config = AutoConfig.from_pretrained(self.MODEL_ID, trust_remote_code=True)
@@ -83,9 +84,11 @@ class TextEmbeddingWrapper:
                     config=config,
                     torch_dtype=dtype,
                     trust_remote_code=True,
-                ).to(device_str)
+                    device_map=device_str if device_str == "cuda" else None,
+                )
 
             self.model.eval()
+            self.model = self.model.to(dtype)
             self.torch = torch
             self.device_str = device_str
         except Exception as e:
@@ -151,12 +154,12 @@ class TextEmbeddingWrapper:
                     padding=True,
                     truncation=True,
                     return_tensors="pt"
-                ).to(self.device_str)
+                ).to(self.model.device)
 
                 with self.torch.no_grad():
                     outputs = self.model(**inputs)
                     # Mean pooling trên token embeddings
-                    attention_mask = inputs["attention_mask"].unsqueeze(-1)
+                    attention_mask = inputs["attention_mask"].unsqueeze(-1).to(outputs[0].dtype)
                     token_embeddings = outputs[0]  # First element of model_output contains all token embeddings
                     sum_embeddings = self.torch.sum(token_embeddings * attention_mask, 1)
                     sum_mask = self.torch.clamp(attention_mask.sum(1), min=1e-9)
