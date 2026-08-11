@@ -9,7 +9,7 @@ import sys
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from ocr_local import select_best_candidate, should_filter_text
+from shared.ocr.ocr_local import select_best_candidate, should_filter_text
 
 ocr_dir = os.path.join(PROJECT_ROOT, "data", "ocr_output")
 parquet_files = sorted(glob.glob(os.path.join(ocr_dir, "L*_ocr.parquet")))

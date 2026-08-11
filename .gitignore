@@ -78,3 +78,13 @@ temp_*.json
 *.quality.tmp
 data/ocr_test_output/
 
+# --- Scratch & orphaned temp files ---
+scratch/
+*.rar
+L_by_scene_id.json
+prompt*.md
+test_body.json
+tasks.md
+folder_structure.md
+server.log
+server_error.log
