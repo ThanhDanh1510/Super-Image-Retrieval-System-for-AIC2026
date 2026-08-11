@@ -472,19 +472,12 @@ body {
 }
 
 /* --- TRAKE Chain Display --- */
-.trake-row {
-  display: flex;
-  gap: 16px;
-  margin-bottom: 16px;
-}
-
 .trake-chain {
   background: var(--card-bg);
   border: 1px solid var(--card-border);
   border-radius: 12px;
   padding: 12px;
-  flex: 1;
-  min-width: 0;
+  margin-bottom: 16px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
 }
 
