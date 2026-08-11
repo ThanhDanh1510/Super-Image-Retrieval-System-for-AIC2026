@@ -267,9 +267,7 @@ async def _enhance_query(raw_query: str) -> tuple[str, str]:
 def _split_events(query: str) -> list[str]:
     """
     Tách TRAKE query thành N sub-event descriptions.
-
-    Priority 1: Nếu query chứa xuống dòng '\\n', tách theo từng dòng.
-    Priority 2: Rule-based connectors ('then', 'after that', 'sau đó', ...).
+    Hybrid approach: Pattern-based (nhanh) → LLM fallback (chính xác).
 
     Args:
         query: Query tiếng Anh đã enhanced (hoặc tiếng Việt).
@@ -282,28 +280,122 @@ def _split_events(query: str) -> list[str]:
     """
     import re
 
-    # 1. Ưu tiên 1 — Newline split
+    # --- Strategy 1: Pattern-based (nhanh, ~0s) ---
+
+    # 1a. Explicit labels: E1:, E2:, 1., 2., - , *
+    explicit_pattern = r"(?:^|\n)\s*(?:E?\d+[\.:\)]\s*|\-\s*|\*\s*)(.+?)(?=(?:\n\s*(?:E?\d+[\.:\)]\s*|\-\s*|\*\s*)|\Z))"
+    matches = re.findall(explicit_pattern, query, flags=re.MULTILINE | re.DOTALL)
+    if len(matches) >= 2:
+        return [m.strip(" .,;-") for m in matches if m.strip(" .,;-")]
+
+    # 1b. Newline split (có số dòng >= 2)
     if "\n" in query:
-        lines = [line.strip() for line in query.split("\n") if line.strip()]
+        lines = [line.strip(" .,;-•*") for line in query.split("\n") if line.strip(" .,;-•*")]
         if len(lines) >= 2:
             return lines
 
-    # 2. Fallback — Rule-based connectors (bao gồm "and", "và")
+    # 1c. Temporal markers / connectors
     connectors_pattern = (
-        r"\b(?:then|after that|followed by|next|afterwards|subsequently|later|finally|sau đó|tiếp theo|rồi|và|and)\b"
+        r"\b(?:bắt đầu(?: bằng| với)?|tiếp theo|sau đó|rồi|cuối cùng|"
+        r"trước tiếp|cuối cùng|finally|then|after(?: that|wards)?|followed by|next|subsequently|later|"
+        r"và|and)\b"
     )
     segments = re.split(connectors_pattern, query, flags=re.IGNORECASE)
-    sub_events = [s.strip(" .,;-") for s in segments if s and s.strip(" .,;-")]
+    sub_events = [s.strip(" .,;-") for s in segments if s and len(s.strip(" .,;-")) > 5]
 
-    # 3. Nếu connectors không tách được, thử tách theo dấu chấm hoặc chấm phẩy
-    if len(sub_events) < 2:
-        punct_segments = re.split(r"[.;,]", query)
-        sub_events = [s.strip(" .,;-") for s in punct_segments if s and s.strip(" .,;-")]
+    if len(sub_events) >= 2:
+        return sub_events
 
-    if len(sub_events) < 2:
-        raise ValueError(f"Không thể tách query thành ít nhất 2 sub-events: '{query}'")
+    # 1d. Phân tách theo dấu chấm/phẩy (events dài > 5 từ)
+    punct_segments = re.split(r"[.;,]", query)
+    sub_events = [s.strip(" .,;-") for s in punct_segments if s and len(s.strip(" .,;-")) > 5]
+    if len(sub_events) >= 2:
+        return sub_events
 
-    return sub_events
+    # --- Strategy 2: LLM-based fallback (~1-2s) ---
+    llm_events = _split_events_llm(query)
+    if len(llm_events) >= 2:
+        return llm_events
+
+    raise ValueError(f"Không thể tách query thành ít nhất 2 sub-events: '{query}'")
+
+
+def _split_events_llm(query: str) -> list[str]:
+    """
+    Dùng Qwen2-1.5B để tách query thành events (fallback khi pattern fail).
+
+    Args:
+        query: Query text.
+
+    Returns:
+        List các sub-event strings. Trả về [] nếu LLM fail.
+    """
+    try:
+        import asyncio
+        # Dùng global text_embedder đã load sẵn
+        from serving.api.service.retrieval.text_query import _get_model_cached
+
+        model, tokenizer = _get_model_cached()
+
+        prompt = f"""Tách câu sau thành các sự kiện riêng biệt, mỗi sự kiện trên 1 dòng. Chỉ liệt kê sự kiện, không giải thích.
+
+Query: "{query}"
+
+Sự kiện:"""
+
+        inputs = tokenizer(prompt, return_tensors="pt", max_length=512, truncation=True).to(model.device)
+
+        import torch
+        with torch.no_grad():
+            outputs = model.generate(
+                **inputs,
+                max_new_tokens=256,
+                temperature=0.3,
+                do_sample=False,
+                pad_token_id=tokenizer.eos_token_id,
+            )
+
+        response = tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
+
+        # Parse response → events
+        events = []
+        for line in response.strip().split("\n"):
+            line = line.strip(" .,;-•*1234567890.)")
+            if line and len(line) > 5:
+                events.append(line)
+
+        return events
+    except Exception as e:
+        logger.warning(f"LLM event splitting failed: {e}")
+        return []
+
+
+_MODEL_CACHE = None
+_TOKENIZER_CACHE = None
+
+def _get_model_cached():
+    """Lấy hoặc khởi tạo model cho event splitting."""
+    global _MODEL_CACHE, _TOKENIZER_CACHE
+    if _MODEL_CACHE is None:
+        import torch
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+
+        model_id = "Qwen/Qwen2.5-1.5B-Instruct"
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+
+        tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
+        model = AutoModelForCausalLM.from_pretrained(
+            model_id,
+            torch_dtype=torch.float16,
+            device_map=device,
+            trust_remote_code=True,
+        )
+        model.eval()
+
+        _MODEL_CACHE = model
+        _TOKENIZER_CACHE = tokenizer
+
+    return _MODEL_CACHE, _TOKENIZER_CACHE
 
 
 async def _encode_text(
