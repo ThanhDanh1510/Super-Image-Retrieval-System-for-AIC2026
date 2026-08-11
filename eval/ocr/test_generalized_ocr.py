@@ -64,7 +64,7 @@ def load_dynamic_tiles(pil_img, input_size=448):
 def run_vietocr_branch(img_path):
     print("\n🔹 [Nhánh 1: VietOCR Printed Specialist] Đang trích xuất chữ in...")
     try:
-        from ocr_local import TextDetection, Predictor, Cfg, ocr_image
+        from shared.ocr.ocr_local import TextDetection, Predictor, Cfg, ocr_image
         det = TextDetection()
         cfg = Cfg.load_config_from_name('vgg_transformer')
         cfg['device'] = 'cuda' if torch.cuda.is_available() else 'cpu'

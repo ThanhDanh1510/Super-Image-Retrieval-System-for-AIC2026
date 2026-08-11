@@ -23,7 +23,7 @@ if not hasattr(np, "sctypes"):
     }
 
 from tqdm import tqdm
-from ocr_local import _init_detector, _init_recognizer, ocr_image_hybrid_quality, get_vlm_engine
+from shared.ocr.ocr_local import _init_detector, _init_recognizer, ocr_image_hybrid_quality, get_vlm_engine
 
 def natural_sort_key(s):
     return [int(text) if text.isdigit() else text.lower() for text in re.split(r'(\d+)', s)]
