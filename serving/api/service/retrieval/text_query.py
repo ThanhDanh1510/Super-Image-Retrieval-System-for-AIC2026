@@ -283,8 +283,15 @@ def _split_events(query: str) -> list[str]:
     # --- Strategy 1: Pattern-based (nhanh, ~0s) ---
 
     # 1a. Explicit labels: E1:, E2:, 1., 2., - , *
-    explicit_pattern = r"(?:^|\n)\s*(?:E?\d+[\.:\)]\s*|\-\s*|\*\s*)(.+?)(?=(?:\n\s*(?:E?\d+[\.:\)]\s*|\-\s*|\*\s*)|\Z))"
-    matches = re.findall(explicit_pattern, query, flags=re.MULTILINE | re.DOTALL)
+    # Hỗ trợ cả single-line (cách nhau bởi space) và multi-line
+    explicit_pattern = r"(?:E?\d+[\.:\)]\s*)(.+?)(?=(?:E?\d+[\.:\)]\s*)|\Z)"
+    matches = re.findall(explicit_pattern, query, flags=re.DOTALL)
+    if len(matches) >= 2:
+        return [m.strip(" .,;-") for m in matches if m.strip(" .,;-")]
+
+    # 1b. Bullet points: -, *, •
+    bullet_pattern = r"(?:^|\n)\s*[\-\*\•]\s*(.+?)(?=(?:\n\s*[\-\*\•]\s*)|\Z)"
+    matches = re.findall(bullet_pattern, query, flags=re.MULTILINE | re.DOTALL)
     if len(matches) >= 2:
         return [m.strip(" .,;-") for m in matches if m.strip(" .,;-")]
 
