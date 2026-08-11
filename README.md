@@ -163,26 +163,14 @@ Tất cả phiên bản model được khai báo tập trung tại `configs/mode
 
 **Pre-download tất cả models (khuyên dùng — tổng ~15GB):**
 
+Thay vì tự viết code, bạn có thể chạy 1 dòng lệnh duy nhất để script tự động parse đúng model versions từ `configs/model_versions.yaml` và tải về:
+
 ```powershell
-python -c "
-from transformers import AutoModel, AutoTokenizer, AutoModelForSequenceClassification
-models = [
-    'openai/clip-vit-large-patch14',
-    'Alibaba-NLP/gte-Qwen2-1.5B-instruct',
-    'BAAI/bge-reranker-v2-m3',
-    'jinaai/jina-reranker-m0',
-    'BAAI/bge-large-en-v1.5',
-    'vinai/PhoWhisper-medium',
-]
-for m in models:
-    print(f'Downloading {m}...')
-    AutoTokenizer.from_pretrained(m, trust_remote_code=True)
-    try:
-        AutoModelForSequenceClassification.from_pretrained(m, trust_remote_code=True)
-    except:
-        AutoModel.from_pretrained(m, trust_remote_code=True)
-    print(f'  Done!')
-"
+# Cách 1: Sử dụng Makefile shortcut
+make download-models
+
+# Cách 2: Chạy trực tiếp script
+python tools/download_models.py
 ```
 
 ---

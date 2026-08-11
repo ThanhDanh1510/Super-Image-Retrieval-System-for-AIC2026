@@ -34,6 +34,9 @@ help: ## Hiển thị danh sách commands
 install: ## Cài đặt TẤT CẢ dependencies vào 1 venv duy nhất (serving + ingestion + dev)
 	pip install -e ".[all]"
 
+download-models: ## Tải trước tất cả các model được đăng ký trong model_versions.yaml
+	$(PYTHON) tools/download_models.py
+
 # =============================================================================
 # Serving
 # =============================================================================
