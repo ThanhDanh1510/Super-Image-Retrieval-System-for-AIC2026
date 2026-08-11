@@ -84,7 +84,31 @@ python -m indexing.run_index --dataset-dir ./data/unified --collection aic2026_v
 ```
 Quá trình này mất khoảng ~7 phút. Nó sẽ tạo collection và thiết lập alias `production`.
 
-### Bước 6: Khởi động Server
+### Bước 6: Tải AI Models (Pre-download)
+
+Tất cả models được tải tự động từ HuggingFace Hub lần đầu chạy. Để tránh chờ lần đầu, nên tải trước:
+
+```powershell
+# Cách 1: Dùng script (khuyên dùng)
+python tools/download_models.py
+
+# Cách 2: Makefile
+make download-models
+```
+
+**Danh sách models (~12GB):**
+
+| Model | Mục đích | Device | RAM |
+|---|---|---|---|
+| **CLIP ViT-L/14** | Image embedding | GPU | ~1.7GB |
+| **gte-Qwen2-1.5B** | Text embedding (OCR+ASR) | GPU | ~3GB |
+| **bge-reranker-v2-m3** | Text rerank | GPU | ~2.3GB |
+| **PhoWhisper-medium** | ASR tiếng Việt | CPU | ~1.5GB |
+| **bge-large-en-v1.5** | Hybrid search | CPU | ~2GB |
+
+> 💡 Models được cache tại `~/.cache/huggingface/` (hoặc `data/hf_cache/` nếu đặt `HF_HOME`).
+
+### Bước 7: Khởi động Server
 ```powershell
 python start_api.py
 ```
@@ -100,7 +124,7 @@ Pipeline sử dụng 5 loại vector chính để tìm kiếm:
 - **ocr_sparse** (BM42)
 - **asr_sparse** (BM42)
 
-Sử dụng Weighted RRF (k=60, prefetch=200), rerank với ViRanker (text, luôn bật) + Jina Reranker M0 (crossmodal, GPU float16, có thể bật/tắt qua UI).
+Sử dụng Weighted RRF (k=60, prefetch=200), rerank với bge-reranker-v2-m3 (text, luôn bật, GPU).
 
 ## 📂 Cấu trúc Dự án (Project Structure)
 ```text
@@ -134,14 +158,12 @@ Super-Image-Retrieval-System-for-AIC2026/
 
 | Endpoint | Body | Mô tả |
 |---|---|---|
-| `POST /api/v1/kis` | `{query, input_type: "text"\|"voice", top_k (1-200), use_reranker?, user_choices?}` | Known-Item Search |
-| `POST /api/v1/vqa` | `{query, question, input_type, top_k, use_reranker?, user_choices?}` | Visual QA — trả `results` + `answers` |
+| `POST /api/v1/kis` | `{query, input_type: "text"\|"voice", top_k (1-200), user_choices?}` | Known-Item Search |
+| `POST /api/v1/vqa` | `{query, question, input_type, top_k, user_choices?}` | Visual QA — trả `results` + `answers` |
 | `POST /api/v1/trake` | `{query, num_events (2-10), input_type, top_k}` | Temporal Retrieval — trả `list[list[CandidateResult]]` |
 | `POST /api/v1/similar-image` | multipart `file` + query param `top_k` | Image Search |
 
 Tất cả response trả về `CandidateResult`: `video_id`, `scene_id`, `frame_id`, `timestamp_start/mid/end`, `keyframe_path`, `ocr_text`, `asr_text`, `score`.
-
-**Tham số `use_reranker`:** Mặc định `false`. Khi bật (`true`), Jina Reranker M0 chạy trên GPU float16 để tăng độ chính xác (tốc độ chậm hơn ~8s). ViRanker text reranker **luôn chạy** vì rất nhẹ (~0.2s).
 
 ---
 
@@ -153,9 +175,7 @@ Model **tự động tải về** từ HuggingFace Hub lần đầu được dù
 |---|---|---|---|---|
 | **CLIP ViT-L/14** | Image embedding (dim 1024) | `openai/clip-vit-large-patch14` | GPU | ~1.7GB |
 | **gte-Qwen2-1.5B** | Text embedding OCR+ASR (dim 1536) | `Alibaba-NLP/gte-Qwen2-1.5B-instruct` | GPU | ~3GB |
-| **ViRanker** | Text reranker (luôn bật) | — | CPU/GPU | ~0.5GB |
-| **bge-reranker-v2-m3** | Text rerank (KIS/VQA) | `BAAI/bge-reranker-v2-m3` | GPU | ~2.3GB |
-| **jina-reranker-m0** | Crossmodal rerank (bật/tắt qua UI) | `jinaai/jina-reranker-m0` | GPU (float16) | ~2.5GB |
+| **bge-reranker-v2-m3** | Text rerank (luôn bật) | `BAAI/bge-reranker-v2-m3` | GPU | ~2.3GB |
 | **PhoWhisper-medium** | ASR tiếng Việt | `vinai/PhoWhisper-medium` | CPU | ~1.5GB |
 | **bge-large-en-v1.5** | Description hybrid search | `BAAI/bge-large-en-v1.5` | CPU | ~2GB |
 
@@ -258,14 +278,12 @@ make typecheck     # Mypy type checker
 | Bước | Thời gian | Device |
 |---|---|---|
 | enhance_query (dịch EN/VI) | ~0.4s | API call |
-| encode_text+image | ~0.2s | GPU |
-| qdrant_search (RRF fusion) | ~0.2s | CPU |
-| viranker rerank (luôn bật) | ~0.2s | CPU/GPU |
-| jina rerank (khi bật qua UI) | ~8s | GPU |
-| **Tổng (không Jina)** | **~1s** | — |
-| **Tổng (có Jina)** | **~9s** | — |
+| encode_text+image | ~0.8s | GPU |
+| qdrant_search (RRF fusion) | ~0.3s | CPU |
+| bge-reranker-v2-m3 (luôn bật) | ~0.2s | GPU |
+| **Tổng** | **~2s** | — |
 
-**GPU Memory:** ~9.5GB / 16GB (RTX 5060 Ti)
+**GPU Memory:** ~7.9GB / 16GB (RTX 5060 Ti)
 
 ---
 
@@ -284,10 +302,13 @@ Cần chạy indexing trước (xem phần **Indexing & Alias Management**).
 Đã tối ưu — chỉ CLIP + Qwen2 + bge-reranker trên GPU (~7-9.5GB), còn lại chạy CPU.
 
 ### Search chậm (>10s)
-Kiểm tra reranker có đang bật không (nút **🚀 Reranker** trên UI). Tắt đi nếu cần latency thấp.
+Xem log profiling để xác định bottleneck:
+```powershell
+Get-Content "server.log" | Select-String "PROFILE"
+```
 
 ### Lỗi dtype mismatch (Float vs Half)
-Đã sửa — model Jina Reranker M0 tự động ép sang float16 sau khi load.
+Đã sửa — models tự động ép sang float16 sau khi load.
 
 ---
 
