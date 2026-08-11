@@ -170,38 +170,30 @@ def build_scene_metadata(raw_df: pd.DataFrame, fps: float = 25.0) -> pd.DataFram
 
 def extract_ocr_for_metadata(meta_df: pd.DataFrame, ocr_dir: str | Path) -> pd.DataFrame:
     """
-    Tra cứu text OCR từ data/OCR/<group>/<video_id>.json sử dụng multi-fallback lookup.
+    Tra cứu text OCR từ data/OCR/<group>/<video_id>.json sử dụng video_id và frame_id.
     """
     ocr_dir = Path(ocr_dir)
     ocr_cache: dict[str, dict[str, str]] = {}
-    global_ocr_map: dict[str, str] = {}
 
     if ocr_dir.exists():
         for json_file in ocr_dir.glob("**/*.json"):
             try:
-                v_name = json_file.stem
+                v_name = json_file.stem  # Ví dụ: "L21_V001"
                 with open(json_file, "r", encoding="utf-8") as f:
-                    d = json.load(f)
-                    ocr_cache[v_name] = d
-                    global_ocr_map.update(d)
+                    ocr_cache[v_name] = json.load(f)
             except Exception as e:
                 logger.warning(f"Không thể đọc OCR JSON {json_file}: {e}")
 
     ocr_rows = []
-    for global_idx, row in meta_df.iterrows():
+    for _, row in meta_df.iterrows():
         video_id = row["video_id"]
         frame_id_str = str(row["frame_id"])
-        global_idx_str = str(global_idx)
 
         v_ocr_dict = ocr_cache.get(video_id, {})
 
-        # Multi-fallback lookup: global_idx -> v_ocr_dict[frame_id] -> global_ocr_map[frame_id]
-        raw_ocr = (
-            global_ocr_map.get(global_idx_str)
-            or v_ocr_dict.get(frame_id_str)
-            or global_ocr_map.get(frame_id_str)
-            or ""
-        )
+        # Tra cứu trực tiếp theo frame_id
+        raw_ocr = v_ocr_dict.get(frame_id_str, "")
+
         clean_ocr = clean_whitespace(normalize_nfc(raw_ocr)) if raw_ocr else ""
 
         ocr_rows.append({

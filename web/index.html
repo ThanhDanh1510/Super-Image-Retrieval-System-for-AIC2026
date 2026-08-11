@@ -88,6 +88,14 @@
           </div>
 
           <div class="control-group">
+            <label class="spider-switch" title="Bật/Tắt Reranker (Bật sẽ chính xác hơn nhưng tăng độ trễ ~0.2s)">
+              <input type="checkbox" id="use-reranker-checkbox" />
+              <span class="slider"></span>
+              <span class="label-text">🚀 Reranker</span>
+            </label>
+          </div>
+
+          <div class="control-group">
             <label for="density-slider">Mật độ card:</label>
             <input type="range" id="density-slider" min="140" max="320" step="10" value="180" />
             <span id="density-val" class="highlight-val">180px</span>

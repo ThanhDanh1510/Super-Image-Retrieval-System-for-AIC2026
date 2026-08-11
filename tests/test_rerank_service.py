@@ -63,7 +63,7 @@ def mock_rerankers(monkeypatch):
 @pytest.mark.anyio
 async def test_rerank_returns_fused_candidates(candidates, mock_rerankers):
     viranker, jina, fuse = mock_rerankers
-    result = await rerank_service.rerank("query", candidates)
+    result = await rerank_service.rerank("query", candidates, use_visual_reranker=True)
 
     assert result == candidates
     # Cả hai nhánh được gọi song song với query gốc
@@ -74,9 +74,22 @@ async def test_rerank_returns_fused_candidates(candidates, mock_rerankers):
 
 
 @pytest.mark.anyio
+async def test_rerank_only_runs_text_when_visual_is_disabled(candidates, mock_rerankers):
+    viranker, jina, fuse = mock_rerankers
+    result = await rerank_service.rerank("query", candidates, use_visual_reranker=False)
+
+    assert result == candidates
+    # Chỉ nhánh text được gọi
+    viranker.score.assert_called_once_with("query", candidates)
+    jina.score.assert_not_called()
+    # Fusion nhận score text và visual là None
+    fuse.assert_called_once_with([0.9, 0.4], None, candidates)
+
+
+@pytest.mark.anyio
 async def test_rerank_empty_candidates_returns_empty(mock_rerankers):
     viranker, jina, _ = mock_rerankers
-    result = await rerank_service.rerank("query", [])
+    result = await rerank_service.rerank("query", [], use_visual_reranker=True)
 
     assert result == []
     viranker.score.assert_not_called()
@@ -99,7 +112,7 @@ async def test_rerank_falls_back_to_original_candidates_when_scorer_raises(candi
     jina.score.return_value = [0.5, 0.8]
     monkeypatch.setattr(rerank_service, "jina_reranker_m0", jina)
 
-    result = await rerank_service.rerank("query", candidates)
+    result = await rerank_service.rerank("query", candidates, use_visual_reranker=True)
 
     assert result == candidates
     # Nhánh jina được gọi song song nhưng kết quả bị bỏ vì viranker lỗi → fallback
@@ -109,7 +122,7 @@ async def test_rerank_falls_back_to_original_candidates_when_scorer_raises(candi
 @pytest.mark.anyio
 async def test_rerank_uses_enhanced_query_over_raw_query(candidates, mock_rerankers):
     viranker, jina, _ = mock_rerankers
-    await rerank_service.rerank("câu hỏi tiếng Việt", candidates, enhanced_query="english query")
+    await rerank_service.rerank("câu hỏi tiếng Việt", candidates, enhanced_query="english query", use_visual_reranker=True)
 
     viranker.score.assert_called_once_with("english query", candidates)
     jina.score.assert_called_once_with("english query", candidates, "")
@@ -137,7 +150,7 @@ async def test_search_kis_uses_rerank_service(monkeypatch):
     rerank = AsyncMock(return_value=cands)
     monkeypatch.setattr(routes_kis.rerank_service, "rerank", rerank)
 
-    req = KISRequest(query="câu hỏi tiếng Việt", top_k=5)
+    req = KISRequest(query="câu hỏi tiếng Việt", top_k=5, use_reranker=True)
     resp = await routes_kis.search_kis(
         request=req,
         qdrant_client=AsyncMock(),
@@ -172,7 +185,7 @@ async def test_search_vqa_uses_rerank_service(monkeypatch):
     rerank = AsyncMock(return_value=cands)
     monkeypatch.setattr(routes_kis.rerank_service, "rerank", rerank)
 
-    req = VQARequest(query="câu hỏi tiếng Việt", question="Câu hỏi?", top_k=5)
+    req = VQARequest(query="câu hỏi tiếng Việt", question="Câu hỏi?", top_k=5, use_reranker=True)
     resp = await routes_kis.search_vqa(
         request=req,
         qdrant_client=AsyncMock(),

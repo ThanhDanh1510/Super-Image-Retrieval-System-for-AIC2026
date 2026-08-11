@@ -30,9 +30,11 @@ def _get_model():
             from transformers import AutoModel
 
             model_name = "jinaai/jina-reranker-m0"
-            logger.info(f"Loading Jina Reranker M0 model: {model_name} on CPU...")
-            device = "cpu"
-            dtype = torch.float32
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            dtype = torch.float16 if device == "cuda" else torch.float32
+            
+            logger.info(f"Loading Jina Reranker M0 model: {model_name} on {device.upper()} ({dtype})...")
+            
             import transformers
             orig_verbosity = transformers.logging.get_verbosity()
             transformers.logging.set_verbosity_error()
@@ -44,8 +46,9 @@ def _get_model():
                 )
             finally:
                 transformers.logging.set_verbosity(orig_verbosity)
+            
+            # Use device_map or standard model.to()
             model.to(device)
-            model = model.to(dtype)
             model.eval()
 
             _MODEL_CACHE["model"] = model
