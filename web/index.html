@@ -87,6 +87,11 @@
             <input type="number" id="top-k-input" min="1" max="500" value="30" class="number-input-field" />
           </div>
 
+          <div class="control-group" id="num-events-group" style="display: none;">
+            <label for="num-events-input">Sự kiện:</label>
+            <input type="number" id="num-events-input" min="2" max="10" value="3" class="number-input-field" />
+          </div>
+
           <div class="control-group">
             <label class="spider-switch" title="Bật/Tắt Reranker (Bật sẽ chính xác hơn nhưng tăng độ trễ ~0.2s)">
               <input type="checkbox" id="use-reranker-checkbox" />

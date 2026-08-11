@@ -44,6 +44,11 @@ function setupTabs() {
       document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
       state.mode = btn.dataset.mode;
+      // Hiện/ẩn num_events cho TRAKE
+      const numEventsGroup = document.getElementById("num-events-group");
+      if (numEventsGroup) {
+        numEventsGroup.style.display = (state.mode === "trake") ? "flex" : "none";
+      }
       updateDrawer();
     });
   });
@@ -213,6 +218,11 @@ async function triggerSearch() {
 
     if (state.mode === "vqa") {
       payload.question = queryText;
+    }
+
+    if (state.mode === "trake") {
+      const numEvents = parseInt(document.getElementById("num-events-input")?.value || "3", 10);
+      payload.num_events = Math.max(2, Math.min(10, numEvents));
     }
 
     const resp = await fetch(endpoint, {
