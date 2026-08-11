@@ -124,7 +124,7 @@ Pipeline sử dụng 5 loại vector chính để tìm kiếm:
 - **ocr_sparse** (BM42)
 - **asr_sparse** (BM42)
 
-Sử dụng Weighted RRF (k=60, prefetch=200), rerank với bge-reranker-v2-m3 (text, luôn bật, GPU).
+Sử dụng Weighted RRF (k=60, prefetch=200), rerank với bge-reranker-v2-m3 (text, luôn bật, GPU) + jina-reranker-m0 (crossmodal, tắt mặc định).
 
 ## 📂 Cấu trúc Dự án (Project Structure)
 ```text
@@ -158,12 +158,14 @@ Super-Image-Retrieval-System-for-AIC2026/
 
 | Endpoint | Body | Mô tả |
 |---|---|---|
-| `POST /api/v1/kis` | `{query, input_type: "text"\|"voice", top_k (1-200), user_choices?}` | Known-Item Search |
-| `POST /api/v1/vqa` | `{query, question, input_type, top_k, user_choices?}` | Visual QA — trả `results` + `answers` |
+| `POST /api/v1/kis` | `{query, input_type: "text"\|"voice", top_k (1-200), use_crossmodal_reranker?, user_choices?}` | Known-Item Search |
+| `POST /api/v1/vqa` | `{query, question, input_type, top_k, use_crossmodal_reranker?, user_choices?}` | Visual QA — trả `results` + `answers` |
 | `POST /api/v1/trake` | `{query, num_events (2-10), input_type, top_k}` | Temporal Retrieval — trả `list[list[CandidateResult]]` |
 | `POST /api/v1/similar-image` | multipart `file` + query param `top_k` | Image Search |
 
 Tất cả response trả về `CandidateResult`: `video_id`, `scene_id`, `frame_id`, `timestamp_start/mid/end`, `keyframe_path`, `ocr_text`, `asr_text`, `score`.
+
+**Tham số `use_crossmodal_reranker`:** Mặc định `false`. Khi bật (`true`), Jina Reranker M0 chạy trên GPU để tăng độ chính xác (tốc độ chậm hơn ~8s). Text reranker (bge-reranker-v2-m3) **luôn chạy** vì rất nhẹ (~0.2s).
 
 ---
 
@@ -176,6 +178,7 @@ Model **tự động tải về** từ HuggingFace Hub lần đầu được dù
 | **CLIP ViT-L/14** | Image embedding (dim 1024) | `openai/clip-vit-large-patch14` | GPU | ~1.7GB |
 | **gte-Qwen2-1.5B** | Text embedding OCR+ASR (dim 1536) | `Alibaba-NLP/gte-Qwen2-1.5B-instruct` | GPU | ~3GB |
 | **bge-reranker-v2-m3** | Text rerank (luôn bật) | `BAAI/bge-reranker-v2-m3` | GPU | ~2.3GB |
+| **jina-reranker-m0** | Crossmodal rerank (tắt mặc định) | `jinaai/jina-reranker-m0` | GPU | ~2.5GB |
 | **PhoWhisper-medium** | ASR tiếng Việt | `vinai/PhoWhisper-medium` | CPU | ~1.5GB |
 | **bge-large-en-v1.5** | Description hybrid search | `BAAI/bge-large-en-v1.5` | CPU | ~2GB |
 
@@ -281,9 +284,11 @@ make typecheck     # Mypy type checker
 | encode_text+image | ~0.8s | GPU |
 | qdrant_search (RRF fusion) | ~0.3s | CPU |
 | bge-reranker-v2-m3 (luôn bật) | ~0.2s | GPU |
-| **Tổng** | **~2s** | — |
+| jina-reranker-m0 (tắt mặc định) | ~8s | GPU |
+| **Tổng (không Jina)** | **~2s** | — |
+| **Tổng (có Jina)** | **~10s** | — |
 
-**GPU Memory:** ~7.9GB / 16GB (RTX 5060 Ti)
+**GPU Memory:** ~7.9GB (không Jina) / ~10.4GB (có Jina)
 
 ---
 
@@ -302,8 +307,9 @@ Cần chạy indexing trước (xem phần **Indexing & Alias Management**).
 Đã tối ưu — chỉ CLIP + Qwen2 + bge-reranker trên GPU (~7-9.5GB), còn lại chạy CPU.
 
 ### Search chậm (>10s)
-Xem log profiling để xác định bottleneck:
+Kiểm tra `use_crossmodal_reranker` có đang bật không. Tắt đi nến cần latency thấp:
 ```powershell
+# Xem log profiling
 Get-Content "server.log" | Select-String "PROFILE"
 ```
 
