@@ -258,58 +258,145 @@ function renderResults(results) {
 
   resultsGrid.innerHTML = "";
 
-  results.forEach((item, idx) => {
-    // Handle TRAKE tuple format or KIS single format
-    const candidate = Array.isArray(item) ? item[0] : item;
+  // TRAKE mode: mỗi item là 1 chain (array) của candidates
+  const isTrake = state.mode === "trake" && Array.isArray(results[0]);
+
+  if (isTrake) {
+    // TRAKE: render từng chain như 1 chuỗi ảnh
+    results.forEach((chain, chainIdx) => {
+      if (!Array.isArray(chain) || chain.length === 0) return;
+      renderTrakeChain(chain, chainIdx);
+    });
+  } else {
+    // KIS/VQA: render từng ảnh riêng lẻ
+    results.forEach((candidate, idx) => {
+      renderSingleCard(candidate);
+    });
+  }
+}
+
+// --- Render 1 TRAKE chain (chuỗi ảnh nối tiếp) ---
+function renderTrakeChain(chain, chainIdx) {
+  const chainKey = chain.map(c => `${c.video_id}_${c.frame_id}`).join("__");
+  const avgScore = chain.reduce((sum, c) => sum + c.score, 0) / chain.length;
+
+  const chainContainer = document.createElement("div");
+  chainContainer.className = "trake-chain";
+
+  let imagesHtml = "";
+  chain.forEach((candidate, eventIdx) => {
+    const imgUrl = `${API_BASE}/api/v1/image/${candidate.video_id}/${candidate.frame_id}`;
     const itemKey = `${candidate.video_id}_${candidate.frame_id}`;
     const isSelected = state.selectedItems.has(itemKey);
 
-    const imgUrl = `${API_BASE}/api/v1/image/${candidate.video_id}/${candidate.frame_id}`;
-    const scorePct = (candidate.score * 100).toFixed(1);
-
-    const card = document.createElement("div");
-    card.className = "kf-card";
-
-    card.innerHTML = `
-      <div class="kf-img-wrapper">
-        <img src="${imgUrl}" alt="${candidate.scene_id}" loading="lazy" />
-        <span class="score-badge">${scorePct}%</span>
-        <button class="select-checkbox-btn ${isSelected ? 'selected' : ''}" data-key="${itemKey}">
-          ${isSelected ? '✓' : '+'}
-        </button>
-        <button class="copy-btn-overlay" title="Copy <video_id,frame_id> (Ctrl+C)">📋 Copy</button>
-      </div>
-      <div class="kf-details">
-        <div class="kf-title">
-          <span>${candidate.video_id}</span>
-          <span class="ts-label">${candidate.timestamp_mid.toFixed(1)}s</span>
+    imagesHtml += `
+      <div class="trake-event" data-key="${itemKey}">
+        <div class="trake-img-wrapper">
+          <img src="${imgUrl}" alt="${candidate.scene_id}" loading="lazy" />
+          <span class="event-badge">E${eventIdx + 1}</span>
+          <button class="select-checkbox-btn ${isSelected ? 'selected' : ''}" data-key="${itemKey}">
+            ${isSelected ? '✓' : '+'}
+          </button>
         </div>
-        ${candidate.ocr_text ? `<div class="ocr-pill" title="${candidate.ocr_text}">🔤 ${candidate.ocr_text}</div>` : ''}
+        <div class="trake-event-info">
+          <span class="ts-label">${candidate.timestamp_mid.toFixed(1)}s</span>
+          <span class="video-label">${candidate.video_id}</span>
+        </div>
       </div>
     `;
 
-    // Mouseover tracking for hotkey C copy
-    card.addEventListener("mouseenter", () => { state.hoveredCand = candidate; });
-    card.addEventListener("mouseleave", () => { state.hoveredCand = null; });
+    // Thêm mũi tên giữa các events (trừ event cuối)
+    if (eventIdx < chain.length - 1) {
+      imagesHtml += `<div class="trake-arrow">→</div>`;
+    }
+  });
 
-    // Lightbox image preview on click
-    card.querySelector("img").addEventListener("click", () => showLightbox(candidate, imgUrl));
+  chainContainer.innerHTML = `
+    <div class="trake-chain-header">
+      <span class="chain-index">#${chainIdx + 1}</span>
+      <span class="chain-score">${(avgScore * 100).toFixed(0)}%</span>
+      <span class="chain-video">${chain[0].video_id}</span>
+    </div>
+    <div class="trake-chain-images">
+      ${imagesHtml}
+    </div>
+  `;
 
-    // Copy Button Overlay Click
-    card.querySelector(".copy-btn-overlay").addEventListener("click", (e) => {
-      e.stopPropagation();
-      copyToClipboard(candidate);
-    });
+  // Event listeners cho từng event trong chain
+  chainContainer.querySelectorAll(".trake-event").forEach((eventEl) => {
+    const key = eventEl.dataset.key;
+    const candidate = chain.find(c => `${c.video_id}_${c.frame_id}` === key);
+    if (!candidate) return;
 
-    // Selection Checkbox
-    const selectBtn = card.querySelector(".select-checkbox-btn");
+    const imgUrl = `${API_BASE}/api/v1/image/${candidate.video_id}/${candidate.frame_id}`;
+
+    // Lightbox on click
+    eventEl.querySelector("img").addEventListener("click", () => showLightbox(candidate, imgUrl));
+
+    // Selection
+    const selectBtn = eventEl.querySelector(".select-checkbox-btn");
     selectBtn.addEventListener("click", (e) => {
       e.stopPropagation();
-      toggleSelect(itemKey, candidate, selectBtn);
+      toggleSelect(key, candidate, selectBtn);
     });
 
-    resultsGrid.appendChild(card);
+    // Hover tracking
+    eventEl.addEventListener("mouseenter", () => { state.hoveredCand = candidate; });
+    eventEl.addEventListener("mouseleave", () => { state.hoveredCand = null; });
   });
+
+  resultsGrid.appendChild(chainContainer);
+}
+
+// --- Render 1 single card (KIS/VQA) ---
+function renderSingleCard(candidate) {
+  const itemKey = `${candidate.video_id}_${candidate.frame_id}`;
+  const isSelected = state.selectedItems.has(itemKey);
+  const imgUrl = `${API_BASE}/api/v1/image/${candidate.video_id}/${candidate.frame_id}`;
+  const scorePct = (candidate.score * 100).toFixed(1);
+
+  const card = document.createElement("div");
+  card.className = "kf-card";
+
+  card.innerHTML = `
+    <div class="kf-img-wrapper">
+      <img src="${imgUrl}" alt="${candidate.scene_id}" loading="lazy" />
+      <span class="score-badge">${scorePct}%</span>
+      <button class="select-checkbox-btn ${isSelected ? 'selected' : ''}" data-key="${itemKey}">
+        ${isSelected ? '✓' : '+'}
+      </button>
+      <button class="copy-btn-overlay" title="Copy <video_id,frame_id> (Ctrl+C)">📋 Copy</button>
+    </div>
+    <div class="kf-details">
+      <div class="kf-title">
+        <span>${candidate.video_id}</span>
+        <span class="ts-label">${candidate.timestamp_mid.toFixed(1)}s</span>
+      </div>
+      ${candidate.ocr_text ? `<div class="ocr-pill" title="${candidate.ocr_text}">🔤 ${candidate.ocr_text}</div>` : ''}
+    </div>
+  `;
+
+  // Mouseover tracking for hotkey C copy
+  card.addEventListener("mouseenter", () => { state.hoveredCand = candidate; });
+  card.addEventListener("mouseleave", () => { state.hoveredCand = null; });
+
+  // Lightbox image preview on click
+  card.querySelector("img").addEventListener("click", () => showLightbox(candidate, imgUrl));
+
+  // Copy Button Overlay Click
+  card.querySelector(".copy-btn-overlay").addEventListener("click", (e) => {
+    e.stopPropagation();
+    copyToClipboard(candidate);
+  });
+
+  // Selection Checkbox
+  const selectBtn = card.querySelector(".select-checkbox-btn");
+  selectBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleSelect(itemKey, candidate, selectBtn);
+  });
+
+  resultsGrid.appendChild(card);
 }
 
 // --- Selection Drawer & Collapsible Sidebar ---
