@@ -30,7 +30,7 @@ async def rerank(
     candidates: list[CandidateResult],
     enhanced_query: str | None = None,
     keyframes_root_dir: str = "",
-    use_crossmodal_reranker: bool = False,
+    use_visual_reranker: bool = False,
 ) -> list[CandidateResult]:
     """
     Rerank candidates bằng ViRanker (text) + tùy chọn Jina M0 (crossmodal).
@@ -40,7 +40,7 @@ async def rerank(
         candidates: Danh sách candidates cần rerank.
         enhanced_query: Query đã dịch/enhance.
         keyframes_root_dir: Thư mục chứa ảnh keyframe (cho Jina M0).
-        use_crossmodal_reranker: Bật Jina M0 (mặc định False).
+        use_visual_reranker: Bật Jina M0 (mặc định False).
 
     Returns:
         Danh sách candidates đã rerank và sắp xếp theo score.
@@ -56,7 +56,7 @@ async def rerank(
     rerank_candidates = candidates[:20] if len(candidates) > 20 else candidates
 
     try:
-        if use_crossmodal_reranker:
+        if use_visual_reranker:
             # Chạy song song cả hai nhánh
             text_task = asyncio.to_thread(viranker.score, query_for_rerank, rerank_candidates)
             visual_task = asyncio.to_thread(
