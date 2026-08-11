@@ -92,6 +92,11 @@
             <input type="number" id="num-events-input" min="2" max="10" value="3" class="number-input-field" />
           </div>
 
+          <div class="control-group" id="chains-per-row-group" style="display: none;">
+            <label for="chains-per-row-input">Chain/hàng:</label>
+            <input type="number" id="chains-per-row-input" min="1" max="4" value="2" class="number-input-field" />
+          </div>
+
           <div class="control-group">
             <label class="spider-switch" title="Bật/Tắt Reranker (Bật sẽ chính xác hơn nhưng tăng độ trễ ~0.2s)">
               <input type="checkbox" id="use-reranker-checkbox" />
@@ -100,7 +105,7 @@
             </label>
           </div>
 
-          <div class="control-group">
+          <div class="control-group" id="density-group">
             <label for="density-slider">Mật độ card:</label>
             <input type="range" id="density-slider" min="140" max="320" step="10" value="180" />
             <span id="density-val" class="highlight-val">180px</span>
