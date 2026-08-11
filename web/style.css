@@ -473,6 +473,9 @@ body {
 
 /* --- TRAKE Chain Display --- */
 .trake-chain {
+  grid-column: 1 / -1 !important;
+  width: 100% !important;
+  box-sizing: border-box;
   background: var(--card-bg);
   border: 1px solid var(--card-border);
   border-radius: 12px;
