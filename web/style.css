@@ -472,12 +472,19 @@ body {
 }
 
 /* --- TRAKE Chain Display --- */
+.trake-row {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
 .trake-chain {
   background: var(--card-bg);
   border: 1px solid var(--card-border);
   border-radius: 12px;
   padding: 12px;
-  margin-bottom: 16px;
+  flex: 1;
+  min-width: 0;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
 }
 
@@ -564,6 +571,12 @@ body {
   justify-content: space-between;
   margin-top: 4px;
   font-size: 0.7rem;
+}
+
+.frame-label {
+  color: var(--spider-blue);
+  font-family: var(--font-code);
+  font-weight: 700;
 }
 
 .trake-event-info .video-label {

@@ -11,6 +11,7 @@ const state = {
   query: "",
   topK: 30,
   useReranker: false,
+  chainsPerRow: 2, // Số chain TRAKE trên 1 hàng
   selectedItems: new Map(), // key -> CandidateResult
   rawResults: [],
   selectedImageBase64: null,
@@ -44,10 +45,18 @@ function setupTabs() {
       document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
       state.mode = btn.dataset.mode;
-      // Hiện/ẩn num_events cho TRAKE
+      // Hiện/ẩn controls theo mode
       const numEventsGroup = document.getElementById("num-events-group");
+      const chainsPerRowGroup = document.getElementById("chains-per-row-group");
+      const densityGroup = document.getElementById("density-group");
       if (numEventsGroup) {
         numEventsGroup.style.display = (state.mode === "trake") ? "flex" : "none";
+      }
+      if (chainsPerRowGroup) {
+        chainsPerRowGroup.style.display = (state.mode === "trake") ? "flex" : "none";
+      }
+      if (densityGroup) {
+        densityGroup.style.display = (state.mode === "trake") ? "none" : "flex";
       }
       updateDrawer();
     });
@@ -121,6 +130,18 @@ function setupControls() {
     rerankerCheckbox.addEventListener("change", (e) => {
       state.useReranker = e.target.checked;
       statusBar.textContent = `⚙️ Reranker đã được ${state.useReranker ? "BẬT" : "TẮT"}`;
+    });
+  }
+
+  // TRAKE Chains Per Row
+  const chainsPerRowInput = document.getElementById("chains-per-row-input");
+  if (chainsPerRowInput) {
+    chainsPerRowInput.value = state.chainsPerRow;
+    chainsPerRowInput.addEventListener("input", (e) => {
+      let val = parseInt(e.target.value, 10);
+      if (isNaN(val) || val < 1) val = 1;
+      if (val > 4) val = 4;
+      state.chainsPerRow = val;
     });
   }
 }
@@ -262,10 +283,21 @@ function renderResults(results) {
   const isTrake = state.mode === "trake" && Array.isArray(results[0]);
 
   if (isTrake) {
-    // TRAKE: render từng chain như 1 chuỗi ảnh
+    // TRAKE: render chains theo hàng (mỗi hàng N chain)
+    const perRow = state.chainsPerRow;
+    let rowContainer = null;
+
     results.forEach((chain, chainIdx) => {
       if (!Array.isArray(chain) || chain.length === 0) return;
-      renderTrakeChain(chain, chainIdx);
+
+      // Tạo hàng mới mỗi N chain
+      if (chainIdx % perRow === 0) {
+        rowContainer = document.createElement("div");
+        rowContainer.className = "trake-row";
+        resultsGrid.appendChild(rowContainer);
+      }
+
+      renderTrakeChain(chain, chainIdx, rowContainer);
     });
   } else {
     // KIS/VQA: render từng ảnh riêng lẻ
@@ -276,8 +308,7 @@ function renderResults(results) {
 }
 
 // --- Render 1 TRAKE chain (chuỗi ảnh nối tiếp) ---
-function renderTrakeChain(chain, chainIdx) {
-  const chainKey = chain.map(c => `${c.video_id}_${c.frame_id}`).join("__");
+function renderTrakeChain(chain, chainIdx, rowContainer) {
   const avgScore = chain.reduce((sum, c) => sum + c.score, 0) / chain.length;
 
   const chainContainer = document.createElement("div");
@@ -299,7 +330,7 @@ function renderTrakeChain(chain, chainIdx) {
           </button>
         </div>
         <div class="trake-event-info">
-          <span class="ts-label">${candidate.timestamp_mid.toFixed(1)}s</span>
+          <span class="frame-label">f${candidate.frame_id}</span>
           <span class="video-label">${candidate.video_id}</span>
         </div>
       </div>
@@ -345,7 +376,7 @@ function renderTrakeChain(chain, chainIdx) {
     eventEl.addEventListener("mouseleave", () => { state.hoveredCand = null; });
   });
 
-  resultsGrid.appendChild(chainContainer);
+  rowContainer.appendChild(chainContainer);
 }
 
 // --- Render 1 single card (KIS/VQA) ---
