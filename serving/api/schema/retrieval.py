@@ -123,6 +123,10 @@ class KISRequest(BaseModel):
         default_factory=list,
         description="Danh sách các frame do người dùng tự chọn bằng tay để xếp lên đầu."
     )
+    use_reranker: bool = Field(
+        default=False,
+        description="Bật/Tắt tính năng Reranker cho kết quả tìm kiếm (Mặc định: False để tăng tốc tối đa)."
+    )
 
 
 class VQARequest(BaseModel):
@@ -136,6 +140,10 @@ class VQARequest(BaseModel):
     user_choices: list[UserChoice] = Field(
         default_factory=list,
         description="Danh sách các frame và câu trả lời do người dùng tự chọn bằng tay."
+    )
+    use_reranker: bool = Field(
+        default=False,
+        description="Bật/Tắt tính năng Reranker cho kết quả tìm kiếm (Mặc định: False để tăng tốc tối đa)."
     )
 
 

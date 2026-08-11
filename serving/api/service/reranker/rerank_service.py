@@ -36,19 +36,19 @@ async def rerank(
     candidates: list[CandidateResult],
     enhanced_query: str | None = None,
     keyframes_root_dir: str = "",
+    use_visual_reranker: bool = False,
 ) -> list[CandidateResult]:
     """
-    Rerank candidates bằng Viranker (text) + Jina M0 (crossmodal) rồi fusion.
+    Rerank candidates:
+      - Luôn luôn chạy ViRanker (text) vì rất nhẹ.
+      - Chạy thêm Jina M0 (crossmodal/visual) nếu use_visual_reranker = True.
 
     Args:
-        query: Query gốc từ request.
-        candidates: Danh sách candidates cần rerank (từ retrieval pipeline).
-        enhanced_query: Query đã enhance/dịch — được ưu tiên hơn query gốc.
-        keyframes_root_dir: Thư mục chứa ảnh keyframe (cho nhánh Jina M0).
-
-    Returns:
-        Danh sách candidates đã fusion & sắp xếp giảm dần theo score.
-        Nếu rerank lỗi → trả về candidates gốc (fallback an toàn).
+      - query: Query gốc từ request.
+      - candidates: Danh sách candidates cần rerank.
+      - enhanced_query: Query đã dịch/enhance.
+      - keyframes_root_dir: Thư mục chứa ảnh keyframe.
+      - use_visual_reranker: Bật/Tắt nhánh rerank hình ảnh Jina (mặc định False).
     """
     import time
     _t_start = time.time()
@@ -61,10 +61,35 @@ async def rerank(
     rerank_candidates = candidates[:20] if len(candidates) > 20 else candidates
 
     try:
-        text_scores = await asyncio.to_thread(viranker.score, query_for_rerank, rerank_candidates)
+        if use_visual_reranker:
+            # Chạy song song cả hai nhánh với return_exceptions=True
+            text_task = asyncio.to_thread(viranker.score, query_for_rerank, rerank_candidates)
+            visual_task = asyncio.to_thread(
+                jina_reranker_m0.score, 
+                query_for_rerank, 
+                rerank_candidates, 
+                keyframes_root_dir
+            )
+            
+            results = await asyncio.gather(text_task, visual_task, return_exceptions=True)
+            
+            # Kiểm tra nếu bất kỳ task nào trả về lỗi
+            for res in results:
+                if isinstance(res, Exception):
+                    raise res
+                    
+            text_scores, visual_scores = results
+        else:
+            # Chỉ chạy nhánh ViRanker (text) rất nhẹ
+            text_scores = await asyncio.to_thread(viranker.score, query_for_rerank, rerank_candidates)
+            visual_scores = None
+            
         _t1 = time.time()
-        logger.info(f"[PROFILE] viranker: {_t1 - _t_start:.2f}s")
-        fused = fusion_score.fuse(text_scores, None, rerank_candidates)
+        logger.info(f"[PROFILE] rerank (visual={use_visual_reranker}) took: {_t1 - _t_start:.2f}s")
+        
+        # Fusion scores
+        fused = fusion_score.fuse(text_scores, visual_scores, rerank_candidates)
+        
         if len(candidates) > 20:
             return fused + candidates[20:]
         return fused

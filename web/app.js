@@ -10,6 +10,7 @@ const state = {
   searchMode: "all", // all, embedding, ocr, asr
   query: "",
   topK: 30,
+  useReranker: false,
   selectedItems: new Map(), // key -> CandidateResult
   rawResults: [],
   selectedImageBase64: null,
@@ -106,6 +107,17 @@ function setupControls() {
       document.getElementById("image-preview-chip").style.display = "none";
     });
   }
+
+  // Reranker Checkbox Switch
+  const rerankerCheckbox = document.getElementById("use-reranker-checkbox");
+  if (rerankerCheckbox) {
+    // Sync UI with state initial value
+    rerankerCheckbox.checked = state.useReranker;
+    rerankerCheckbox.addEventListener("change", (e) => {
+      state.useReranker = e.target.checked;
+      statusBar.textContent = `⚙️ Reranker đã được ${state.useReranker ? "BẬT" : "TẮT"}`;
+    });
+  }
 }
 
 // --- Keyboard Shortcuts (Copy on Hover) ---
@@ -195,7 +207,8 @@ async function triggerSearch() {
       query: queryText,
       search_mode: state.searchMode,
       top_k: state.topK,
-      user_choices: []
+      user_choices: [],
+      use_reranker: state.useReranker
     };
 
     if (state.mode === "vqa") {

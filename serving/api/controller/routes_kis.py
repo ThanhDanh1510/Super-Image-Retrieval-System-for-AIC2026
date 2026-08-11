@@ -119,7 +119,7 @@ async def search_kis(
             asr_model=asr_model,
         )
 
-        # Rerank candidates nếu có (qua seam rerank_service — controller không import reranker trực tiếp)
+        # Rerank candidates nếu có (luôn chạy ViRanker text reranker, Jina visual reranker bật/tắt động)
         candidates = pipeline_res.candidates
         if candidates:
             candidates = await rerank_service.rerank(
@@ -127,6 +127,7 @@ async def search_kis(
                 candidates=candidates,
                 enhanced_query=pipeline_res.enhanced_query,
                 keyframes_root_dir=get_settings().DATA_DIR,
+                use_visual_reranker=request.use_reranker,
             )
 
         # Merge logic: Ghép các frame người dùng đã tự chọn bằng tay lên đầu
@@ -209,6 +210,7 @@ async def search_vqa(
                 candidates=candidates,
                 enhanced_query=pipeline_res.enhanced_query,
                 keyframes_root_dir=get_settings().DATA_DIR,
+                use_visual_reranker=request.use_reranker,
             )
 
         # Merge logic cho VQA: Ghép lựa chọn thủ công (kèm đáp án) lên đầu

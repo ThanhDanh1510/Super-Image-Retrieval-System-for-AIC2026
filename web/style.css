@@ -712,3 +712,63 @@ body {
   font-family: var(--font-code);
   font-size: 0.9rem;
 }
+
+/* Spider-Switch Reranker Neon Slider Toggle */
+.spider-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.spider-switch input {
+  display: none;
+}
+
+.spider-switch .slider {
+  position: relative;
+  width: 38px;
+  height: 20px;
+  background-color: rgba(255, 255, 255, 0.05);
+  border: 1.5px solid var(--spider-red);
+  border-radius: 20px;
+  transition: all 0.3s ease;
+  box-shadow: 0 0 5px var(--spider-red-glow);
+}
+
+.spider-switch .slider::before {
+  content: "";
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  left: 2px;
+  bottom: 2px;
+  background-color: #fff;
+  border-radius: 50%;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
+}
+
+.spider-switch input:checked + .slider {
+  background-color: rgba(0, 210, 255, 0.15);
+  border-color: var(--spider-blue);
+  box-shadow: 0 0 12px var(--spider-blue-glow);
+}
+
+.spider-switch input:checked + .slider::before {
+  transform: translateX(18px);
+  background-color: var(--spider-blue);
+  box-shadow: 0 0 8px var(--spider-blue);
+}
+
+.spider-switch .label-text {
+  font-size: 0.85rem;
+  color: var(--text-sub);
+  font-weight: 600;
+  transition: color 0.3s;
+}
+
+.spider-switch input:checked ~ .label-text {
+  color: var(--spider-blue);
+}
