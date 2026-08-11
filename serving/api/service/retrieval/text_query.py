@@ -288,16 +288,16 @@ def _split_events(query: str) -> list[str]:
         if len(lines) >= 2:
             return lines
 
-    # 2. Fallback — Rule-based connectors
+    # 2. Fallback — Rule-based connectors (bao gồm "and", "và")
     connectors_pattern = (
-        r"\b(?:then|after that|followed by|next|afterwards|subsequently|later|finally|sau đó|tiếp theo|rồi)\b"
+        r"\b(?:then|after that|followed by|next|afterwards|subsequently|later|finally|sau đó|tiếp theo|rồi|và|and)\b"
     )
     segments = re.split(connectors_pattern, query, flags=re.IGNORECASE)
     sub_events = [s.strip(" .,;-") for s in segments if s and s.strip(" .,;-")]
 
     # 3. Nếu connectors không tách được, thử tách theo dấu chấm hoặc chấm phẩy
     if len(sub_events) < 2:
-        punct_segments = re.split(r"[.;]", query)
+        punct_segments = re.split(r"[.;,]", query)
         sub_events = [s.strip(" .,;-") for s in punct_segments if s and s.strip(" .,;-")]
 
     if len(sub_events) < 2:
