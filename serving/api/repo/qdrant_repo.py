@@ -25,6 +25,8 @@ from qdrant_client.models import (
     FieldCondition,
     MatchText,
     MatchValue,
+    TextIndexParams,
+    TokenizerType,
 )
 
 from serving.api.schema.retrieval import CandidateResult
@@ -102,6 +104,37 @@ async def _resolve_collection(client: AsyncQdrantClient, collection_name: str) -
     except Exception:
         pass
     return collection_name
+
+
+async def setup_full_text_indexes(
+    client: AsyncQdrantClient,
+    collection_name: str = PRODUCTION_ALIAS,
+) -> None:
+    """
+    Khởi tạo Full-text index (MatchText) cho ocr_text và asr_text với replace_accent=True (bỏ dấu tiếng Việt)
+    và lowercase=True để giải quyết triệt để vấn đề mismatch chữ hoa/thường hay có dấu/không dấu.
+    """
+    collection_name = await _resolve_collection(client, collection_name)
+    try:
+        info = await client.get_collection(collection_name)
+        indexed_fields = info.payload_schema or {}
+        
+        for field in ["ocr_text", "asr_text"]:
+            if field not in indexed_fields:
+                logger.info(f"🏗️ Tự động tạo full-text index cho trường: '{field}' (bỏ dấu + viết thường)")
+                await client.create_payload_index(
+                    collection_name=collection_name,
+                    field_name=field,
+                    field_schema=TextIndexParams(
+                        type="text",
+                        tokenizer=TokenizerType.WORD,
+                        lowercase=True,
+                        replace_accent=True,
+                    )
+                )
+                logger.info(f"✅ Đã tạo thành công full-text index cho: '{field}'")
+    except Exception as e:
+        logger.warning(f"Không thể tự động tạo full-text index cho Qdrant payload: {e}")
 
 
 # =============================================================================
