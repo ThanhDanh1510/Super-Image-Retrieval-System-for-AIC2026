@@ -93,11 +93,23 @@ async def process(
         sub_events = _split_events(en_query)
         logger.info(f"TRAKE: tách được {len(sub_events)} sub-events từ query.")
 
-    # Run Qwen2 (OCR/ASR text) and CLIP (Image Dense) embeddings in parallel on threads
-    (ocr_vector, asr_vector), image_vector = await asyncio.gather(
-        _encode_text(vi_query, text_embedder),
-        _encode_text_to_image_vector(en_query, image_embedder),
-    )
+    # Tối ưu hóa: Nếu chỉ tìm kiếm bằng OCR hoặc ASR, không cần chạy model Qwen2 để sinh embedding text
+    # vì hệ thống sẽ sử dụng cơ chế so khớp từ khóa văn bản thuần túy (MatchText).
+    ocr_vector = []
+    asr_vector = []
+    image_vector = []
+
+    if query_input.search_mode in ["all", "embedding"]:
+        # Chạy song song sinh embedding cho Image (CLIP) và Text (Qwen2)
+        (ocr_vector, asr_vector), image_vector = await asyncio.gather(
+            _encode_text(vi_query, text_embedder),
+            _encode_text_to_image_vector(en_query, image_embedder),
+        )
+    else:
+        # Đối với chế độ ocr hoặc asr, chỉ cần chạy CLIP (nếu cần), hoặc bỏ qua nếu không dùng
+        # Ở đây ta khởi tạo rỗng để tiết kiệm tối đa thời gian xử lý và tài nguyên GPU
+        pass
+
     _t2 = time.time()
     logger.info(f"[PROFILE] encode_text+image: {_t2 - _t1:.2f}s")
 
@@ -112,6 +124,7 @@ async def process(
         image_vector=image_vector,
         top_k=query_input.top_k,
         search_mode=query_input.search_mode,
+        query_text=vi_query, # Truyền query_text tiếng Việt đã làm sạch xuống repo
     )
     _t3 = time.time()
     logger.info(f"[PROFILE] qdrant_search: {_t3 - _t2:.2f}s, candidates: {len(candidates)}")
