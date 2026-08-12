@@ -66,9 +66,33 @@ body {
   font-size: 1.3rem;
   font-weight: 900;
   letter-spacing: 1px;
-  background: linear-gradient(135deg, var(--text-main), var(--spider-red));
+  /* Dải màu chuyển động metallic: Trắng - Đỏ - Xanh - Trắng bóng - Đỏ */
+  background: linear-gradient(
+    120deg,
+    #ffffff 0%,
+    var(--spider-red) 25%,
+    var(--spider-blue) 50%,
+    #ffffff 75%,
+    var(--spider-red) 100%
+  );
+  background-size: 300% auto;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
+  animation: spider-shine 8s linear infinite;
+  /* Hiệu ứng phát quang mờ ảo neon */
+  filter: drop-shadow(0 0 4px var(--spider-red-glow)) drop-shadow(0 0 10px rgba(0, 210, 255, 0.15));
+}
+
+@keyframes spider-shine {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 150% 50%;
+  }
+  100% {
+    background-position: 300% 50%;
+  }
 }
 
 .sub-text {
@@ -1003,7 +1027,7 @@ body {
   height: 70.4px;
   --clr: var(--spider-blue);
   --clr-alpha: rgba(0, 210, 255, 0.08);
-  animation: spinner 2.0s infinite ease;
+  animation: spinner 2.5s infinite ease;
   transform-style: preserve-3d;
 }
 
