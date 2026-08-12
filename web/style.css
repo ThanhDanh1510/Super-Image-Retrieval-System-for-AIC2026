@@ -66,32 +66,34 @@ body {
   font-size: 1.3rem;
   font-weight: 900;
   letter-spacing: 1px;
-  /* Dải màu chuyển động metallic: Trắng - Đỏ - Xanh - Trắng bóng - Đỏ */
+  /* Dải màu metallic: Đỏ chủ đạo, xanh nháy qua nhanh ở giữa, vệt trắng lướt qua */
   background: linear-gradient(
     120deg,
     #ffffff 0%,
-    var(--spider-red) 25%,
-    var(--spider-blue) 50%,
-    #ffffff 75%,
-    var(--spider-red) 100%
+    var(--spider-red) 15%,
+    var(--spider-red) 45%,
+    var(--spider-blue) 52%,
+    var(--spider-red) 60%,
+    var(--spider-red) 85%,
+    #ffffff 100%
   );
   background-size: 300% auto;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
-  animation: spider-shine 8s linear infinite;
+  animation: spider-shine 10s linear infinite; /* Kéo dài thời gian ra 10s để chuyển động chậm rãi hơn */
   /* Hiệu ứng phát quang mờ ảo neon */
   filter: drop-shadow(0 0 4px var(--spider-red-glow)) drop-shadow(0 0 10px rgba(0, 210, 255, 0.15));
 }
 
 @keyframes spider-shine {
   0% {
-    background-position: 0% 50%;
+    background-position: 300% 50%; /* Đảo ngược để màu trượt qua phải */
   }
   50% {
     background-position: 150% 50%;
   }
   100% {
-    background-position: 300% 50%;
+    background-position: 0% 50%;
   }
 }
 
