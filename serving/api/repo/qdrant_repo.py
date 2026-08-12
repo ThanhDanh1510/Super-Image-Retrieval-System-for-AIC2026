@@ -129,7 +129,7 @@ async def setup_full_text_indexes(
                         type="text",
                         tokenizer=TokenizerType.WORD,
                         lowercase=True,
-                        replace_accent=True,
+                        ascii_folding=True,
                     )
                 )
                 logger.info(f"✅ Đã tạo thành công full-text index cho: '{field}'")
