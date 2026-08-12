@@ -84,11 +84,24 @@ function setupControls() {
   // Dynamic Density Slider (adjusts card min-width)
   const densitySlider = document.getElementById("density-slider");
   const densityVal = document.getElementById("density-val");
+
+  const updateSliderFill = (slider) => {
+    const min = parseFloat(slider.min) || 0;
+    const max = parseFloat(slider.max) || 100;
+    const val = parseFloat(slider.value) || 0;
+    const percent = ((val - min) / (max - min)) * 100;
+    slider.style.setProperty("--slider-value-percent", `${percent}%`);
+  };
+
   if (densitySlider) {
+    // Set initial fill percentage on page load
+    updateSliderFill(densitySlider);
+
     densitySlider.addEventListener("input", (e) => {
       const pxVal = e.target.value;
       resultsGrid.style.setProperty("--card-min-width", `${pxVal}px`);
       if (densityVal) densityVal.textContent = `${pxVal}px`;
+      updateSliderFill(e.target);
     });
   }
 

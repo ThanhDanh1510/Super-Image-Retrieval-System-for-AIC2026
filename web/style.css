@@ -889,3 +889,99 @@ body {
 .spider-switch input:checked ~ .label-text {
   color: var(--spider-blue);
 }
+
+/* =============================================================================
+   🎚️ UNTITLED UI CUSTOM SLIDER STYLE (Card Density Slider)
+   ============================================================================= */
+
+#density-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 150px;
+  height: 6px;
+  background: linear-gradient(to right, var(--spider-red) 0%, var(--spider-red) var(--slider-value-percent, 22%), rgba(255, 255, 255, 0.1) var(--slider-value-percent, 22%), rgba(255, 255, 255, 0.1) 100%);
+  border-radius: 8px;
+  outline: none;
+  transition: background 0.1s ease;
+  cursor: pointer;
+}
+
+/* Chrome, Safari, Opera, and Edge */
+#density-slider::-webkit-slider-runnable-track {
+  width: 100%;
+  height: 6px;
+  background: transparent;
+  border-radius: 8px;
+}
+
+#density-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 2px solid var(--spider-red);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2), 0 0 0 0px var(--spider-red-glow);
+  transition: transform 0.1s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+  margin-top: -6px; /* Align with track center */
+}
+
+#density-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.1);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3), 0 0 0 6px var(--spider-red-glow);
+  background-color: var(--text-main);
+}
+
+#density-slider::-webkit-slider-thumb:active {
+  transform: scale(1.05);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2), 0 0 0 10px var(--spider-red-glow);
+  background-color: var(--spider-red);
+  border-color: #ffffff;
+}
+
+/* Firefox */
+#density-slider::-moz-range-track {
+  width: 100%;
+  height: 6px;
+  background: transparent;
+  border-radius: 8px;
+}
+
+#density-slider::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 2px solid var(--spider-red);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2), 0 0 0 0px var(--spider-red-glow);
+  transition: transform 0.1s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+  cursor: pointer;
+}
+
+#density-slider::-moz-range-thumb:hover {
+  transform: scale(1.1);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3), 0 0 0 6px var(--spider-red-glow);
+  background-color: var(--text-main);
+}
+
+#density-slider::-moz-range-thumb:active {
+  transform: scale(1.05);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2), 0 0 0 10px var(--spider-red-glow);
+  background-color: var(--spider-red);
+  border-color: #ffffff;
+}
+
+/* Alignment and UI container styling for density group */
+#density-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+#density-group label {
+  font-size: 0.85rem;
+  color: var(--text-sub);
+  font-weight: 600;
+}
+
