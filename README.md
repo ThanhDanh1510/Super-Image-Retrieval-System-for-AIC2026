@@ -44,7 +44,7 @@ curl.exe http://localhost:6333/
 Lưu ý: Dự án có sẵn `docker-compose.yml`. Nếu không có Docker, hệ thống sẽ tự động fallback sang Local Embedded Qdrant tại `./data/qdrant_db/`.
 
 ### Bước 3: Tải Dữ liệu
-📥 Tải data tại: [Google Drive - TBD]()
+📥 Tải data tại: [Google Drive - TBD](https://drive.google.com/file/d/1LMDnPyOFzizCEgEft4yxfkEX4tPNocRw/view?usp=drive_link)
 
 Sau khi tải về, giải nén sao cho cấu trúc thư mục như sau:
 ```text
