@@ -17,6 +17,8 @@
 - Package manager `uv`
 
 ### Bước 1: Clone & Cài đặt thư viện
+
+#### Dành cho Windows:
 ```powershell
 git clone https://github.com/ThanhDanh1510/Super-Image-Retrieval-System-for-AIC2026.git
 cd Super-Image-Retrieval-System-for-AIC2026
@@ -24,16 +26,39 @@ cd Super-Image-Retrieval-System-for-AIC2026
 # Cài đặt uv
 pip install uv
 
-# Tạo môi trường ảo
+# Tạo môi trường ảo & Kích hoạt
 uv venv .venv
 .venv\Scripts\Activate.ps1
 
-# Cài đặt PyTorch với CUDA
+# Cài đặt PyTorch hỗ trợ GPU CUDA (NVIDIA)
 uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
 
 # Cài đặt toàn bộ dependencies
 uv pip install -e ".[all]"
 ```
+
+#### Dành cho macOS:
+```bash
+git clone https://github.com/ThanhDanh1510/Super-Image-Retrieval-System-for-AIC2026.git
+cd Super-Image-Retrieval-System-for-AIC2026
+
+# Cài đặt uv
+pip3 install uv
+
+# Tạo môi trường ảo & Kích hoạt
+uv venv .venv
+source .venv/bin/activate
+
+# Cài đặt PyTorch mặc định (Tự động hỗ trợ Apple Silicon MPS hoặc Intel CPU)
+uv pip install torch torchvision torchaudio
+
+# Cài đặt toàn bộ dependencies
+uv pip install -e ".[all]"
+```
+*Lưu ý cho macOS:* 
+- Nếu bạn dùng máy Mac chip **Apple Silicon (M1/M2/M3)**, hãy sửa biến môi trường trong file `.env` thành `AIC_DEVICE=mps` để sử dụng GPU tích hợp (Metal Performance Shaders).
+- Nếu dùng máy Mac chip **Intel**, hãy để `AIC_DEVICE=cpu`.
+
 
 ### Bước 2: Khởi động Qdrant (Docker)
 ```powershell
