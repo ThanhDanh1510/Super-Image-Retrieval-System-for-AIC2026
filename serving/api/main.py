@@ -85,12 +85,14 @@ async def lifespan(app: FastAPI):
     logger.info(f"Device: {settings.DEVICE} | PRELOAD_MODELS={settings.PRELOAD_MODELS} | MODEL_UNLOAD_TTL_S={settings.MODEL_UNLOAD_TTL_S}")
 
     # --- STARTUP ---
-    from serving.api.repo.qdrant_repo import get_async_qdrant_client
+    from serving.api.repo.qdrant_repo import get_async_qdrant_client, setup_full_text_indexes
 
     # 1. Khởi tạo Qdrant client
-    app.state.qdrant_client = get_async_qdrant_client(
-        settings.QDRANT_URL, settings.QDRANT_API_KEY
-    )
+    client = get_async_qdrant_client(settings.QDRANT_URL, settings.QDRANT_API_KEY)
+    app.state.qdrant_client = client
+
+    # Tự động đồng bộ và thiết lập Full-text indexes cho OCR/ASR
+    await setup_full_text_indexes(client)
 
     # 2. ModelRegistry — lazy loading, không tốn RAM lúc khởi động
     registry = ModelRegistry(

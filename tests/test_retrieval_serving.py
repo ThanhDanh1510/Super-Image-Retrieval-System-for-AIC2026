@@ -163,8 +163,11 @@ def test_split_events_connectors():
 
 
 def test_split_events_invalid():
-    with pytest.raises(ValueError):
-        text_query._split_events("Single event without any connectors or newlines")
+    # Mock LLM fallback to return empty list so the ValueError is raised deterministically
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr("serving.api.service.retrieval.text_query._split_events_llm", lambda x: [])
+        with pytest.raises(ValueError):
+            text_query._split_events("Single event without any connectors or newlines")
 
 
 @pytest.mark.anyio
