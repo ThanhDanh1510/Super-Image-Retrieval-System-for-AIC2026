@@ -46,7 +46,7 @@ async def rerank(
         Danh sách candidates đã rerank và sắp xếp theo score.
     """
     import time
-    _t_start = time.time()
+    _t_start = time.perf_counter()
     if not candidates:
         return []
 
@@ -58,6 +58,7 @@ async def rerank(
     try:
         if use_visual_reranker:
             # Chạy song song cả hai nhánh
+            _t_inference_start = time.perf_counter()
             text_task = asyncio.to_thread(viranker.score, query_for_rerank, rerank_candidates)
             visual_task = asyncio.to_thread(
                 jina_reranker_m0.score,
@@ -72,12 +73,23 @@ async def rerank(
                     raise res
 
             text_scores, visual_scores = results
+            _t_inference_end = time.perf_counter()
+            logger.info(f"[PROFILE] Dual Reranking inference (ViRanker + Jina M0) took {(_t_inference_end - _t_inference_start) * 1000:.2f}ms")
         else:
             # Chỉ chạy ViRanker (nhẹ, nhanh)
+            _t_inference_start = time.perf_counter()
             text_scores = await asyncio.to_thread(viranker.score, query_for_rerank, rerank_candidates)
             visual_scores = None
+            _t_inference_end = time.perf_counter()
+            logger.info(f"[PROFILE] ViRanker inference took {(_t_inference_end - _t_inference_start) * 1000:.2f}ms")
 
+        _t_fuse_start = time.perf_counter()
         fused = fusion_score.fuse(text_scores, visual_scores, rerank_candidates)
+        _t_fuse_end = time.perf_counter()
+        logger.info(f"[PROFILE] Score fusion & sorting took {(_t_fuse_end - _t_fuse_start) * 1000:.2f}ms")
+
+        _t_end = time.perf_counter()
+        logger.info(f"[PROFILE] Total rerank process took {(_t_end - _t_start) * 1000:.2f}ms")
 
         if len(candidates) > 20:
             return fused + candidates[20:]

@@ -90,7 +90,12 @@ async def process(
     Returns:
         VoiceQueryOutput với candidates, transcript, và enhanced_query.
     """
+    import time
+    
+    _t_start = time.perf_counter()
     transcript = await _transcribe(query_input.audio_bytes, query_input.audio_format, asr_model)
+    _t_asr = time.perf_counter()
+    logger.info(f"[PROFILE] ASR transcription: {(_t_asr - _t_start) * 1000:.2f}ms")
     logger.info(f"ASR transcript: {transcript[:100]}...")
 
     text_output: TextQueryOutput = await text_query.process(
