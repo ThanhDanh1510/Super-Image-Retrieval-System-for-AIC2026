@@ -83,6 +83,7 @@ scratch/
 *.rar
 L_by_scene_id.json
 prompt*.md
+*.zip
 test_body.json
 tasks.md
 folder_structure.md
