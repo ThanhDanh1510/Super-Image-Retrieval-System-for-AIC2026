@@ -83,10 +83,10 @@ async def process(
     import asyncio
     import time
 
-    _t0 = time.time()
+    _t0 = time.perf_counter()
     en_query, vi_query = await _enhance_query(query_input.raw_query)
-    _t1 = time.time()
-    logger.info(f"[PROFILE] enhance_query: {_t1 - _t0:.2f}s")
+    _t1 = time.perf_counter()
+    logger.info(f"[PROFILE] enhance_query: {(_t1 - _t0) * 1000:.2f}ms")
 
     sub_events: list[str] | None = None
     if query_input.task_type == TaskType.TRAKE:
@@ -110,8 +110,8 @@ async def process(
         # Ở đây ta khởi tạo rỗng để tiết kiệm tối đa thời gian xử lý và tài nguyên GPU
         pass
 
-    _t2 = time.time()
-    logger.info(f"[PROFILE] encode_text+image: {_t2 - _t1:.2f}s")
+    _t2 = time.perf_counter()
+    logger.info(f"[PROFILE] encode_text+image: {(_t2 - _t1) * 1000:.2f}ms")
 
     ocr_sparse, asr_sparse = _encode_sparse(vi_query)
 
@@ -126,8 +126,8 @@ async def process(
         search_mode=query_input.search_mode,
         query_text=vi_query, # Truyền query_text tiếng Việt đã làm sạch xuống repo
     )
-    _t3 = time.time()
-    logger.info(f"[PROFILE] qdrant_search: {_t3 - _t2:.2f}s, candidates: {len(candidates)}")
+    _t3 = time.perf_counter()
+    logger.info(f"[PROFILE] qdrant_search: {(_t3 - _t2) * 1000:.2f}ms, candidates: {len(candidates)}")
 
     return TextQueryOutput(
         candidates=candidates,

@@ -176,6 +176,24 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    # --- HTTP Request Latency Logging Middleware ---
+    import time
+    from fastapi import Request
+
+    @app.middleware("http")
+    async def log_request_latency(request: Request, call_next):
+        start_time = time.perf_counter()
+        response = await call_next(request)
+        duration = time.perf_counter() - start_time
+        
+        # Chỉ log chi tiết các API endpoints chính, bỏ qua static files hoặc assets UI để đỡ loãng log
+        path = request.url.path
+        if path.startswith("/api/v1/"):
+            logger.info(f"⏱️ [HTTP] {request.method} {path} - Status {response.status_code} - took {duration:.4f}s")
+            
+        return response
+
+
     # --- Mount Static Files (ảnh keyframe & UI) ---
     if os.path.isdir(settings.DATA_DIR):
         app.mount("/static", StaticFiles(directory=settings.DATA_DIR), name="static")
