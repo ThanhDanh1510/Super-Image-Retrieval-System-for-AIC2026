@@ -839,6 +839,79 @@ body {
   border: 1px solid var(--card-border);
 }
 
+/* Video phát trực tiếp ngay trong khung ảnh của Lightbox Modal */
+.modal-img-container video {
+  max-height: 42vh;
+  max-width: 100%;
+  width: 100%;
+  height: auto;
+  border-radius: 8px;
+}
+
+.video-frame-bar {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+.video-info-label {
+  font-family: var(--font-code);
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--spider-yellow);
+  background: rgba(8, 11, 17, 0.95);
+  border: 1px solid var(--card-border);
+  padding: 8px 14px;
+  border-radius: 8px;
+  letter-spacing: 0.5px;
+}
+
+.video-frame-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.video-seek-btn {
+  background: rgba(8, 11, 17, 0.95);
+  border: 1px solid var(--card-border);
+  color: var(--text-main);
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.video-seek-btn:hover {
+  border-color: var(--spider-blue);
+  box-shadow: 0 0 10px var(--spider-blue-glow);
+}
+
+.video-add-btn {
+  border-color: var(--spider-red);
+  color: var(--spider-red);
+}
+
+.video-add-btn:hover {
+  box-shadow: 0 0 10px var(--spider-red-glow);
+}
+
+.video-error-msg {
+  margin-top: 12px;
+  color: var(--spider-red);
+  font-size: 0.9rem;
+  text-align: center;
+  padding: 10px;
+  border: 1px solid var(--spider-red);
+  border-radius: 8px;
+  background: rgba(255, 0, 0, 0.08);
+}
+
 /* Toast Notification */
 .copy-toast {
   position: fixed;
