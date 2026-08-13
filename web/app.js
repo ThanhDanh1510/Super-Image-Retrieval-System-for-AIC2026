@@ -445,7 +445,7 @@ function updateDrawer() {
     const imgUrl = `${API_BASE}/api/v1/image/${cand.video_id}/${cand.frame_id}`;
     
     div.innerHTML = `
-      <img src="${imgUrl}" alt="${cand.scene_id}" />
+      <img src="${imgUrl}" alt="${cand.scene_id}" onerror="this.style.display='none'" />
       <div style="flex:1;">
         <div style="font-weight:bold; font-size:0.85rem;">${cand.video_id} (Frame ${cand.frame_id})</div>
         <div style="font-size:0.75rem; color:var(--text-sub);">${cand.timestamp_mid.toFixed(1)}s</div>
@@ -549,10 +549,30 @@ function exportCSV() {
   document.body.removeChild(link);
 }
 
-// Lightbox Modal
+// Lightbox Modal — phát video tương tác ngay trong khung ảnh
+let currentLightboxCand = null;
+
+const modalImgEl = document.getElementById("modal-img");
+const modalVideoEl = document.getElementById("modal-video");
+const videoFrameBarEl = document.getElementById("video-frame-bar");
+const videoErrorMsgEl = document.getElementById("video-error-msg");
+const videoInfoLabelEl = document.getElementById("video-info-label");
+
+let currentVideoId = null;
+let currentVideoFps = 25.0; // fallback, được ghi đè bằng fps thật từ API ngay khi mở modal
+
+function currentVideoFrame() {
+  return Math.round(modalVideoEl.currentTime * currentVideoFps);
+}
+
+function updateVideoInfoLabel() {
+  if (!currentVideoId) return;
+  videoInfoLabelEl.textContent = `${currentVideoId},${currentVideoFrame()}`;
+}
+
 function showLightbox(cand, imgUrl) {
+  currentLightboxCand = cand;
   const modal = document.getElementById("lightbox-modal");
-  document.getElementById("modal-img").src = imgUrl;
   document.getElementById("modal-title").textContent = `${cand.video_id} — Scene: ${cand.scene_id} (Frame ${cand.frame_id})`;
 
   const descBox = document.getElementById("modal-desc");
@@ -568,19 +588,133 @@ function showLightbox(cand, imgUrl) {
   ocrBox.scrollTop = 0;
   asrBox.scrollTop = 0;
 
+  loadLightboxVideo(cand, imgUrl);
+
   modal.style.display = "flex";
+}
+
+async function loadLightboxVideo(cand, imgUrl) {
+  currentVideoId = cand.video_id;
+  currentVideoFps = 25.0;
+  videoErrorMsgEl.style.display = "none";
+
+  // Mặc định thử phát video ngay trong khung ảnh; nếu lỗi sẽ fallback về ảnh tĩnh.
+  modalImgEl.style.display = "none";
+  modalVideoEl.style.display = "block";
+  videoFrameBarEl.style.display = "flex";
+  videoInfoLabelEl.textContent = `${cand.video_id},${cand.frame_id}`;
+
+  modalVideoEl.src = `${API_BASE}/api/v1/video/${cand.video_id}`;
+  // timestamp_mid đã được backend tính sẵn = frame_id / fps (fps riêng của từng video),
+  // nên không cần frontend tự tính hay giả định fps cố định khi seek lần đầu.
+  const seekTo = cand.timestamp_mid || 0;
+
+  const onLoadedMeta = () => {
+    modalVideoEl.currentTime = seekTo;
+    modalVideoEl.removeEventListener("loadedmetadata", onLoadedMeta);
+  };
+  modalVideoEl.addEventListener("loadedmetadata", onLoadedMeta);
+
+  modalVideoEl.onerror = () => {
+    // Không tìm thấy video trên server -> fallback hiển thị ảnh keyframe tĩnh
+    modalVideoEl.style.display = "none";
+    videoFrameBarEl.style.display = "none";
+    modalImgEl.style.display = "block";
+    modalImgEl.src = imgUrl;
+    videoErrorMsgEl.style.display = "block";
+  };
+
+  // Mở video ở chế độ dừng (pause) sẵn tại đúng frame, người dùng tự bấm play khi muốn xem.
+  modalVideoEl.pause();
+
+  // Lấy fps thật của video này để tính frame_id realtime chính xác khi play/pause/tua.
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/video/${cand.video_id}/fps`);
+    if (res.ok) {
+      const data = await res.json();
+      if (data.fps && cand.video_id === currentVideoId) {
+        currentVideoFps = data.fps;
+        updateVideoInfoLabel();
+      }
+    }
+  } catch (err) {
+    // Giữ fallback fps nếu API lỗi
+  }
+}
+
+function closeLightboxVideo() {
+  modalVideoEl.pause();
+  modalVideoEl.removeAttribute("src");
+  modalVideoEl.load();
+  modalVideoEl.onerror = null;
+  currentVideoId = null;
 }
 
 const modalEl = document.getElementById("lightbox-modal");
 if (modalEl) {
   document.getElementById("close-modal-btn").addEventListener("click", () => {
     modalEl.style.display = "none";
+    closeLightboxVideo();
   });
 
   modalEl.addEventListener("click", (e) => {
     if (e.target === modalEl) {
       modalEl.style.display = "none";
+      closeLightboxVideo();
     }
+  });
+
+  // Cập nhật "video_id,frame" realtime: đang phát, tua timeline, hoặc dừng lại.
+  modalVideoEl.addEventListener("timeupdate", updateVideoInfoLabel);
+  modalVideoEl.addEventListener("seeked", updateVideoInfoLabel);
+  modalVideoEl.addEventListener("pause", updateVideoInfoLabel);
+  modalVideoEl.addEventListener("play", updateVideoInfoLabel);
+
+  // Về Frame Chính: quay lại đúng thời điểm frame gốc đã tìm được
+  document.getElementById("video-goto-main-btn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (currentLightboxCand) {
+      modalVideoEl.currentTime = currentLightboxCand.timestamp_mid || 0;
+    }
+  });
+
+  // Copy Frame: copy <video_id,frame_id> của khung hình đang dừng/phát tại thời điểm hiện tại
+  document.getElementById("video-copy-frame-btn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (!currentVideoId) return;
+    copyToClipboard({ video_id: currentVideoId, frame_id: currentVideoFrame() });
+  });
+
+  // Thêm vào giỏ: thêm khung hình đang dừng tại thời điểm hiện tại vào Giỏ Nộp Bài
+  document.getElementById("video-add-frame-btn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (!currentVideoId) return;
+
+    const frameId = currentVideoFrame();
+    const ts = modalVideoEl.currentTime;
+    const base = currentLightboxCand || {};
+    const newCand = {
+      video_id: currentVideoId,
+      frame_id: frameId,
+      scene_id: base.scene_id || "",
+      timestamp_start: ts,
+      timestamp_end: ts,
+      timestamp_mid: ts,
+      keyframe_path: "",
+      ocr_text: "",
+      asr_text: "",
+      description: "",
+      score: 1.0,
+    };
+
+    const itemKey = `${newCand.video_id}_${newCand.frame_id}`;
+    if (state.selectedItems.has(itemKey)) {
+      showToast(`⚠️ Frame ${newCand.video_id},${newCand.frame_id} đã có trong giỏ`);
+      return;
+    }
+    state.selectedItems.set(itemKey, newCand);
+    updateDrawer();
+    showToast(`➕ Đã thêm ${newCand.video_id},${newCand.frame_id} vào giỏ`);
   });
 }
 

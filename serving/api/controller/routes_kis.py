@@ -52,6 +52,69 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1", tags=["Retrieval"])
 
 
+def _resolve_video_path(video_id: str) -> Path | None:
+    """Tìm file video gốc trên đĩa cho một video_id, ví dụ 'L21_V001'."""
+    settings = get_settings()
+    data_dir = Path(settings.DATA_DIR)
+
+    parts = video_id.split("_")
+    grp = parts[0] if len(parts) == 2 else video_id
+
+    candidates = [
+        data_dir / "video" / grp / "video" / f"{video_id}.mp4",
+        data_dir / "video" / grp / f"{video_id}.mp4",
+        data_dir / "video" / f"{video_id}.mp4",
+        data_dir / "video" / grp / "video" / f"{video_id}.webm",
+        data_dir / "video" / grp / f"{video_id}.webm",
+        data_dir / "video" / f"{video_id}.webm",
+    ]
+    for p in candidates:
+        if p.is_file():
+            return p
+    return None
+
+
+@router.get("/video/{video_id}", summary="Lấy file video gốc (hỗ trợ tua/seek qua HTTP Range)")
+async def get_video(video_id: str):
+    """
+    Phục vụ file video gốc cho Frontend để play/seek trong modal xem video.
+
+    Dựa vào FileResponse của Starlette, endpoint này tự động hỗ trợ HTTP Range
+    request (206 Partial Content) nên trình duyệt có thể tua timeline mượt mà
+    mà không cần tải toàn bộ file trước.
+    """
+    video_path = _resolve_video_path(video_id)
+    if not video_path:
+        raise HTTPException(status_code=404, detail=f"Không tìm thấy video cho video_id={video_id}")
+    return FileResponse(video_path, media_type="video/mp4")
+
+
+@router.get("/video/{video_id}/fps", summary="Lấy fps thực tế của video (để Frontend tính frame realtime)")
+async def get_video_fps(video_id: str):
+    """
+    Mỗi video nguồn có fps riêng, nên Frontend cần fps thật để suy ra frame_id
+    hiện tại từ currentTime khi video đang phát/tua (frame = round(currentTime * fps)).
+    """
+    video_path = _resolve_video_path(video_id)
+    if not video_path:
+        raise HTTPException(status_code=404, detail=f"Không tìm thấy video cho video_id={video_id}")
+
+    import cv2
+
+    cap = cv2.VideoCapture(str(video_path))
+    try:
+        if not cap.isOpened():
+            raise HTTPException(status_code=500, detail=f"Không đọc được video_id={video_id}")
+        fps = cap.get(cv2.CAP_PROP_FPS)
+    finally:
+        cap.release()
+
+    if not fps or fps <= 0:
+        fps = 25.0  # fallback khi OpenCV không đọc được metadata fps
+
+    return {"video_id": video_id, "fps": fps}
+
+
 def _resolve_keyframe_path(video_id: str, frame_id: int, keyframe_path: str = "") -> Path | None:
     settings = get_settings()
     data_dir = Path(settings.DATA_DIR)
