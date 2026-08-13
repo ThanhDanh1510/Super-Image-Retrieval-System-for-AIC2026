@@ -141,6 +141,60 @@ async def setup_full_text_indexes(
 # Core Retrieval Functions
 # =============================================================================
 
+import re
+
+def _normalize_text_for_scoring(text: str) -> str:
+    """Chuẩn hóa chuỗi văn bản về dạng chữ thường không dấu để so khớp chính xác."""
+    if not text:
+        return ""
+    text = text.lower()
+    patterns = {
+        '[àáảãạăằắẳẵặâầấẩẫậ]': 'a',
+        '[èéẻẽẹêềếểễệ]': 'e',
+        '[ìíỉĩị]': 'i',
+        '[òóỏõọôồốổỗộơờớởỡợ]': 'o',
+        '[ùúủũụưừứửữự]': 'u',
+        '[ỳýỷỹỵ]': 'y',
+        'đ': 'd'
+    }
+    for pattern, repl in patterns.items():
+        text = re.sub(pattern, repl, text)
+    # Loại bỏ ký tự đặc biệt
+    text = re.sub(r'[^a-z0-9\s]', ' ', text)
+    return " ".join(text.split())
+
+
+def _calculate_match_score(query: str, target_text: str) -> float:
+    """Tính điểm khớp từ khóa (overlap score) giữa câu query và đoạn văn bản trong database."""
+    if not target_text:
+        return 0.0
+    
+    q_norm = _normalize_text_for_scoring(query)
+    t_norm = _normalize_text_for_scoring(target_text)
+    
+    q_words = [w for w in q_norm.split() if len(w) > 1]
+    if not q_words:
+        return 0.0
+        
+    t_words = set(t_norm.split())
+    
+    # Tính tỉ lệ từ khóa trùng lặp
+    matches = sum(1 for w in q_words if w in t_words)
+    overlap_ratio = matches / len(q_words)
+    
+    # Cộng điểm bonus nếu khớp nguyên cả cụm từ liên tiếp (substring match)
+    if q_norm in t_norm:
+        overlap_ratio += 0.5
+    else:
+        # Check khớp các cụm 2 từ liên tiếp nếu có
+        for i in range(len(q_words) - 1):
+            bigram = f"{q_words[i]} {q_words[i+1]}"
+            if bigram in t_norm:
+                overlap_ratio += 0.15
+                
+    return round(overlap_ratio, 6)
+
+
 async def search_by_text_match(
     client: AsyncQdrantClient,
     field_name: str,
@@ -150,40 +204,78 @@ async def search_by_text_match(
 ) -> list[CandidateResult]:
     """
     Tìm kiếm keyframe bằng cách khớp từ khóa văn bản (MatchText filter) trực tiếp trên Qdrant.
-    Không sử dụng embedding vector để đảm bảo khớp ký tự chuẩn xác 100%.
+    Hỗ trợ tìm kiếm thả lỏng (OR matching) và sắp xếp kết quả theo điểm trùng khớp thực tế.
     """
     if not query_text or not query_text.strip():
         return []
 
     collection_name = await _resolve_collection(client, collection_name)
 
-    # Sử dụng Qdrant scroll với bộ lọc MatchText để thực hiện tìm kiếm full-text
+    # Phân tách từ khóa để tạo bộ lọc thả lỏng (should)
+    # Giữ các từ có độ dài từ 2 ký tự trở lên để tăng tính chính xác
+    clean_query = query_text.strip()
+    words = [w for w in clean_query.split() if len(w) > 1]
+    
+    should_conditions = []
+    
+    # 1. Thêm cả cụm nguyên văn (Khớp đầy đủ cả cụm từ là tốt nhất)
+    should_conditions.append(
+        FieldCondition(key=field_name, match=MatchText(text=clean_query))
+    )
+    
+    # 2. Tạo các cụm 2 từ liên tiếp (bigrams) nếu câu dài
+    if len(words) >= 3:
+        for i in range(len(words) - 1):
+            bigram = f"{words[i]} {words[i+1]}"
+            should_conditions.append(
+                FieldCondition(key=field_name, match=MatchText(text=bigram))
+            )
+            
+    # 3. Thêm các từ đơn lẻ (độ dài >= 3 để lọc từ quá ngắn)
+    for word in words:
+        if len(word) >= 3:
+            should_conditions.append(
+                FieldCondition(key=field_name, match=MatchText(text=word))
+            )
+
+    # Dự phòng: Nếu không có từ nào đủ dài, dùng tất cả các từ
+    if not should_conditions:
+        should_conditions = [
+            FieldCondition(key=field_name, match=MatchText(text=w)) for w in clean_query.split()
+        ]
+
+    # Sử dụng Qdrant scroll với bộ lọc should để tìm kiếm thả lỏng
     res, _ = await client.scroll(
         collection_name=collection_name,
-        scroll_filter=Filter(
-            must=[
-                FieldCondition(
-                    key=field_name,
-                    match=MatchText(text=query_text)
-                )
-            ]
-        ),
-        limit=limit,
+        scroll_filter=Filter(should=should_conditions),
+        limit=limit * 2, # Lấy nhiều hơn một chút để lọc trùng khớp tốt ở python
         with_payload=True,
         with_vectors=False,
     )
 
-    cands = []
-    # Gán score giảm dần theo thứ tự khớp để thuật toán RRF hoặc hiển thị hoạt động tốt
-    for rank, point in enumerate(res, start=1):
+    cands_with_scores = []
+    for point in res:
         try:
             cand = _scored_point_to_candidate(point)
-            cand.score = round(1.0 - (rank / (limit + 10)), 6)
-            cands.append(cand)
+            # Lấy trường text tương ứng từ payload để chấm điểm
+            db_text = cand.ocr_text if field_name == "ocr_text" else cand.asr_text
+            
+            # Tính điểm độ tương thích
+            score = _calculate_match_score(clean_query, db_text)
+            
+            # Chỉ lấy các kết quả có độ trùng khớp tối thiểu (ví dụ: khớp ít nhất 1 từ khóa)
+            if score > 0.0:
+                cand.score = score
+                cands_with_scores.append(cand)
         except Exception as e:
-            logger.warning(f"Error parse point in text match: {e}")
+            logger.warning(f"Error parsing point in loose text match: {e}")
             pass
-    return cands
+
+    # Sắp xếp danh sách candidates theo điểm số độ khớp giảm dần
+    cands_with_scores.sort(key=lambda x: x.score, reverse=True)
+    
+    # Lấy đúng số lượng giới hạn limit
+    return cands_with_scores[:limit]
 
 
 async def search_by_text_vectors(
