@@ -96,11 +96,12 @@ def get_async_qdrant_client(url: str, api_key: str | None = None) -> AsyncQdrant
         )
         return AsyncQdrantClient(path="./data/qdrant_db")
 async def _resolve_collection(client: AsyncQdrantClient, collection_name: str) -> str:
-    """Tự động chuyển 'production' sang 'collection_v1' nếu alias chưa khởi tạo."""
+    """Tự động chuyển 'production' sang collection thực tế nếu alias chưa khởi tạo."""
     try:
         if not await client.collection_exists(collection_name):
-            if await client.collection_exists("collection_v1"):
-                return "collection_v1"
+            for candidate in ["aic2026_clean_v3", "aic2026_v1", "collection_v1"]:
+                if await client.collection_exists(candidate):
+                    return candidate
     except Exception:
         pass
     return collection_name
