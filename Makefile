@@ -74,6 +74,15 @@ merge-datasets: ## Gộp các shard datasets thành bộ thống nhất
 publish-unified: ## Đóng gói và publish Unified Dataset lên Kaggle (yêu cầu --owner)
 	$(PYTHON) -m aggregation.publish_unified --owner $(OWNER)
 
+filter-tool: ## Khởi chạy Web UI lọc ảnh & tìm kiếm ảnh trùng lặp (Port 8501)
+	$(PYTHON) -m tools.image_filter.server
+
+apply-filter: ## Áp dụng file filtered_keyframes.json: xóa ảnh & rebuild unified dataset
+	$(PYTHON) -m aggregation.apply_filter --delete-images
+
+apply-filter-dry: ## Chạy thử nghiệm áp dụng filter (Dry-run, không xóa file)
+	$(PYTHON) -m aggregation.apply_filter --dry-run
+
 # =============================================================================
 # Evaluation
 # =============================================================================

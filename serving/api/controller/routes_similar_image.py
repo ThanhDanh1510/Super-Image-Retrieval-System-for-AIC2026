@@ -32,9 +32,11 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1", tags=["Similar Image"])
 
-# Giới hạn kích thước ảnh upload (10MB)
-_MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024
-_ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp"}
+from pathlib import Path
+
+_MAX_IMAGE_SIZE_BYTES = 15 * 1024 * 1024
+_ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp", "image/bmp", "application/octet-stream"}
+_ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 
 
 @router.post(
@@ -43,8 +45,9 @@ _ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp"}
     summary="Image-to-Image Search — tìm keyframe tương đồng với ảnh upload",
 )
 async def search_similar_image(
-    file: UploadFile = File(..., description="Ảnh query (JPEG/PNG/WebP, tối đa 10MB)"),
-    top_k: int = Query(default=100, ge=1, le=100, description="Số kết quả trả về"),
+    file: UploadFile = File(..., description="Ảnh query (JPEG/PNG/WebP, tối đa 15MB)"),
+    top_k: int = Query(default=100, ge=1, le=500, description="Số kết quả trả về"),
+    use_reranker: bool = Query(default=False, description="Bật/tắt reranker"),
     qdrant_client = Depends(get_qdrant_client),
     image_embedder = Depends(get_image_embedder),
 ) -> ImageSearchResponse:
@@ -52,21 +55,24 @@ async def search_similar_image(
     Endpoint Image Search: nhận ảnh upload, trả về danh sách keyframe tương đồng.
 
     Luồng xử lý:
-        1. Validate file upload (content type, size)
+        1. Validate file upload (content type hoặc extension, size)
         2. Đọc bytes → encode base64
         3. Tạo ImageSearchRequest và gọi retrieval_pipeline.run()
         4. Build ImageSearchResponse và trả về
     """
-    # 1. Validate content type
-    if file.content_type not in _ALLOWED_CONTENT_TYPES:
+    ext = Path(file.filename or "").suffix.lower()
+    is_valid_type = (file.content_type in _ALLOWED_CONTENT_TYPES) or (ext in _ALLOWED_EXTENSIONS)
+    if not is_valid_type:
         raise HTTPException(
             status_code=400,
-            detail=f"Định dạng file không được hỗ trợ. Chỉ cho phép các định dạng: {', '.join(_ALLOWED_CONTENT_TYPES)}",
+            detail=f"Định dạng file không được hỗ trợ ({file.content_type}). Chỉ cho phép JPEG, PNG, WebP, BMP.",
         )
 
     try:
         # 2. Đọc bytes và validate kích thước
         contents = await file.read()
+        if not contents:
+            raise HTTPException(status_code=400, detail="File ảnh rỗng.")
         if len(contents) > _MAX_IMAGE_SIZE_BYTES:
             raise HTTPException(
                 status_code=400,
@@ -81,7 +87,7 @@ async def search_similar_image(
 
         pipeline_res = await retrieval_pipeline.run(
             input_type=InputType.IMAGE,
-            task_type=TaskType.KIS,  # Image search mặc định thuộc dạng KIS
+            task_type=TaskType.KIS,
             request=request,
             qdrant_client=qdrant_client,
             text_embedder=None,
@@ -89,10 +95,10 @@ async def search_similar_image(
             asr_model=None,
         )
 
-        # 4. Trả về response
+        candidates = pipeline_res.candidates
         return ImageSearchResponse(
-            results=pipeline_res.candidates,
-            total=len(pipeline_res.candidates),
+            results=candidates,
+            total=len(candidates),
         )
     except HTTPException:
         raise

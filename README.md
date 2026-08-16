@@ -92,16 +92,7 @@ data/
 ```powershell
 copy .env.example .env
 ```
-Bảng các biến môi trường quan trọng:
-
-| Biến | Mặc định | Mô tả |
-|---|---|---|
-| AIC_QDRANT_URL | http://localhost:6333 | URL của server Qdrant |
-| AIC_QDRANT_COLLECTION_ALIAS | production | Collection alias dùng cho query |
-| AIC_DEVICE | cuda | cuda / cpu |
-| AIC_PRELOAD_MODELS | false | true = khởi động trước tất cả model lúc startup |
-| AIC_DATA_DIR | ./data | Thư mục chứa dữ liệu chung |
-| AIC_KEYFRAME_DIR | ./data/image | Thư mục chứa video keyframes |
+Tùy chỉnh các đường dẫn lưu cache mô hình AI (tránh đầy ổ C) và thư mục dữ liệu trong file `.env`. Xem chi tiết tại mục [Biến Môi Trường (`.env`)](#️-biến-môi-trường-env).
 
 ### Bước 5: Index Dữ liệu vào Qdrant
 ```powershell
@@ -121,13 +112,14 @@ python tools/download_models.py
 make download-models
 ```
 
-**Danh sách models (~12GB):**
+**Danh sách models (~15GB):**
 
 | Model | Mục đích | Device | RAM |
 |---|---|---|---|
 | **CLIP ViT-L/14** | Image embedding | GPU | ~1.7GB |
 | **gte-Qwen2-1.5B** | Text embedding (OCR+ASR) | GPU | ~3GB |
-| **bge-reranker-v2-m3** | Text rerank | GPU | ~2.3GB |
+| **bge-reranker-v2-m3** | Text rerank (luôn bật) | GPU | ~2.3GB |
+| **jina-reranker-m0** | Crossmodal rerank (tắt mặc định) | GPU | ~2.5GB |
 | **PhoWhisper-medium** | ASR tiếng Việt | CPU | ~1.5GB |
 | **bge-large-en-v1.5** | Hybrid search | CPU | ~2GB |
 
@@ -181,16 +173,22 @@ Super-Image-Retrieval-System-for-AIC2026/
 
 ## 🔌 API Endpoints
 
-| Endpoint | Body | Mô tả |
-|---|---|---|
-| `POST /api/v1/kis` | `{query, input_type: "text"\|"voice", top_k (1-200), use_crossmodal_reranker?, user_choices?}` | Known-Item Search |
-| `POST /api/v1/vqa` | `{query, question, input_type, top_k, use_crossmodal_reranker?, user_choices?}` | Visual QA — trả `results` + `answers` |
-| `POST /api/v1/trake` | `{query, num_events (2-10), input_type, top_k}` | Temporal Retrieval — trả `list[list[CandidateResult]]` |
-| `POST /api/v1/similar-image` | multipart `file` + query param `top_k` | Image Search |
+| Endpoint | Method | Body / Params | Mô tả |
+|---|---|---|---|
+| `/api/v1/kis` | POST | `{query, input_type: "text"\|"voice"\|"image", search_mode: "all", top_k (1-500), use_reranker?, user_choices?}` | Known-Item Search |
+| `/api/v1/vqa` | POST | `{query, question, input_type, search_mode, top_k, use_reranker?, user_choices?}` | Visual QA — trả `results` + `answers` |
+| `/api/v1/trake` | POST | `{query, num_events (2-10), input_type, search_mode, top_k}` | Temporal Retrieval — trả `list[list[CandidateResult]]` |
+| `/api/v1/similar-image` | POST | multipart `file` + query param `top_k` (1-100), `use_reranker?` | Image Search |
+| `/api/v1/search/hybrid` | GET | query params: `query_vi`, `query_en?`, `mode`, `top_k` | Hybrid Search (Weighted Convex + RRF) |
+| `/api/v1/image/{video_id}/{frame_id}` | GET | path params: `video_id`, `frame_id` | Lấy file ảnh keyframe thực tế |
+| `/api/v1/video/{video_id}` | GET | path param: `video_id` (hỗ trợ HTTP Range) | Lấy file video gốc |
+| `/api/v1/video/{video_id}/fps` | GET | path param: `video_id` | Lấy FPS thực tế của video |
 
-Tất cả response trả về `CandidateResult`: `video_id`, `scene_id`, `frame_id`, `timestamp_start/mid/end`, `keyframe_path`, `ocr_text`, `asr_text`, `score`.
+Tất cả response retrieval trả về danh sách `CandidateResult`: `video_id`, `scene_id`, `frame_id`, `timestamp_start`, `timestamp_mid`, `timestamp_end`, `keyframe_path`, `ocr_text`, `asr_text`, `description`, `score`.
 
-**Tham số `use_crossmodal_reranker`:** Mặc định `false`. Khi bật (`true`), Jina Reranker M0 chạy trên GPU để tăng độ chính xác (tốc độ chậm hơn ~8s). Text reranker (bge-reranker-v2-m3) **luôn chạy** vì rất nhẹ (~0.2s).
+**Tham số `use_reranker`:** Mặc định `false`.
+- Khi `false`: Chỉ chạy text reranker **ViRanker (bge-reranker-v2-m3)** trên GPU (~0.2s, rất nhẹ).
+- Khi `true`: Chạy song song cả **ViRanker** và **Jina Reranker M0** (crossmodal image-text) trên GPU để tối ưu độ chính xác.
 
 ---
 
@@ -235,6 +233,30 @@ Giao diện Web UI chủ đề **Spider-Man** mật độ cao tại `http://loca
 
 ---
 
+## 🧹 Công cụ Lọc Keyframe & Tìm Ảnh Trùng Lặp (Image Filter Tool)
+
+Hệ thống cung cấp Web UI độc lập để duyệt ảnh theo từng video, đánh dấu lọc các ảnh bị mờ/hỏng/thừa và quét tìm ảnh trùng lặp trên 108.000+ vector CLIP:
+
+```powershell
+# 1. Khởi chạy Web UI lọc ảnh (Port 8501)
+python -m tools.image_filter.server
+# Hoặc: make filter-tool
+# Truy cập: http://localhost:8501
+```
+
+- 📂 **Duyệt theo Video**: Sidebar điều hướng Batch (`L21`–`L30`) ➔ Video (`V001`, `V002`,...).
+- 🖱️ **Đánh dấu 1-Click**: Click vào card ảnh để bật/tắt đánh dấu lọc (Overlay ❌).
+- 🔍 **Quét trùng lặp siêu tốc (<10ms)**: Bấm nút *🔍 Giống* để quét toàn bộ dataset, kéo thanh trượt ngưỡng tương đồng (ví dụ $\ge 90\%$) và chọn *Giữ lại ảnh gốc* hoặc *Xóa cả ảnh gốc*.
+- 💾 **Auto-Save JSON**: Tự động lưu và đồng bộ vào file duy nhất `data/filtered_keyframes.json`.
+
+```powershell
+# 2. Áp dụng lọc (Xóa file ảnh trên ổ đĩa & Rebuild Unified Dataset)
+python -m aggregation.apply_filter --delete-images
+# Hoặc kiểm tra thử trước: make apply-filter-dry
+```
+
+---
+
 ## 📁 Indexing & Alias Management
 
 ### Nạp dữ liệu vào Qdrant
@@ -269,18 +291,45 @@ python -m indexing.collection_alias --action rollback --collection aic2026_v1
 
 ## ⚙️ Biến Môi Trường (`.env`)
 
-Copy `.env.example` → `.env`. Các biến quan trọng:
+Copy file mẫu cấu hình:
+```powershell
+copy .env.example .env
+```
+
+### 1. Cấu hình Cache thư viện ML (Khuyến nghị cấu hình để tránh đầy ổ C)
+
+| Biến | Mặc định trong `.env.example` | Ý nghĩa |
+|---|---|---|
+| `HF_HOME` | `./data/hf_cache` | Thư mục gốc lưu cache HuggingFace (models, tokenizers) |
+| `HF_HUB_CACHE` | `./data/hf_cache/hub` | Thư mục lưu hub cache của HuggingFace |
+| `TRANSFORMERS_CACHE` | `./data/hf_cache/hub` | Thư mục lưu cache mô hình Transformers |
+| `PADDLE_HOME` | `./data/paddle_cache` | Thư mục lưu cache PaddlePaddle |
+| `PADDLEOCR_BASE_DIR` | `./data/paddle_cache` | Thư mục lưu pretrained weights của PaddleOCR |
+| `TORCH_HOME` | `./data/torch_cache` | Thư mục lưu cache weights của PyTorch |
+
+> 💡 **Mẹo:** Nếu máy có ổ cứng phụ (ví dụ ổ `D:`), bạn có thể đổi giá trị các biến trên thành đường dẫn tuyệt đối (vd: `D:\huggingface_cache`) để giải phóng hoàn toàn dung lượng ổ `C:`.
+
+### 2. Cấu hình Đường dẫn Dữ liệu (Tùy chọn)
 
 | Biến | Mặc định | Ý nghĩa |
 |---|---|---|
+| `AIC_DATA_DIR` | `./data` (thư mục `data/` tại root) | Thư mục gốc chứa toàn bộ dataset, unified parquet, vectors và keyframes |
+| `AIC_KEYFRAME_DIR` | `./data/image` | Đường dẫn thư mục ảnh keyframe (tùy chọn ghi đè nếu tách riêng ổ đĩa) |
+
+### 3. Cấu hình Nâng cao (Tùy chọn — Server có sẵn giá trị mặc định tối ưu)
+
+Hệ thống cung cấp sẵn các giá trị mặc định chuẩn, không bắt buộc phải khai báo trong file `.env`:
+
+| Biến | Mặc định trong code | Ý nghĩa |
+|---|---|---|
+| `AIC_DEVICE` | `cuda` | Thiết bị chạy model (`cuda`, `mps`, `cpu`) |
+| `AIC_PRELOAD_MODELS` | `true` | Tự động warmup toàn bộ models lúc startup |
 | `AIC_QDRANT_URL` | `http://localhost:6333` | URL Qdrant server |
-| `AIC_QDRANT_COLLECTION_ALIAS` | `production` | Alias collection dùng để query |
-| `AIC_DEVICE` | `cuda` | `cuda` / `mps` / `cpu` |
-| `AIC_PRELOAD_MODELS` | `false` | `true` = warmup toàn bộ model lúc startup |
-| `AIC_MODEL_UNLOAD_TTL_S` | `0` | Unload model sau N giây idle (`0` = không unload) |
-| `AIC_DATA_DIR` | `data/` | Thư mục chứa dữ liệu chung |
-| `AIC_KEYFRAME_DIR` | `data/image` | Thư mục chứa ảnh keyframe |
-| `AIC_CORS_ORIGINS` | `["*"]` | Allowed origins |
+| `AIC_QDRANT_COLLECTION_ALIAS` | `production` | Collection alias dùng cho truy vấn |
+| `AIC_MODEL_UNLOAD_TTL_S` | `0` | Tự động unload model sau N giây không dùng (`0` = tắt) |
+| `AIC_PORT` | `8000` | Cổng HTTP của FastAPI server |
+| `AIC_HOST` | `0.0.0.0` | Địa chỉ bind của FastAPI server |
+| `AIC_CORS_ORIGINS` | `["*"]` | Danh sách CORS allowed origins |
 
 ---
 
@@ -332,7 +381,7 @@ Cần chạy indexing trước (xem phần **Indexing & Alias Management**).
 Đã tối ưu — chỉ CLIP + Qwen2 + bge-reranker trên GPU (~7-9.5GB), còn lại chạy CPU.
 
 ### Search chậm (>10s)
-Kiểm tra `use_crossmodal_reranker` có đang bật không. Tắt đi nến cần latency thấp:
+Kiểm tra `use_reranker` có đang bật không. Tắt đi nếu cần latency thấp:
 ```powershell
 # Xem log profiling
 Get-Content "server.log" | Select-String "PROFILE"

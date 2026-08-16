@@ -13,6 +13,7 @@ const state = {
   useReranker: false,
   selectedItems: new Map(), // key -> CandidateResult
   rawResults: [],
+  selectedFile: null,
   selectedImageBase64: null,
   hoveredCand: null,
 };
@@ -44,57 +45,58 @@ function setupTabs() {
       document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
       state.mode = btn.dataset.mode;
-      // Hiện/ẩn controls theo mode
-      const numEventsGroup = document.getElementById("num-events-group");
-      const densityGroup = document.getElementById("density-group");
-      if (numEventsGroup) {
-        numEventsGroup.style.display = (state.mode === "trake") ? "flex" : "none";
-      }
-      if (densityGroup) {
-        densityGroup.style.display = (state.mode === "trake") ? "none" : "flex";
-      }
+      updateUIForMode();
       updateDrawer();
     });
   });
 }
 
-// --- Controls Setup ---
-function setupControls() {
-  // Top-K number input
-  const topKInput = document.getElementById("top-k-input");
-  if (topKInput) {
-    topKInput.addEventListener("input", (e) => {
-      let val = parseInt(e.target.value);
-      if (!isNaN(val) && val > 0) {
-        state.topK = val;
-      }
-    });
+function updateUIForMode() {
+  const numEventsGroup = document.getElementById("num-events-group");
+  if (state.mode === "trake") {
+    queryInput.placeholder = "Gõ chuỗi sự kiện theo thứ tự... (VD: người đàn ông bước vào xe -> xe chạy trên đường -> dừng lại ở quán ăn)";
+    if (numEventsGroup) numEventsGroup.style.display = "flex";
+  } else if (state.mode === "vqa") {
+    queryInput.placeholder = "Gõ câu hỏi VQA... (VD: Người lái xe mặc áo màu gì? / Có bao nhiêu người trong quán?)";
+    if (numEventsGroup) numEventsGroup.style.display = "none";
+  } else {
+    queryInput.placeholder = "Gõ câu miêu tả tìm kiếm... (VD: xe máy màu vàng, tiệm vàng Lê Tứ)";
+    if (numEventsGroup) numEventsGroup.style.display = "none";
   }
+}
 
-  // Branch mode buttons (Hybrid, Embedding, OCR, ASR)
+// --- Search Controls Setup ---
+function setupControls() {
+  // Branch Buttons
   document.querySelectorAll(".branch-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
       document.querySelectorAll(".branch-btn").forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
       state.searchMode = btn.dataset.branch;
-      statusBar.textContent = `⚙️ Đã chuyển sang nhánh tìm kiếm: ${btn.textContent.trim()}`;
+      statusBar.textContent = `🎯 Đã đổi sang nhánh tìm kiếm: ${btn.textContent.trim()}`;
     });
   });
 
-  // Dynamic Density Slider (adjusts card min-width)
+  // Top-K
+  const topKInput = document.getElementById("top-k-input");
+  if (topKInput) {
+    topKInput.addEventListener("change", (e) => {
+      state.topK = parseInt(e.target.value, 10) || 30;
+    });
+  }
+
+  // Card Density Slider
   const densitySlider = document.getElementById("density-slider");
   const densityVal = document.getElementById("density-val");
-
-  const updateSliderFill = (slider) => {
-    const min = parseFloat(slider.min) || 0;
-    const max = parseFloat(slider.max) || 100;
-    const val = parseFloat(slider.value) || 0;
-    const percent = ((val - min) / (max - min)) * 100;
-    slider.style.setProperty("--slider-value-percent", `${percent}%`);
-  };
-
   if (densitySlider) {
-    // Set initial fill percentage on page load
+    const updateSliderFill = (slider) => {
+      const min = slider.min || 140;
+      const max = slider.max || 320;
+      const val = slider.value;
+      const percent = ((val - min) / (max - min)) * 100;
+      slider.style.background = `linear-gradient(to right, #ffd700 ${percent}%, rgba(255, 255, 255, 0.1) ${percent}%)`;
+    };
+
     updateSliderFill(densitySlider);
 
     densitySlider.addEventListener("input", (e) => {
@@ -111,13 +113,45 @@ function setupControls() {
     imgInput.addEventListener("change", (e) => {
       const file = e.target.files[0];
       if (file) {
+        state.selectedFile = file;
         const reader = new FileReader();
         reader.onload = (evt) => {
           state.selectedImageBase64 = evt.target.result.split(",")[1];
           document.getElementById("chip-filename").textContent = file.name;
           document.getElementById("image-preview-chip").style.display = "inline-flex";
+          statusBar.textContent = `🖼️ Đã chọn ảnh: ${file.name}. Bấm TÌM KIẾM hoặc Enter để tìm ảnh tương đồng.`;
         };
         reader.readAsDataURL(file);
+      }
+    });
+  }
+
+  // Drag and drop image onto search panel
+  const searchPanel = document.querySelector(".search-panel");
+  if (searchPanel) {
+    searchPanel.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      searchPanel.classList.add("drag-over");
+    });
+    searchPanel.addEventListener("dragleave", () => {
+      searchPanel.classList.remove("drag-over");
+    });
+    searchPanel.addEventListener("drop", (e) => {
+      e.preventDefault();
+      searchPanel.classList.remove("drag-over");
+      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]) {
+        const file = e.dataTransfer.files[0];
+        if (file.type.startsWith("image/")) {
+          state.selectedFile = file;
+          const reader = new FileReader();
+          reader.onload = (evt) => {
+            state.selectedImageBase64 = evt.target.result.split(",")[1];
+            document.getElementById("chip-filename").textContent = file.name;
+            document.getElementById("image-preview-chip").style.display = "inline-flex";
+            statusBar.textContent = `🖼️ Đã thả ảnh: ${file.name}. Bấm TÌM KIẾM để tìm ảnh tương đồng.`;
+          };
+          reader.readAsDataURL(file);
+        }
       }
     });
   }
@@ -125,8 +159,11 @@ function setupControls() {
   const removeImgBtn = document.getElementById("remove-img-btn");
   if (removeImgBtn) {
     removeImgBtn.addEventListener("click", () => {
+      state.selectedFile = null;
       state.selectedImageBase64 = null;
+      if (imgInput) imgInput.value = "";
       document.getElementById("image-preview-chip").style.display = "none";
+      statusBar.textContent = "🗑️ Đã bỏ chọn ảnh.";
     });
   }
 
@@ -140,7 +177,6 @@ function setupControls() {
       statusBar.textContent = `⚙️ Reranker đã được ${state.useReranker ? "BẬT" : "TẮT"}`;
     });
   }
-
 }
 
 // --- Keyboard Shortcuts (Copy on Hover) ---
@@ -211,17 +247,68 @@ function setupSearch() {
 
 async function triggerSearch() {
   const queryText = queryInput.value.trim();
+  state.lastQuery = queryText;
 
-  if (!queryText && !state.selectedImageBase64) {
+  if (!queryText && !state.selectedImageBase64 && !state.selectedFile) {
     statusBar.textContent = "⚠️ Vui lòng nhập câu tìm kiếm hoặc tải ảnh lên!";
     return;
   }
 
-  statusBar.textContent = `🕸️ Spidey đang tìm kiếm (Nhánh: ${state.searchMode.toUpperCase()})...`;
-  speedTag.style.display = "none";
-  resultsGrid.innerHTML = `<div class="empty-state">🕷️ Đang thực hiện tìm kiếm & Rerank đa phương thức...</div>`;
-
   const startTime = performance.now();
+  speedTag.style.display = "none";
+
+  // CASE 1: Image-to-Image Search (Nếu có ảnh được tải lên / chọn)
+  if (state.selectedFile || state.selectedImageBase64) {
+    statusBar.textContent = "🕸️ Đang quét toàn bộ vector để tìm ảnh tương đồng (Image-to-Image Search)...";
+    resultsGrid.innerHTML = `<div class="empty-state">🕷️ Đang mã hóa vector ảnh CLIP và truy vấn Qdrant...</div>`;
+
+    try {
+      const formData = new FormData();
+      if (state.selectedFile) {
+        formData.append("file", state.selectedFile, state.selectedFile.name);
+      } else {
+        // Build blob from base64 string
+        const byteCharacters = atob(state.selectedImageBase64);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { type: "image/webp" });
+        formData.append("file", blob, "query_image.webp");
+      }
+
+      const resp = await fetch(`${API_BASE}/api/v1/similar-image?top_k=${state.topK}&use_reranker=${state.useReranker}`, {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!resp.ok) {
+        const errData = await resp.json().catch(() => ({}));
+        throw new Error(errData.detail || `HTTP ${resp.status}`);
+      }
+
+      const data = await resp.json();
+      resultsList = data.results || [];
+
+      const duration = ((performance.now() - startTime) / 1000).toFixed(2);
+      state.rawResults = resultsList;
+      renderResults(state.rawResults);
+
+      statusBar.textContent = `✅ Tìm thấy ${state.rawResults.length} keyframe tương đồng với ảnh mẫu!`;
+      speedTag.textContent = `${duration}s`;
+      speedTag.style.display = "inline-block";
+      return;
+    } catch (err) {
+      statusBar.textContent = `❌ Lỗi khi tìm kiếm ảnh: ${err.message}`;
+      resultsGrid.innerHTML = `<div class="empty-state">Lỗi kết nối server: ${err.message}</div>`;
+      return;
+    }
+  }
+
+  // CASE 2: Text / Multimodal KIS / VQA / TRAKE Search
+  statusBar.textContent = `🕸️ Spidey đang tìm kiếm (Nhánh: ${state.searchMode.toUpperCase()})...`;
+  resultsGrid.innerHTML = `<div class="empty-state">🕷️ Đang thực hiện tìm kiếm & Rerank đa phương thức...</div>`;
 
   try {
     let endpoint = `${API_BASE}/api/v1/${state.mode}`;
@@ -382,14 +469,17 @@ function renderSingleCard(candidate) {
       <button class="select-checkbox-btn ${isSelected ? 'selected' : ''}" data-key="${itemKey}">
         ${isSelected ? '✓' : '+'}
       </button>
-      <button class="copy-btn-overlay" title="Copy <video_id,frame_id> (Ctrl+C)">📋 Copy</button>
+      <div class="card-overlay-actions">
+        <button class="copy-btn-overlay" title="Copy <video_id,frame_id> (Ctrl+C)">📋 Copy</button>
+        <button class="similar-btn-overlay" title="Tìm các keyframe tương đồng với ảnh này">🔍 Tương tự</button>
+      </div>
     </div>
     <div class="kf-details">
       <div class="kf-title">
         <span>${candidate.video_id}</span>
         <span class="ts-label">${candidate.timestamp_mid.toFixed(1)}s</span>
       </div>
-      ${candidate.ocr_text ? `<div class="ocr-pill" title="${candidate.ocr_text}">🔤 ${candidate.ocr_text}</div>` : ''}
+      ${candidate.ocr_text ? `<div class="ocr-pill" title="${candidate.ocr_text}">🔤 ${highlightMatchedText(candidate.ocr_text, state.lastQuery || (queryInput ? queryInput.value : ''))}</div>` : ''}
     </div>
   `;
 
@@ -406,6 +496,15 @@ function renderSingleCard(candidate) {
     copyToClipboard(candidate);
   });
 
+  // Similar Image Search Button Click
+  const simBtn = card.querySelector(".similar-btn-overlay");
+  if (simBtn) {
+    simBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      searchSimilarByCandidate(candidate);
+    });
+  }
+
   // Selection Checkbox
   const selectBtn = card.querySelector(".select-checkbox-btn");
   selectBtn.addEventListener("click", (e) => {
@@ -414,6 +513,39 @@ function renderSingleCard(candidate) {
   });
 
   resultsGrid.appendChild(card);
+}
+
+// --- Quick 1-Click Similar Image Search ---
+async function searchSimilarByCandidate(cand) {
+  statusBar.textContent = `🖼️ Đang nạp ảnh mẫu ${cand.video_id} #${cand.frame_id}...`;
+  try {
+    const imgUrl = `${API_BASE}/api/v1/image/${cand.video_id}/${cand.frame_id}`;
+    const res = await fetch(imgUrl);
+    if (!res.ok) throw new Error("Không thể tải file ảnh keyframe mẫu");
+    const blob = await res.blob();
+    state.selectedFile = new File([blob], `${cand.video_id}_${cand.frame_id}.webp`, { type: blob.type || "image/webp" });
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      state.selectedImageBase64 = evt.target.result.split(",")[1];
+      const chipEl = document.getElementById("image-preview-chip");
+      const chipNameEl = document.getElementById("chip-filename");
+      if (chipNameEl) chipNameEl.textContent = `Ảnh mẫu: ${cand.video_id} #${cand.frame_id}`;
+      if (chipEl) chipEl.style.display = "inline-flex";
+
+      // Tự động đóng Lightbox nếu đang mở và thực hiện tìm kiếm
+      const modal = document.getElementById("lightbox-modal");
+      if (modal && modal.style.display !== "none") {
+        modal.style.display = "none";
+        closeLightboxVideo();
+      }
+
+      triggerSearch();
+    };
+    reader.readAsDataURL(blob);
+  } catch (err) {
+    statusBar.textContent = `❌ Lỗi nạp ảnh: ${err.message}`;
+  }
 }
 
 // --- Selection Drawer & Collapsible Sidebar ---
@@ -570,6 +702,82 @@ function updateVideoInfoLabel() {
   videoInfoLabelEl.textContent = `${currentVideoId},${currentVideoFrame()}`;
 }
 
+// --- Bulletproof Vietnamese Diacritics & Unicode Normalized Highlighter ---
+function removeVietnameseDiacritics(str) {
+  if (!str) return "";
+  const normalized = str.normalize("NFC").toLowerCase();
+  const accents = {
+    '[àáảãạăằắẳẵặâầấẩẫậ]': 'a',
+    '[èéẻẽẹêềếểễệ]': 'e',
+    '[ìíỉĩị]': 'i',
+    '[òóỏõọôồốổỗộơờớởỡợ]': 'o',
+    '[ùúủũụưừứửữự]': 'u',
+    '[ỳýỷỹỵ]': 'y',
+    'đ': 'd'
+  };
+  let res = normalized;
+  for (const [pattern, repl] of Object.entries(accents)) {
+    res = res.replace(new RegExp(pattern, 'g'), repl);
+  }
+  return res;
+}
+
+function buildVietnameseRegexPattern(term) {
+  const charMap = {
+    'a': '[aàáảãạăằắẳẵặâầấẩẫậAÀÁẢÃẠĂẰẮẲẴẶÂẦẤẨẪẬ]',
+    'd': '[dđDĐ]',
+    'e': '[eèéẻẽẹêềếểễệEÈÉẺẼẸÊỀẾỂỄỆ]',
+    'i': '[iìíỉĩịIÌÍỈĨỊ]',
+    'o': '[oòóỏõọôồốổỗộơờớởỡợOÒÓỎÕỌÔỒỐỔỖỘƠỜỚỞỠỢ]',
+    'u': '[uùúủũụưừứửữựUÙÚỦŨỤƯỪỨỬỮỰ]',
+    'y': '[yỳýỷỹỵYỲÝỶỸỴ]'
+  };
+
+  const rootTerm = removeVietnameseDiacritics(term);
+  let pat = "";
+  for (const ch of rootTerm) {
+    if (charMap[ch]) {
+      pat += charMap[ch];
+    } else if (/\s/.test(ch)) {
+      pat += '\\s+';
+    } else {
+      pat += ch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+  }
+  return pat;
+}
+
+function highlightMatchedText(fullText, query) {
+  if (!fullText || fullText === "None" || fullText === "-") return fullText || "None";
+  if (!query || typeof query !== "string" || !query.trim()) return escapeHtml(fullText);
+
+  function escapeHtml(text) {
+    return text
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
+
+  const normalizedText = fullText.normalize("NFC");
+  const rawTerms = query
+    .normalize("NFC")
+    .trim()
+    .split(/\s+/)
+    .filter((t) => t.length >= 2);
+
+  // Sắp xếp các cụm từ dài trước, từ ngắn sau để regex match tham lam chính xác
+  const uniqueTerms = Array.from(new Set([query.normalize("NFC").trim(), ...rawTerms])).sort((a, b) => b.length - a.length);
+
+  const patterns = uniqueTerms.map(buildVietnameseRegexPattern).filter(Boolean);
+  if (patterns.length === 0) return escapeHtml(normalizedText);
+
+  const regex = new RegExp(`(${patterns.join("|")})`, "gi");
+
+  return escapeHtml(normalizedText).replace(regex, (match) => `<mark class="highlight-match">${match}</mark>`);
+}
+
 function showLightbox(cand, imgUrl) {
   currentLightboxCand = cand;
   const modal = document.getElementById("lightbox-modal");
@@ -579,9 +787,11 @@ function showLightbox(cand, imgUrl) {
   const ocrBox = document.getElementById("modal-ocr");
   const asrBox = document.getElementById("modal-asr");
 
-  descBox.innerHTML = `<strong>Image Description:</strong> ${cand.description || 'None'}`;
-  ocrBox.innerHTML = `<strong>OCR:</strong> ${cand.ocr_text || 'None'}`;
-  asrBox.innerHTML = `<strong>ASR:</strong> ${cand.asr_text || 'None'}`;
+  const queryForHighlight = state.lastQuery || (queryInput ? queryInput.value.trim() : "");
+
+  descBox.innerHTML = `<strong>Image Description:</strong> ${highlightMatchedText(cand.description || 'None', queryForHighlight)}`;
+  ocrBox.innerHTML = `<strong>OCR:</strong> ${highlightMatchedText(cand.ocr_text || 'None', queryForHighlight)}`;
+  asrBox.innerHTML = `<strong>ASR:</strong> ${highlightMatchedText(cand.asr_text || 'None', queryForHighlight)}`;
 
   // Default scroll position at top
   descBox.scrollTop = 0;
@@ -685,6 +895,20 @@ if (modalEl) {
     copyToClipboard({ video_id: currentVideoId, frame_id: currentVideoFrame() });
   });
 
+  // Tìm ảnh tương tự từ Lightbox
+  const videoSearchSimBtn = document.getElementById("video-search-similar-btn");
+  if (videoSearchSimBtn) {
+    videoSearchSimBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (!currentVideoId) return;
+      const targetCand = {
+        video_id: currentVideoId,
+        frame_id: currentVideoFrame(),
+      };
+      searchSimilarByCandidate(targetCand);
+    });
+  }
+
   // Thêm vào giỏ: thêm khung hình đang dừng tại thời điểm hiện tại vào Giỏ Nộp Bài
   document.getElementById("video-add-frame-btn").addEventListener("click", (e) => {
     e.stopPropagation();
@@ -728,7 +952,8 @@ function openTextZoom(typeLabel, textContent) {
   if (!textContent || textContent === 'None' || textContent === '-') return;
   currentZoomedText = textContent;
   textZoomTitle.textContent = `🔍 CHI TIẾT ${typeLabel.toUpperCase()}`;
-  textZoomBody.textContent = textContent;
+  const queryForHighlight = queryInput ? queryInput.value.trim() : "";
+  textZoomBody.innerHTML = highlightMatchedText(textContent, queryForHighlight);
   textZoomModal.style.display = "flex";
 }
 
