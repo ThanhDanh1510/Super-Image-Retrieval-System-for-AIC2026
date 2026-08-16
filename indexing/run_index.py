@@ -131,7 +131,7 @@ def load_unified_dataset(dataset_dir: str) -> tuple[pd.DataFrame, dict[str, np.n
         f"ocr: {ocr_vecs.shape}, asr: {asr_vecs.shape}"
     )
 
-    # --- Load và merge metadata ---
+    # Load text và description
     meta_df = pd.read_parquet(base / "scene_metadata.parquet")
     ocr_df = pd.read_parquet(base / "ocr_text.parquet")[["scene_id", "ocr_text"]]
     asr_df = pd.read_parquet(base / "asr_text.parquet")[["scene_id", "asr_text"]]
@@ -139,6 +139,13 @@ def load_unified_dataset(dataset_dir: str) -> tuple[pd.DataFrame, dict[str, np.n
     # Merge text vào metadata
     meta_df = meta_df.merge(ocr_df, on="scene_id", how="left")
     meta_df = meta_df.merge(asr_df, on="scene_id", how="left")
+
+    if (base / "scene_descriptions.parquet").exists():
+        desc_df = pd.read_parquet(base / "scene_descriptions.parquet")[["scene_id", "description"]]
+        meta_df = meta_df.merge(desc_df, on="scene_id", how="left")
+        meta_df["description"] = meta_df["description"].fillna("").astype(str)
+    else:
+        meta_df["description"] = ""
 
     # Điền chuỗi rỗng cho text bị thiếu (không dùng NaN)
     meta_df["ocr_text"] = meta_df["ocr_text"].fillna("").astype(str)
@@ -219,6 +226,7 @@ def build_and_upsert_batches(
                 "keyframe_path": str(row.keyframe_path),
                 "ocr_text": str(row.ocr_text),
                 "asr_text": str(row.asr_text),
+                "description": str(getattr(row, "description", "")),
                 "ingestion_version": ingestion_version,
                 "member": str(getattr(row, "member", "unknown")),
             }
@@ -278,6 +286,7 @@ def run(
     qdrant_path: str | None = None,
     batch_size: int = 200,
     create_if_missing: bool = False,
+    recreate: bool = False,
     skip_alias: bool = False,
 ) -> None:
     """
@@ -323,10 +332,10 @@ def run(
 
     # 2. Tạo collection nếu cần
     existing = [c.name for c in client.get_collections().collections]
-    if collection_name not in existing:
-        if create_if_missing:
-            logger.info(f"Collection '{collection_name}' chưa tồn tại. Đang tạo...")
-            create_collection(client, collection_name)
+    if recreate or (collection_name not in existing):
+        if create_if_missing or recreate:
+            logger.info(f"Tạo collection '{collection_name}' (recreate={recreate})...")
+            create_collection(client, collection_name, recreate=recreate)
         else:
             raise ValueError(
                 f"Collection '{collection_name}' không tồn tại. "
@@ -357,20 +366,43 @@ def run(
         batch_size=batch_size,
     )
 
+    # 5. Tạo payload indexes cho text search & filtering
+    try:
+        from qdrant_client.models import TextIndexParams, TokenizerType, PayloadSchemaType
+        logger.info("Đang tạo payload indexes cho metadata và full-text search...")
+        client.create_payload_index(collection_name, "video_id", field_schema=PayloadSchemaType.KEYWORD)
+        client.create_payload_index(collection_name, "scene_id", field_schema=PayloadSchemaType.KEYWORD)
+        client.create_payload_index(collection_name, "frame_id", field_schema=PayloadSchemaType.INTEGER)
+        client.create_payload_index(collection_name, "timestamp_mid", field_schema=PayloadSchemaType.FLOAT)
+        
+        for text_field in ["ocr_text", "asr_text", "description"]:
+            client.create_payload_index(
+                collection_name,
+                text_field,
+                field_schema=TextIndexParams(
+                    type="text",
+                    tokenizer=TokenizerType.WORD,
+                    lowercase=True,
+                    ascii_folding=True,
+                )
+            )
+        logger.info("✅ Payload indexes và full-text search indexes tạo thành công.")
+    except Exception as e:
+        logger.warning(f"Payload index setup note: {e}")
+
     # 6. Set production alias
     if not skip_alias:
-        current = get_current_production(client)
-        logger.info(
-            f"Đang chuyển alias 'production': "
-            f"'{current or 'N/A'}' → '{collection_name}'"
-        )
-        set_production_alias(client, collection_name)
+        try:
+            current = get_current_production(client)
+            logger.info(
+                f"Đang chuyển alias 'production': "
+                f"'{current or 'N/A'}' → '{collection_name}'"
+            )
+            set_production_alias(client, collection_name)
+        except Exception as e:
+            logger.warning(f"Alias setup note: {e}")
     else:
         logger.info("--skip-alias được set. Alias 'production' KHÔNG được cập nhật.")
-        logger.info(
-            f"Khi muốn set alias, chạy: "
-            f"python -m indexing.collection_alias --action set --collection {collection_name}"
-        )
 
     elapsed = time.time() - run_start
     logger.info(f"=== Indexing hoàn tất: {total_upserted} points trong {elapsed:.1f}s ===")
@@ -389,19 +421,8 @@ Ví dụ:
   # Tạo collection mới và index toàn bộ dataset:
   python -m indexing.run_index \\
       --dataset-dir ./data/unified \\
-      --collection collection_v2 \\
-      --create-collection
-
-  # Index thêm batch mới vào collection đã tồn tại:
-  python -m indexing.run_index \\
-      --dataset-dir ./data/unified_patch \\
-      --collection collection_v2
-
-  # Index xong nhưng chưa đổi alias (để verify trước):
-  python -m indexing.run_index \\
-      --dataset-dir ./data/unified \\
-      --collection collection_v2 \\
-      --create-collection --skip-alias
+      --collection aic2026_clean_v3 \\
+      --recreate
         """,
     )
     parser.add_argument(
@@ -412,7 +433,7 @@ Ví dụ:
     parser.add_argument(
         "--collection",
         required=True,
-        help="Tên collection Qdrant đích (ví dụ: collection_v2).",
+        help="Tên collection Qdrant đích (ví dụ: aic2026_clean_v3).",
     )
     parser.add_argument(
         "--qdrant-url",
@@ -432,13 +453,18 @@ Ví dụ:
     parser.add_argument(
         "--batch-size",
         type=int,
-        default=200,
-        help="Số points upsert mỗi lần. Mặc định: 200.",
+        default=500,
+        help="Số points upsert mỗi lần. Mặc định: 500.",
     )
     parser.add_argument(
         "--create-collection",
         action="store_true",
         help="Tự động tạo collection nếu chưa tồn tại.",
+    )
+    parser.add_argument(
+        "--recreate",
+        action="store_true",
+        help="Xóa collection cũ và tạo lại sạch từ đầu.",
     )
     parser.add_argument(
         "--skip-alias",
@@ -466,7 +492,8 @@ def main(argv: list[str] | None = None) -> None:
             qdrant_api_key=args.qdrant_api_key,
             qdrant_path=args.qdrant_path,
             batch_size=args.batch_size,
-            create_if_missing=args.create_collection,
+            create_if_missing=args.create_collection or args.recreate,
+            recreate=args.recreate,
             skip_alias=args.skip_alias,
         )
     except (FileNotFoundError, ValueError) as e:

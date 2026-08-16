@@ -477,7 +477,7 @@ function renderSingleCard(candidate) {
     <div class="kf-details">
       <div class="kf-title">
         <span>${candidate.video_id}</span>
-        <span class="ts-label">${candidate.timestamp_mid.toFixed(1)}s</span>
+        <span class="ts-label" title="${candidate.video_id},${candidate.frame_id}">f${candidate.frame_id}</span>
       </div>
       ${candidate.ocr_text ? `<div class="ocr-pill" title="${candidate.ocr_text}">🔤 ${highlightMatchedText(candidate.ocr_text, state.lastQuery || (queryInput ? queryInput.value : ''))}</div>` : ''}
     </div>
@@ -517,7 +517,7 @@ function renderSingleCard(candidate) {
 
 // --- Quick 1-Click Similar Image Search ---
 async function searchSimilarByCandidate(cand) {
-  statusBar.textContent = `🖼️ Đang nạp ảnh mẫu ${cand.video_id} #${cand.frame_id}...`;
+  statusBar.textContent = `🖼️ Đang nạp ảnh mẫu ${cand.video_id} #f${cand.frame_id}...`;
   try {
     const imgUrl = `${API_BASE}/api/v1/image/${cand.video_id}/${cand.frame_id}`;
     const res = await fetch(imgUrl);
@@ -530,7 +530,7 @@ async function searchSimilarByCandidate(cand) {
       state.selectedImageBase64 = evt.target.result.split(",")[1];
       const chipEl = document.getElementById("image-preview-chip");
       const chipNameEl = document.getElementById("chip-filename");
-      if (chipNameEl) chipNameEl.textContent = `Ảnh mẫu: ${cand.video_id} #${cand.frame_id}`;
+      if (chipNameEl) chipNameEl.textContent = `Ảnh mẫu: ${cand.video_id} #f${cand.frame_id}`;
       if (chipEl) chipEl.style.display = "inline-flex";
 
       // Tự động đóng Lightbox nếu đang mở và thực hiện tìm kiếm
@@ -579,8 +579,8 @@ function updateDrawer() {
     div.innerHTML = `
       <img src="${imgUrl}" alt="${cand.scene_id}" onerror="this.style.display='none'" />
       <div style="flex:1;">
-        <div style="font-weight:bold; font-size:0.85rem;">${cand.video_id} (Frame ${cand.frame_id})</div>
-        <div style="font-size:0.75rem; color:var(--text-sub);">${cand.timestamp_mid.toFixed(1)}s</div>
+        <div style="font-weight:bold; font-size:0.85rem;">${cand.video_id}</div>
+        <div style="font-size:0.75rem; color:var(--spider-blue); font-family:var(--font-code); font-weight:600;">f${cand.frame_id}</div>
         ${state.mode === "vqa" ? `
           <input type="text" class="vqa-ans-input" data-key="${key}" placeholder="Nhập đáp án VQA..." value="${cand.user_answer || ''}" style="width:100%; margin-top:4px; font-size:0.75rem; padding:2px 4px; background:#000; border:1px solid var(--spider-blue); color:#fff; border-radius:4px;" />
         ` : ''}
@@ -805,7 +805,7 @@ function showLightbox(cand, imgUrl) {
 
 async function loadLightboxVideo(cand, imgUrl) {
   currentVideoId = cand.video_id;
-  currentVideoFps = 25.0;
+  currentLightboxCand = cand;
   videoErrorMsgEl.style.display = "none";
 
   // Mặc định thử phát video ngay trong khung ảnh; nếu lỗi sẽ fallback về ảnh tĩnh.
@@ -814,13 +814,35 @@ async function loadLightboxVideo(cand, imgUrl) {
   videoFrameBarEl.style.display = "flex";
   videoInfoLabelEl.textContent = `${cand.video_id},${cand.frame_id}`;
 
+  // Lấy fps thật của video này để tính thời gian chính xác 100%
+  let fps = 25.0;
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/video/${cand.video_id}/fps`);
+    if (res.ok) {
+      const data = await res.json();
+      if (data.fps) {
+        fps = Number(data.fps);
+      }
+    }
+  } catch (err) {
+    // Giữ fallback fps nếu API lỗi
+  }
+
+  currentVideoFps = fps;
+
+  // Tính chính xác giây tua tới dựa trên frame_id và fps thật của video
+  let seekTo = 0;
+  if (cand.frame_id !== undefined && cand.frame_id !== null && fps > 0) {
+    seekTo = cand.frame_id / fps;
+  } else if (cand.timestamp_mid !== undefined && cand.timestamp_mid !== null) {
+    seekTo = cand.timestamp_mid;
+  }
+
   modalVideoEl.src = `${API_BASE}/api/v1/video/${cand.video_id}`;
-  // timestamp_mid đã được backend tính sẵn = frame_id / fps (fps riêng của từng video),
-  // nên không cần frontend tự tính hay giả định fps cố định khi seek lần đầu.
-  const seekTo = cand.timestamp_mid || 0;
 
   const onLoadedMeta = () => {
     modalVideoEl.currentTime = seekTo;
+    updateVideoInfoLabel();
     modalVideoEl.removeEventListener("loadedmetadata", onLoadedMeta);
   };
   modalVideoEl.addEventListener("loadedmetadata", onLoadedMeta);
@@ -836,20 +858,7 @@ async function loadLightboxVideo(cand, imgUrl) {
 
   // Mở video ở chế độ dừng (pause) sẵn tại đúng frame, người dùng tự bấm play khi muốn xem.
   modalVideoEl.pause();
-
-  // Lấy fps thật của video này để tính frame_id realtime chính xác khi play/pause/tua.
-  try {
-    const res = await fetch(`${API_BASE}/api/v1/video/${cand.video_id}/fps`);
-    if (res.ok) {
-      const data = await res.json();
-      if (data.fps && cand.video_id === currentVideoId) {
-        currentVideoFps = data.fps;
-        updateVideoInfoLabel();
-      }
-    }
-  } catch (err) {
-    // Giữ fallback fps nếu API lỗi
-  }
+  updateVideoInfoLabel();
 }
 
 function closeLightboxVideo() {
@@ -884,7 +893,12 @@ if (modalEl) {
   document.getElementById("video-goto-main-btn").addEventListener("click", (e) => {
     e.stopPropagation();
     if (currentLightboxCand) {
-      modalVideoEl.currentTime = currentLightboxCand.timestamp_mid || 0;
+      if (currentLightboxCand.frame_id !== undefined && currentVideoFps > 0) {
+        modalVideoEl.currentTime = currentLightboxCand.frame_id / currentVideoFps;
+      } else {
+        modalVideoEl.currentTime = currentLightboxCand.timestamp_mid || 0;
+      }
+      updateVideoInfoLabel();
     }
   });
 
