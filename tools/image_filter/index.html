@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🕷️ Keyframe Filter & Duplicate Finder — AIC2026</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Roboto+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Header / Top Navigation -->
+  <header class="app-header">
+    <div class="brand">
+      <div class="brand-icon">🕷️</div>
+      <div class="brand-text">
+        <h1>SPIDER FILTER <span class="badge-tag">AIC2026</span></h1>
+        <p>Keyframe Data Cleaning & Vector Duplicate Finder</p>
+      </div>
+    </div>
+
+    <!-- Quick Stats -->
+    <div class="header-stats">
+      <div class="stat-pill">
+        <span class="stat-label">Tổng ảnh:</span>
+        <span class="stat-val" id="stat-total-images">108,413</span>
+      </div>
+      <div class="stat-pill red-accent">
+        <span class="stat-label">Đã đánh dấu lọc:</span>
+        <span class="stat-val" id="stat-filtered-count">0</span>
+      </div>
+      <div class="stat-pill cyan-accent">
+        <span class="stat-label">Video hiện tại:</span>
+        <span class="stat-val" id="stat-current-video">Chưa chọn</span>
+      </div>
+    </div>
+
+    <!-- Header Actions -->
+    <div class="header-actions">
+      <button class="btn btn-outline" id="btn-refresh" title="Tải lại dữ liệu">
+        🔄 Tải lại
+      </button>
+      <button class="btn btn-primary" id="btn-export-json" title="Tải file JSON đã lọc">
+        💾 Xuất JSON (<span id="btn-export-count">0</span>)
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <div class="main-layout">
+    <!-- Sidebar: Batch & Video Tree -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h2>📁 Danh sách Video</h2>
+        <div class="search-box">
+          <input type="text" id="video-search-input" placeholder="Tìm video (vd: V001, L21)...">
+          <span class="clear-icon" id="clear-video-search">✕</span>
+        </div>
+      </div>
+
+      <div class="batch-accordion" id="batch-list">
+        <div class="loading-spinner">Đang tải danh sách batch...</div>
+      </div>
+
+      <div class="sidebar-footer">
+        <div class="sidebar-summary" id="batch-summary">
+          Tải danh sách batch...
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content Area: Keyframe Grid -->
+    <main class="content-area">
+      <!-- Sticky Video Control Bar -->
+      <div class="video-controls-bar">
+        <div class="video-info">
+          <button class="btn btn-icon" id="btn-prev-video" title="Video trước (Phím ←)">◀</button>
+          <div class="current-video-title">
+            <span class="video-badge" id="current-batch-badge">--</span>
+            <h2 id="current-video-heading">Chọn một video từ sidebar để bắt đầu</h2>
+          </div>
+          <button class="btn btn-icon" id="btn-next-video" title="Video tiếp (Phím →)">▶</button>
+        </div>
+
+        <div class="video-stats-and-filters">
+          <!-- Grid Density Switcher -->
+          <div class="density-switcher" title="Chỉnh số cột hiển thị lưới ảnh">
+            <span class="density-label">Lưới:</span>
+            <button class="btn-density" data-cols="4" title="4 cột - Ảnh lớn">4x</button>
+            <button class="btn-density active" data-cols="6" title="6 cột - Chuẩn">6x</button>
+            <button class="btn-density" data-cols="8" title="8 cột - Mật độ cao">8x</button>
+          </div>
+
+          <div class="filter-tab-group">
+            <button class="filter-tab active" data-filter="all">Tất cả (<span id="cnt-all">0</span>)</button>
+            <button class="filter-tab" data-filter="unfiltered">Chưa lọc (<span id="cnt-unfiltered">0</span>)</button>
+            <button class="filter-tab red" data-filter="filtered">Đã lọc ❌ (<span id="cnt-filtered">0</span>)</button>
+          </div>
+
+          <div class="bulk-actions">
+            <button class="btn btn-small btn-danger" id="btn-select-all-video">❌ Lọc cả video</button>
+            <button class="btn btn-small btn-outline" id="btn-deselect-all-video">↩️ Bỏ lọc video</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Keyframe Image Grid -->
+      <div class="grid-container">
+        <div class="empty-state" id="empty-state">
+          <div class="empty-icon">🕸️</div>
+          <h3>Chưa chọn video nào</h3>
+          <p>Vui lòng click chọn một video trong danh sách bên trái để duyệt các ảnh keyframe.</p>
+        </div>
+
+        <div class="keyframe-grid" id="keyframe-grid" style="display: none;">
+          <!-- Keyframe Cards injected via JS -->
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- MODAL 1: Similar / Duplicate Image Finder -->
+  <div class="modal-overlay" id="similar-modal">
+    <div class="modal-card modal-lg">
+      <div class="modal-header">
+        <div class="modal-title">
+          <span class="modal-icon">🔍</span>
+          <div>
+            <h3>Tìm & Lọc Ảnh Trùng Lặp (Duplicate Search)</h3>
+            <p>Quét 108K+ vector CLIP toàn bộ dataset để tìm các ảnh giống ảnh mẫu</p>
+          </div>
+        </div>
+        <button class="modal-close" id="btn-close-similar-modal">✕</button>
+      </div>
+
+      <div class="modal-body duplicate-finder-layout">
+        <!-- Reference Image Panel -->
+        <div class="ref-panel">
+          <h4>Ảnh Mẫu (Reference)</h4>
+          <div class="ref-img-wrap">
+            <img id="ref-image-preview" src="" alt="Reference Image">
+          </div>
+          <div class="ref-meta">
+            <p><strong>Scene ID:</strong> <span id="ref-scene-id">--</span></p>
+            <p><strong>Video:</strong> <span id="ref-video-id">--</span></p>
+            <p><strong>Frame:</strong> <span id="ref-frame-id">--</span></p>
+          </div>
+
+          <div class="ref-options">
+            <label class="custom-checkbox">
+              <input type="checkbox" id="chk-keep-ref-image" checked>
+              <span class="checkbox-label">🛡️ <strong>GIỮ LẠI ảnh gốc này</strong> (chỉ lọc bỏ các ảnh trùng lặp tìm thấy)</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Similar Results Panel -->
+        <div class="results-panel">
+          <div class="results-controls">
+            <div class="slider-control">
+              <label for="sim-threshold-slider">
+                Ngưỡng tương đồng: <span class="threshold-val" id="threshold-display">85%</span>
+              </label>
+              <input type="range" id="sim-threshold-slider" min="70" max="99" value="85" step="1">
+            </div>
+
+            <div class="slider-control" style="max-width: 160px;">
+              <label for="sim-zoom-slider">
+                Cột hiển thị: <span class="threshold-val" id="zoom-display">4 cột</span>
+              </label>
+              <input type="range" id="sim-zoom-slider" min="2" max="6" value="4" step="1">
+            </div>
+
+            <div class="quick-select-buttons">
+              <button class="btn btn-xs btn-outline" id="btn-quick-95">≥ 95%</button>
+              <button class="btn btn-xs btn-outline" id="btn-quick-90">≥ 90%</button>
+              <button class="btn btn-xs btn-outline" id="btn-quick-all">Tất cả</button>
+              <button class="btn btn-xs btn-outline" id="btn-quick-none">Bỏ chọn</button>
+            </div>
+          </div>
+
+          <div class="results-summary">
+            <span>Tìm thấy: <strong id="sim-found-count">0</strong> ảnh tương đồng</span>
+            <span>Đã chọn để lọc: <strong class="text-danger" id="sim-selected-count">0</strong> ảnh</span>
+          </div>
+
+          <div class="similar-grid" id="similar-results-grid">
+            <div class="loading-spinner">Đang quét vector cosine similarity...</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-outline" id="btn-cancel-similar">Đóng</button>
+        <button class="btn btn-danger" id="btn-apply-similar-filter">
+          ❌ Xác nhận lọc <span id="btn-apply-similar-count">0</span> ảnh đã chọn
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL 2: Lightbox Image Preview -->
+  <div class="lightbox-overlay" id="lightbox-modal">
+    <div class="lightbox-content">
+      <button class="lightbox-close" id="btn-close-lightbox">✕</button>
+      <img id="lightbox-img" src="" alt="Full Preview">
+      <div class="lightbox-info">
+        <h4 id="lightbox-title">L21_V001 / Frame 17</h4>
+        <p id="lightbox-details">Scene: L21_V001_S001 | Time: 0.68s</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
