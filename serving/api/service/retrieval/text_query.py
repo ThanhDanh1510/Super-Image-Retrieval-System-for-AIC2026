@@ -342,7 +342,7 @@ def _split_events(query: str) -> list[str]:
 
 def _split_events_llm(query: str) -> list[str]:
     """
-    Dùng Qwen2-1.5B để tách query thành events (fallback khi pattern fail).
+    Dùng Qwen2.5-1.5B để tách query thành events (fallback khi pattern fail).
 
     Args:
         query: Query text.
@@ -351,11 +351,22 @@ def _split_events_llm(query: str) -> list[str]:
         List các sub-event strings. Trả về [] nếu LLM fail.
     """
     try:
-        import asyncio
-        # Dùng global text_embedder đã load sẵn
-        from serving.api.service.retrieval.text_query import _get_model_cached
+        from serving.api.core.models import ModelRegistry
 
-        model, tokenizer = _get_model_cached()
+        # Standalone loader nếu chưa nạp
+        model_id = "Qwen/Qwen2.5-1.5B-Instruct"
+        import torch
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
+        model = AutoModelForCausalLM.from_pretrained(
+            model_id,
+            torch_dtype=torch.float16 if device == "cuda" else torch.float32,
+            device_map=device,
+            trust_remote_code=True,
+        )
+        model.eval()
 
         prompt = f"""Tách câu sau thành các sự kiện riêng biệt, mỗi sự kiện trên 1 dòng. Chỉ liệt kê sự kiện, không giải thích.
 
@@ -365,7 +376,6 @@ Sự kiện:"""
 
         inputs = tokenizer(prompt, return_tensors="pt", max_length=512, truncation=True).to(model.device)
 
-        import torch
         with torch.no_grad():
             outputs = model.generate(
                 **inputs,
@@ -388,34 +398,6 @@ Sự kiện:"""
     except Exception as e:
         logger.warning(f"LLM event splitting failed: {e}")
         return []
-
-
-_MODEL_CACHE = None
-_TOKENIZER_CACHE = None
-
-def _get_model_cached():
-    """Lấy hoặc khởi tạo model cho event splitting."""
-    global _MODEL_CACHE, _TOKENIZER_CACHE
-    if _MODEL_CACHE is None:
-        import torch
-        from transformers import AutoModelForCausalLM, AutoTokenizer
-
-        model_id = "Qwen/Qwen2.5-1.5B-Instruct"
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-
-        tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
-        model = AutoModelForCausalLM.from_pretrained(
-            model_id,
-            torch_dtype=torch.float16,
-            device_map=device,
-            trust_remote_code=True,
-        )
-        model.eval()
-
-        _MODEL_CACHE = model
-        _TOKENIZER_CACHE = tokenizer
-
-    return _MODEL_CACHE, _TOKENIZER_CACHE
 
 
 async def _encode_text(

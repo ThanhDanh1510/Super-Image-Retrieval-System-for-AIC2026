@@ -5,23 +5,16 @@ Service xử lý query dạng giọng nói (Voice Input).
 
 LUỒNG XỬ LÝ:
   1. Nhận audio bytes từ controller
-  2. Transcribe audio → text (dùng model ASR, giống PhoWhisper trong ingestion)
-  3. Chuyển tiếp transcript sang text_query.process() — không duplicate logic
-
-NGUYÊN TẮC THIẾT KẾ:
-  Module này là adapter (bộ chuyển đổi), không phải retrieval engine.
-  Sau khi có text, TOÀN BỘ logic encode và search đều delegate sang text_query.py.
-  Không bao giờ gọi qdrant_repo trực tiếp từ module này.
-
-IMPORT RULES:
-  - Được gọi bởi: retrieval_pipeline.py
-  - Gọi: voice_query._transcribe() rồi text_query.process()
-  - Không gọi qdrant_repo trực tiếp.
+  2. Transcribe audio → text (dùng model ASR) trong worker thread không block event loop.
+  3. Chuyển tiếp transcript sang text_query.process()
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import os
+import tempfile
 from dataclasses import dataclass
 
 from serving.api.schema.retrieval import CandidateResult, TaskType
@@ -79,19 +72,9 @@ async def process(
 ) -> VoiceQueryOutput:
     """
     Xử lý toàn bộ luồng voice query: transcribe → delegate sang text_query.
-
-    Args:
-        query_input: VoiceQueryInput chứa audio bytes và metadata.
-        qdrant_client: AsyncQdrantClient đã inject.
-        text_embedder: TextEmbeddingWrapper singleton.
-        image_embedder: ImageEmbeddingWrapper singleton.
-        asr_model: ASR model (PhoWhisper) singleton đã load.
-
-    Returns:
-        VoiceQueryOutput với candidates, transcript, và enhanced_query.
     """
     import time
-    
+
     _t_start = time.perf_counter()
     transcript = await _transcribe(query_input.audio_bytes, query_input.audio_format, asr_model)
     _t_asr = time.perf_counter()
@@ -109,7 +92,6 @@ async def process(
         image_embedder=image_embedder,
     )
 
-
     return VoiceQueryOutput(
         candidates=text_output.candidates,
         transcript=transcript,
@@ -119,71 +101,52 @@ async def process(
 
 
 # =============================================================================
-# Internal Helper Functions (implement these)
+# Internal Helper Functions
 # =============================================================================
 
 async def _transcribe(audio_bytes: bytes, audio_format: str, asr_model) -> str:
     """
-    Chuyển đổi audio → text bằng model ASR.
-
-    Args:
-        audio_bytes: Raw audio bytes.
-        audio_format: Format của audio ('wav', 'mp3', 'webm', v.v.).
-        asr_model: ASR model (PhoWhisper pipeline) singleton đã load.
-
-    Returns:
-        Transcript string.
-
-    Raises:
-        ValueError: Nếu audio_bytes rỗng.
-        RuntimeError: Nếu ASR model không thể transcribe.
+    Chuyển đổi audio → text bằng model ASR trên worker thread (non-blocking).
     """
     if not audio_bytes:
         raise ValueError("audio_bytes không được rỗng")
 
     if asr_model is None:
-        logger.warning("ASR model là None, không thể transcribe audio real. Trả về transcript fallback.")
+        logger.warning("ASR model là None, không thể transcribe audio. Trả về transcript fallback.")
         return "[VOICE_TRANSCRIPT_FALLBACK]"
 
-    import tempfile
-    import os
+    def _sync_transcribe() -> str:
+        suffix = f".{audio_format.lstrip('.')}" if audio_format else ".wav"
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            tmp.write(audio_bytes)
+            tmp_path = tmp.name
 
-    suffix = f".{audio_format.lstrip('.')}" if audio_format else ".wav"
-    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-        tmp.write(audio_bytes)
-        tmp_path = tmp.name
+        try:
+            if callable(asr_model):
+                result = asr_model(tmp_path)
+                if isinstance(result, dict):
+                    return str(result.get("text", "") or "").strip()
+                elif isinstance(result, str):
+                    return result.strip()
+                else:
+                    return str(result).strip()
+            elif hasattr(asr_model, "transcribe"):
+                result = asr_model.transcribe(tmp_path)
+                if isinstance(result, tuple):
+                    segments, _ = result
+                    return " ".join([s.text for s in segments]).strip()
+                elif isinstance(result, dict):
+                    return str(result.get("text", "") or "").strip()
+                else:
+                    return str(result).strip()
+            else:
+                logger.warning(f"asr_model type {type(asr_model)} không supported callable/transcribe.")
+                return "[VOICE_TRANSCRIPT_FALLBACK]"
+        finally:
+            if os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    pass
 
-    try:
-        if callable(asr_model):
-            result = asr_model(tmp_path)
-            if isinstance(result, dict):
-                transcript = str(result.get("text", "") or "").strip()
-            elif isinstance(result, str):
-                transcript = result.strip()
-            else:
-                transcript = str(result).strip()
-            return transcript
-        elif hasattr(asr_model, "transcribe"):
-            # e.g., whisper model instance
-            result = asr_model.transcribe(tmp_path)
-            if isinstance(result, tuple):
-                # e.g. faster-whisper returns (segments, info)
-                segments, _ = result
-                transcript = " ".join([s.text for s in segments]).strip()
-            elif isinstance(result, dict):
-                transcript = str(result.get("text", "") or "").strip()
-            else:
-                transcript = str(result).strip()
-            return transcript
-        else:
-            logger.warning(f"asr_model type {type(asr_model)} không supported callable/transcribe.")
-            return "[VOICE_TRANSCRIPT_FALLBACK]"
-    except Exception as e:
-        logger.error(f"Lỗi trong quá trình transcribe audio: {e}", exc_info=True)
-        raise RuntimeError(f"Lỗi khi transcribe audio: {e}") from e
-    finally:
-        if os.path.exists(tmp_path):
-            try:
-                os.remove(tmp_path)
-            except Exception:
-                pass
+    return await asyncio.to_thread(_sync_transcribe)

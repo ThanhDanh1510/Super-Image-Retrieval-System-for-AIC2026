@@ -101,9 +101,10 @@ async def _resolve_collection(client: AsyncQdrantClient, collection_name: str) -
         if not await client.collection_exists(collection_name):
             for candidate in ["aic2026_clean_v3", "aic2026_v1", "collection_v1"]:
                 if await client.collection_exists(candidate):
+                    logger.debug(f"Resolved collection '{collection_name}' -> '{candidate}'")
                     return candidate
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"Could not check collection existence for '{collection_name}': {e}")
     return collection_name
 
 

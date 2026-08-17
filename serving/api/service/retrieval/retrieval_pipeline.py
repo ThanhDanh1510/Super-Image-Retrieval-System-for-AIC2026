@@ -2,29 +2,23 @@
 serving/api/service/retrieval/retrieval_pipeline.py
 ====================================================
 Orchestrator trung tâm — nhận query từ controller, điều hướng sang đúng module,
-và trả về danh sách candidates thô (chưa qua reranker hay temporal_aligner).
+thực hiện Reranking, TRAKE Temporal Alignment, và merge user choices.
 
 TRÁCH NHIỆM CỦA FILE NÀY:
   - Nhận InputType (text/voice/image) và TaskType (KIS/VQA/TRAKE).
-  - Gọi đúng module: text_query / voice_query / image_query.
-  - Trả về candidates thô cho controller.
-  - KHÔNG chạy reranker hay temporal_aligner ở đây.
-
-TRÁCH NHIỆM KHÔNG THUỘC FILE NÀY:
-  - Reranking (ViRanker, Jina) — controller gọi reranker/ riêng.
-  - Temporal alignment (TRAKE) — controller gọi temporal_aligner.py riêng.
-  - Encode model logic — thuộc text_query/image_query/voice_query.
-
-IMPORT RULES:
-  - Được gọi bởi: serving/api/controller/routes_*.py
-  - Gọi: text_query, image_query, voice_query (trong cùng package retrieval/)
-  - Không gọi qdrant_repo trực tiếp — đó là việc của các sub-modules.
+  - Điều phối: text_query / voice_query / image_query.
+  - Tự động thực hiện reranking (ViRanker + tùy chọn Jina M0) qua rerank_service.
+  - Tự động thực hiện TRAKE sub-event decomposition, timeline enrichment và DANTE alignment.
+  - Hợp nhất và ưu tiên các lựa chọn thủ công của người dùng (user_choices).
+  - Trả về kết quả cuối cùng hoàn chỉnh cho Controller.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
+from typing import Any, Optional
 
 from serving.api.schema.retrieval import (
     CandidateResult,
@@ -34,11 +28,16 @@ from serving.api.schema.retrieval import (
     VQARequest,
     TRAKERequest,
     ImageSearchRequest,
+    UserChoice,
 )
 from serving.api.service.retrieval import text_query, image_query, voice_query
 from serving.api.service.retrieval.text_query import TextQueryInput, TextQueryOutput
 from serving.api.service.retrieval.image_query import ImageQueryInput, ImageQueryOutput
 from serving.api.service.retrieval.voice_query import VoiceQueryInput, VoiceQueryOutput
+from serving.api.service.reranker import rerank_service
+from serving.api.service import temporal_aligner
+from serving.api.repo import qdrant_repo
+from serving.api.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -51,24 +50,24 @@ logger = logging.getLogger(__name__)
 class PipelineResult:
     """
     Kết quả trả về từ pipeline orchestrator.
-
-    Controller nhận PipelineResult, sau đó quyết định có chạy reranker hay không
-    trước khi build response cuối.
     """
     candidates: list[CandidateResult]
-    """Danh sách candidates thô từ Qdrant, chưa rerank."""
+    """Danh sách candidates xếp hạng (dùng cho KIS / VQA / Image search)."""
 
     task_type: TaskType
-    """TaskType gốc — controller dùng để chọn response schema."""
+    """TaskType gốc."""
 
     enhanced_query: str | None = None
-    """Query sau khi enhance (text/voice). None với image query."""
+    """Query sau khi enhance/dịch."""
 
     transcript: str | None = None
-    """Transcript ASR (chỉ với voice query). None với text/image."""
+    """Transcript ASR (với voice query)."""
 
     sub_events: list[str] | None = None
-    """Sub-events đã tách (chỉ với TRAKE). None với KIS/VQA/image."""
+    """Sub-events đã tách (với TRAKE)."""
+
+    chains: list[list[CandidateResult]] | None = None
+    """Danh sách chuỗi sự kiện aligned (với TRAKE)."""
 
 
 # =============================================================================
@@ -78,56 +77,106 @@ class PipelineResult:
 async def run(
     input_type: InputType,
     task_type: TaskType,
-    request,           # KISRequest | VQARequest | TRAKERequest | ImageSearchRequest
+    request: KISRequest | VQARequest | TRAKERequest | ImageSearchRequest,
     qdrant_client,
     text_embedder,
     image_embedder,
     asr_model,
+    model_registry=None,
 ) -> PipelineResult:
     """
     Entry point duy nhất cho toàn bộ retrieval pipeline.
-
-    Controller gọi hàm này và nhận về PipelineResult. Controller sau đó
-    quyết định có chạy reranker (và temporal_aligner với TRAKE) hay không.
-
-    Routing logic:
-      - InputType.TEXT  → text_query.process()
-      - InputType.VOICE → voice_query.process()   (sau đó delegate sang text_query)
-      - InputType.IMAGE → image_query.process()
-
-    Args:
-        input_type: Loại đầu vào của query.
-        task_type: KIS / VQA / TRAKE.
-        request: Pydantic request model từ controller.
-        qdrant_client: AsyncQdrantClient singleton.
-        text_embedder: TextEmbeddingWrapper singleton.
-        image_embedder: ImageEmbeddingWrapper singleton.
-        asr_model: ASR model singleton (PhoWhisper). None nếu không load.
-
-    Returns:
-        PipelineResult với candidates thô và metadata.
-
-    Raises:
-        ValueError: Nếu input_type không hỗ trợ.
-        NotImplementedError: Nếu combination (input_type, task_type) chưa implement.
     """
     logger.info(f"Pipeline run: input_type={input_type}, task_type={task_type}")
 
+    if task_type == TaskType.TRAKE and isinstance(request, TRAKERequest):
+        return await _run_trake(
+            request=request,
+            qdrant_client=qdrant_client,
+            text_embedder=text_embedder,
+            image_embedder=image_embedder,
+            asr_model=asr_model,
+            model_registry=model_registry,
+        )
+
+    # 1. Thu thập candidates thô theo input type
     if input_type == InputType.TEXT:
-        return await _run_text(request, task_type, qdrant_client, text_embedder, image_embedder)
-
+        pipeline_res = await _run_text(request, task_type, qdrant_client, text_embedder, image_embedder)
     elif input_type == InputType.VOICE:
-        return await _run_voice(request, task_type, qdrant_client, text_embedder, image_embedder, asr_model)
-
+        pipeline_res = await _run_voice(request, task_type, qdrant_client, text_embedder, image_embedder, asr_model)
     elif input_type == InputType.IMAGE:
-        return await _run_image(request, qdrant_client, image_embedder)
-
+        pipeline_res = await _run_image(request, qdrant_client, image_embedder)
     else:
         raise ValueError(f"Unsupported input_type: {input_type}")
 
+    # 2. Thực hiện Rerank nếu có candidates và là task KIS/VQA
+    candidates = pipeline_res.candidates
+    if candidates and task_type in (TaskType.KIS, TaskType.VQA):
+        use_reranker = getattr(request, "use_reranker", False)
+        raw_query = getattr(request, "query", "")
+        candidates = await rerank_service.rerank(
+            query=raw_query,
+            candidates=candidates,
+            enhanced_query=pipeline_res.enhanced_query,
+            keyframes_root_dir=str(get_settings().DATA_DIR),
+            use_visual_reranker=use_reranker,
+            model_registry=model_registry,
+        )
+
+    # 3. Ghép user choices (nếu có) lên đầu danh sách
+    user_choices = getattr(request, "user_choices", [])
+    top_k = getattr(request, "top_k", 100)
+    final_candidates = _merge_user_choices(user_choices, candidates, top_k)
+
+    pipeline_res.candidates = final_candidates
+    return pipeline_res
+
 
 # =============================================================================
-# Private Routing Functions (implement these)
+# Helper: User Choice Merging
+# =============================================================================
+
+def _merge_user_choices(
+    user_choices: list[UserChoice],
+    candidates: list[CandidateResult],
+    top_k: int,
+) -> list[CandidateResult]:
+    """Hợp nhất các frame người dùng đã chọn bằng tay lên đầu danh sách kết quả."""
+    final_results: list[CandidateResult] = []
+    seen: set[tuple[str, int]] = set()
+
+    for choice in user_choices:
+        key = (choice.video_id, choice.frame_id)
+        if key not in seen:
+            seen.add(key)
+            final_results.append(
+                CandidateResult(
+                    video_id=choice.video_id,
+                    frame_id=choice.frame_id,
+                    scene_id=choice.scene_id,
+                    timestamp_start=choice.timestamp_start,
+                    timestamp_end=choice.timestamp_end,
+                    timestamp_mid=choice.timestamp_mid,
+                    keyframe_path=choice.keyframe_path,
+                    ocr_text=choice.ocr_text,
+                    asr_text=choice.asr_text,
+                    score=1.0,
+                )
+            )
+
+    for cand in candidates:
+        if len(final_results) >= top_k:
+            break
+        key = (cand.video_id, cand.frame_id)
+        if key not in seen:
+            seen.add(key)
+            final_results.append(cand)
+
+    return final_results
+
+
+# =============================================================================
+# Private Routing Functions
 # =============================================================================
 
 async def _run_text(
@@ -137,9 +186,6 @@ async def _run_text(
     text_embedder,
     image_embedder,
 ) -> PipelineResult:
-    """
-    Route text query sang text_query.process() và wrap kết quả thành PipelineResult.
-    """
     raw_query = getattr(request, "query", "")
     top_k = getattr(request, "top_k", 100)
     search_mode = getattr(request, "search_mode", "all")
@@ -174,9 +220,6 @@ async def _run_voice(
     image_embedder,
     asr_model,
 ) -> PipelineResult:
-    """
-    Route voice query sang voice_query.process() và wrap kết quả.
-    """
     import base64
 
     query_data = getattr(request, "query", b"")
@@ -222,9 +265,6 @@ async def _run_image(
     qdrant_client,
     image_embedder,
 ) -> PipelineResult:
-    """
-    Route image query sang image_query.process() và wrap kết quả.
-    """
     import base64
 
     image_base64 = getattr(request, "image_base64", "")
@@ -251,4 +291,140 @@ async def _run_image(
         enhanced_query=None,
         transcript=None,
         sub_events=None,
+    )
+
+
+# =============================================================================
+# TRAKE Orchestration
+# =============================================================================
+
+async def _run_trake(
+    request: TRAKERequest,
+    qdrant_client,
+    text_embedder,
+    image_embedder,
+    asr_model,
+    model_registry=None,
+) -> PipelineResult:
+    """
+    Xử lý tìm kiếm chuỗi thời gian (TRAKE):
+    1. Phân rã query thành sub-events
+    2. Retrieve candidates song song cho từng sub-event
+    3. Enrich video timeline
+    4. DANTE Alignment thuật toán Dynamic Programming
+    """
+    if request.input_type == InputType.VOICE:
+        base_res = await _run_voice(request, TaskType.TRAKE, qdrant_client, text_embedder, image_embedder, asr_model)
+    else:
+        base_res = await _run_text(request, TaskType.TRAKE, qdrant_client, text_embedder, image_embedder)
+
+    sub_events = base_res.sub_events
+    results: list[list[CandidateResult]] = []
+
+    if sub_events and len(sub_events) >= 2:
+        n_events = request.num_events
+        if len(sub_events) > n_events:
+            sub_events = sub_events[:n_events]
+        elif len(sub_events) < n_events:
+            while len(sub_events) < n_events:
+                sub_events.append(request.query)
+
+        tasks = [
+            text_query.process(
+                query_input=text_query.TextQueryInput(
+                    raw_query=ev_text,
+                    task_type=TaskType.KIS,
+                    top_k=request.top_k,
+                ),
+                qdrant_client=qdrant_client,
+                text_embedder=text_embedder,
+                image_embedder=image_embedder,
+            )
+            for ev_text in sub_events
+        ]
+        outputs = await asyncio.gather(*tasks)
+        event_candidates_list = [out.candidates for out in outputs]
+
+        # Thu thập top video_ids để enrich
+        candidate_vids: set[str] = set()
+        for cand_list in event_candidates_list:
+            for c in cand_list[:20]:
+                candidate_vids.add(c.video_id)
+
+        enrich_tasks = [
+            qdrant_repo.get_keyframes_by_video_id(qdrant_client, v_id)
+            for v_id in list(candidate_vids)[:15]
+        ]
+        enriched_results = await asyncio.gather(*enrich_tasks)
+        for video_kfs in enriched_results:
+            if video_kfs:
+                for ev_cands in event_candidates_list:
+                    existing_frames = {c.frame_id for c in ev_cands}
+                    for kf in video_kfs:
+                        if kf.frame_id not in existing_frames:
+                            ev_cands.append(kf)
+
+        aligned_chains = temporal_aligner.align(
+            event_candidates=event_candidates_list,
+            max_results=request.top_k,
+        )
+        results = aligned_chains
+
+    if not results:
+        # Fallback grouping by video_id
+        candidates = base_res.candidates
+        n = request.num_events
+        by_video: dict[str, list[CandidateResult]] = {}
+        for cand in candidates:
+            by_video.setdefault(cand.video_id, []).append(cand)
+
+        for v_id, v_cands in by_video.items():
+            seen_ts: set[float] = set()
+            uniq_v_cands = []
+            for c in sorted(v_cands, key=lambda x: (x.timestamp_mid, x.frame_id)):
+                t_rounded = round(c.timestamp_mid, 2)
+                if t_rounded not in seen_ts:
+                    seen_ts.add(t_rounded)
+                    uniq_v_cands.append(c)
+
+            if len(uniq_v_cands) >= n:
+                for i in range(0, len(uniq_v_cands) - n + 1):
+                    results.append(uniq_v_cands[i : i + n])
+
+    # Final Guard: Enforce strict single video & monotonic timestamps
+    final_chains: list[list[CandidateResult]] = []
+    n_req = request.num_events
+    seen_chain_signatures: set[tuple[str, ...]] = set()
+
+    for chain in results:
+        if not chain or len(chain) != n_req:
+            continue
+
+        target_vid = chain[0].video_id
+        if not all(c.video_id == target_vid for c in chain):
+            continue
+
+        sorted_chain = sorted(chain, key=lambda c: (c.timestamp_mid, c.frame_id))
+        has_duplicates = False
+        for i in range(len(sorted_chain) - 1):
+            if round(sorted_chain[i].timestamp_mid, 2) >= round(sorted_chain[i + 1].timestamp_mid, 2):
+                has_duplicates = True
+                break
+
+        if not has_duplicates:
+            sig = tuple(f"{c.video_id}_{c.frame_id}" for c in sorted_chain)
+            if sig not in seen_chain_signatures:
+                seen_chain_signatures.add(sig)
+                final_chains.append(sorted_chain)
+
+    if len(final_chains) > request.top_k:
+        final_chains = final_chains[:request.top_k]
+
+    return PipelineResult(
+        candidates=[],
+        task_type=TaskType.TRAKE,
+        enhanced_query=base_res.enhanced_query,
+        transcript=base_res.transcript,
+        sub_events=sub_events,
+        chains=final_chains,
     )
