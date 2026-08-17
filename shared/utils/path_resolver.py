@@ -22,6 +22,7 @@ def resolve_keyframe_path(
     """
     if data_dir is None:
         data_dir = get_settings().DATA_DIR
+    data_dir = Path(data_dir)
 
     frame_id_str = f"{frame_id:05d}"
     parts = video_id.split("_")
@@ -46,12 +47,13 @@ def resolve_keyframe_path(
     return None
 
 
-def resolve_video_path(video_id: str, data_dir: Optional[Path] = None) -> Optional[Path]:
+def resolve_video_path(video_id: str, data_dir: Optional[Path | str] = None) -> Optional[Path]:
     """
     Tìm file video gốc trên đĩa cứng (.mp4, .mkv, .webm).
     """
     if data_dir is None:
         data_dir = get_settings().DATA_DIR
+    data_dir = Path(data_dir)
 
     parts = video_id.split("_")
     grp = parts[0] if len(parts) >= 2 else video_id
