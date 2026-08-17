@@ -546,7 +546,7 @@ def _scored_point_to_candidate(scored_point: any) -> CandidateResult:
         ocr_text=payload.get("ocr_text", ""),
         asr_text=payload.get("asr_text", ""),
         description=desc,
-        score=float(getattr(scored_point, "score", 0.0) or 0.0),
+        score=max(0.0, min(1.0, float(getattr(scored_point, "score", 0.0) or 0.0))),
     )
 
 
