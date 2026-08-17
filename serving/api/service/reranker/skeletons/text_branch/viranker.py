@@ -1,59 +1,30 @@
 """
 serving/api/service/reranker/skeletons/text_branch/viranker.py
 ==============================================================
-Nhánh rerank văn bản sử dụng ViRanker (BGE-M3 / MMARCO-VI tuned) (Skeleton).
-
-CONSTRAINTS:
-  - Lazy load: Khởi tạo model lần đầu khi gọi hàm, cache lại. KHÔNG khởi tạo ở module level.
-  - Batch inference: Xử lý toàn bộ candidates trong 1 forward pass. KHÔNG loop từng candidate.
+Nhánh rerank văn bản sử dụng ViRanker (BGE-M3 / MMARCO-VI tuned).
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Optional
 from serving.api.schema.retrieval import CandidateResult
 
 logger = logging.getLogger(__name__)
 
-# Cache cho model và tokenizer
-_MODEL_CACHE: dict[str, Any] = {}
 
-def _get_model():
-    """Lazy load model và tokenizer BAAI/bge-reranker-v2-m3 vào cache."""
-    if "model" not in _MODEL_CACHE or "tokenizer" not in _MODEL_CACHE:
-        try:
-            import torch
-            from transformers import AutoModelForSequenceClassification, AutoTokenizer
-
-            model_name = "BAAI/bge-reranker-v2-m3"
-            logger.info(f"Loading ViRanker text model: {model_name} on GPU...")
-            tokenizer = AutoTokenizer.from_pretrained(model_name)
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-            model = AutoModelForSequenceClassification.from_pretrained(
-                model_name,
-                torch_dtype=torch.float16,
-                device_map=device,
-            )
-            model.eval()
-
-            _MODEL_CACHE["tokenizer"] = tokenizer
-            _MODEL_CACHE["model"] = model
-            _MODEL_CACHE["device"] = device
-        except Exception as e:
-            logger.warning(f"Không thể load model ViRanker ({e}). Dùng CPU mock score.")
-            _MODEL_CACHE["mock"] = True
-
-    return _MODEL_CACHE
-
-
-def score(query: str, candidates: list[CandidateResult]) -> list[float]:
+def score(
+    query: str,
+    candidates: list[CandidateResult],
+    model_bundle: Optional[dict[str, Any]] = None,
+) -> list[float]:
     """
     Tính điểm tương đồng ngữ nghĩa giữa query và description + ocr_text + asr_text của từng candidate.
 
     Args:
         query: Query text tiếng Anh hoặc tiếng Việt đã chuẩn hóa.
         candidates: Danh sách CandidateResult cần rerank.
+        model_bundle: Dict chứa model, tokenizer, device (từ ModelRegistry).
 
     Returns:
         List[float]: Danh sách điểm số (cùng kích thước và thứ tự với candidates).
@@ -61,19 +32,34 @@ def score(query: str, candidates: list[CandidateResult]) -> list[float]:
     if not candidates:
         return []
 
-    cache = _get_model()
+    # Nếu không truyền model_bundle, nạp standalone
+    if model_bundle is None:
+        try:
+            import torch
+            from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
-    if cache.get("mock", False):
-        # Fallback cho unit test / offline: Trả về score gốc từ candidate
-        return [float(c.score) for c in candidates]
+            model_name = "BAAI/bge-reranker-v2-m3"
+            tokenizer = AutoTokenizer.from_pretrained(model_name)
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            model = AutoModelForSequenceClassification.from_pretrained(
+                model_name,
+                torch_dtype=torch.float16 if device == "cuda" else torch.float32,
+                device_map=device,
+            )
+            model.eval()
+            model_bundle = {"model": model, "tokenizer": tokenizer, "device": device}
+        except Exception as e:
+            logger.error(f"Không thể load model ViRanker: {e}. Fallback score gốc.")
+            return [float(c.score) for c in candidates]
 
     try:
         import torch
-        model = cache["model"]
-        tokenizer = cache["tokenizer"]
-        device = cache["device"]
 
-        # Chuẩn bị cặp (query, doc_text) bao gồm description + OCR + ASR (giới hạn độ dài)
+        model = model_bundle["model"]
+        tokenizer = model_bundle["tokenizer"]
+        device = model_bundle.get("device", "cpu")
+
+        # Chuẩn bị cặp (query, doc_text) bao gồm description + OCR + ASR
         pairs = []
         for c in candidates:
             desc_text = getattr(c, "description", "") or ""
@@ -94,7 +80,7 @@ def score(query: str, candidates: list[CandidateResult]) -> list[float]:
             return_tensors="pt",
         ).to(model.device)
 
-        with torch.no_grad(), torch.cuda.amp.autocast(enabled=(device == "cuda")):
+        with torch.no_grad():
             outputs = model(**inputs)
             logits = outputs.logits
             if logits.dim() > 1:
@@ -109,4 +95,3 @@ def score(query: str, candidates: list[CandidateResult]) -> list[float]:
     except Exception as e:
         logger.error(f"Lỗi trong quá trình rerank ViRanker: {e}. Fallback score gốc.")
         return [float(c.score) for c in candidates]
-
