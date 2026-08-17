@@ -257,6 +257,39 @@ python -m aggregation.apply_filter --delete-images
 
 ---
 
+## ⏱️ Công cụ Bù đắp Keyframe & Kiểm tra Độ phủ Timeline (Gap Filling & Coverage)
+
+Trong quá trình thi AIC, việc video bị thiếu keyframe ở các phân đoạn dài hoặc sau khi lọc bỏ TVC/ảnh thừa có thể tạo ra các "khoảng trống" (timeline gaps $> 30\text{s}$). Bộ công cụ sau giúp tự động phát hiện, trích xuất bổ sung keyframe và chuẩn hóa $100\%$ độ phủ timeline cho toàn bộ dataset:
+
+### 1. Báo cáo & Kiểm tra Độ phủ Timeline (Coverage Audit)
+Quét toàn bộ các video từ batch `L21` đến `L30` (hoặc video mới thêm vào `data/video/`), phân loại trạng thái `PASS` (khoảng cách tối đa $\le 30\text{s}$), `WARNING` ($30\text{s} - 60\text{s}$), hoặc `FAILED` ($> 60\text{s}$):
+
+```powershell
+python tools/report_all_batches_coverage.py
+```
+
+### 2. Tự động Bù đắp Keyframe vào các khoảng Gap $> 30\text{s}$ (`tools/fill_gap_keyframes.py`)
+Khi bạn thêm video mới vào `data/video/` hoặc sau khi lọc bớt ảnh rác/TVC, chạy script này để tự động bù kín toàn bộ timeline:
+
+```powershell
+python tools/fill_gap_keyframes.py
+```
+
+**Cơ chế hoạt động:**
+- 🔍 **Tự động quét**: So sánh mốc thời gian giữa các keyframe hiện có trong `data/unified/scene_metadata.parquet` với tổng thời lượng thực tế của file video.
+- ✂️ **Trích xuất ảnh WebP**: Bổ sung keyframe tại các mốc phân bố đều ($\le 20-30\text{s}$) cho các khoảng gap ở đầu, giữa hoặc cuối video, lưu trực tiếp vào thư mục `data/image/{Batch}/{Batch}/{Vxxx}/{frame_id}.webp`.
+- ⚡ **Sinh Vector CLIP trên GPU**: Tự động đưa ảnh qua mô hình **CLIP ViT-L/14** để tạo visual embeddings 1024 chiều.
+- 🔄 **Đồng bộ toàn bộ Unified Dataset**: Tự động cập nhật và ghi đè đồng bộ các file `scene_metadata.parquet`, `ocr_text.parquet`, `asr_text.parquet`, `scene_descriptions.parquet`, `image_vectors.npy`, `ocr_vectors.npy`, `asr_vectors.npy`, `description_embeddings.pt`, và `scene_ids.txt`.
+
+### 3. Hiệu chuẩn FPS và Thời gian Video (`tools/calibrate_all_video_fps.py`)
+Đảm bảo tất cả keyframe có mốc thời gian `timestamp_mid = frame_id / FPS_thực_tế` chính xác tuyệt đối (giải quyết triệt để vấn đề video 29.97/30 FPS bị tính nhầm theo 25 FPS):
+
+```powershell
+python tools/calibrate_all_video_fps.py
+```
+
+---
+
 ## 📁 Indexing & Alias Management
 
 ### Nạp dữ liệu vào Qdrant
