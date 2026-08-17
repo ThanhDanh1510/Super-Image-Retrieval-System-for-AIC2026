@@ -59,18 +59,26 @@ def score(
         tokenizer = model_bundle["tokenizer"]
         device = model_bundle.get("device", "cpu")
 
-        # Chuẩn bị cặp (query, doc_text) bao gồm description + OCR + ASR
+        # Chuẩn bị query đa dạng hoa/thường cho cross-encoder
+        words = query.strip().split()
+        if len(words) <= 6:
+            query_for_model = f"{query} {query.title()}"
+        else:
+            query_for_model = query
+
+        # Chuẩn bị cặp (query, doc_text) bao gồm OCR + Description + ASR
+        # Ưu tiên OCR ở đầu để không bị cắt xén (truncate) bởi văn bản mô tả dài
         pairs = []
         for c in candidates:
             desc_text = getattr(c, "description", "") or ""
             ocr_text = getattr(c, "ocr_text", "") or ""
             asr_text = getattr(c, "asr_text", "") or ""
-            doc = f"{desc_text} {ocr_text} {asr_text}".strip()
+            doc = f"Văn bản/Chữ trên hình: {ocr_text} | Mô tả hình ảnh: {desc_text} | Lời thoại âm thanh: {asr_text}".strip()
             if not doc:
                 doc = "[EMPTY]"
             if len(doc) > 2000:
                 doc = doc[:2000]
-            pairs.append([query, doc])
+            pairs.append([query_for_model, doc])
 
         inputs = tokenizer(
             pairs,
