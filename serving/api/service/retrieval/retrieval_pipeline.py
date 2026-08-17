@@ -109,19 +109,20 @@ async def run(
     else:
         raise ValueError(f"Unsupported input_type: {input_type}")
 
-    # 2. Thực hiện Rerank nếu có candidates và là task KIS/VQA
+    # 2. Thực hiện Rerank nếu có candidates, là input TEXT/VOICE có câu query rõ ràng
     candidates = pipeline_res.candidates
-    if candidates and task_type in (TaskType.KIS, TaskType.VQA):
-        use_reranker = getattr(request, "use_reranker", False)
+    if candidates and input_type in (InputType.TEXT, InputType.VOICE) and task_type in (TaskType.KIS, TaskType.VQA):
         raw_query = getattr(request, "query", "")
-        candidates = await rerank_service.rerank(
-            query=raw_query,
-            candidates=candidates,
-            enhanced_query=pipeline_res.enhanced_query,
-            keyframes_root_dir=str(get_settings().DATA_DIR),
-            use_visual_reranker=use_reranker,
-            model_registry=model_registry,
-        )
+        if raw_query and raw_query.strip():
+            use_reranker = getattr(request, "use_reranker", False)
+            candidates = await rerank_service.rerank(
+                query=raw_query,
+                candidates=candidates,
+                enhanced_query=pipeline_res.enhanced_query,
+                keyframes_root_dir=str(get_settings().DATA_DIR),
+                use_visual_reranker=use_reranker,
+                model_registry=model_registry,
+            )
 
     # 3. Ghép user choices (nếu có) lên đầu danh sách
     user_choices = getattr(request, "user_choices", [])
