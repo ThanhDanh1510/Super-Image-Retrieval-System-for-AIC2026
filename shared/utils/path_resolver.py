@@ -24,23 +24,30 @@ def resolve_keyframe_path(
         data_dir = get_settings().DATA_DIR
     data_dir = Path(data_dir)
 
-    frame_id_str = f"{frame_id:05d}"
+    fid_variants = [str(frame_id), f"{frame_id:05d}", f"{frame_id:06d}"]
     parts = video_id.split("_")
     if len(parts) >= 2:
         grp, vsub = parts[0], parts[1]
     else:
         grp, vsub = video_id, video_id
 
-    candidates = [
-        data_dir / "image" / grp / grp / vsub / f"{frame_id_str}.webp",
-        data_dir / "image" / grp / grp / vsub / f"{frame_id_str}.jpg",
-        data_dir / "image" / grp / f"{video_id}" / f"{frame_id_str}.webp",
-        data_dir / "image" / grp / f"{video_id}" / f"{frame_id_str}.jpg",
-        data_dir / "image" / f"{video_id}" / f"{frame_id_str}.webp",
-        data_dir / "image" / f"{video_id}" / f"{frame_id_str}.jpg",
-        data_dir / "unified" / "keyframes" / keyframe_path if keyframe_path else None,
-        data_dir / keyframe_path if keyframe_path else None,
-    ]
+    candidates = []
+    for fid_s in fid_variants:
+        for ext in ["webp", "jpg", "png"]:
+            candidates.extend([
+                data_dir / "image" / grp / grp / vsub / f"{fid_s}.{ext}",
+                data_dir / "image" / grp / vsub / f"{fid_s}.{ext}",
+                data_dir / "image" / grp / f"{video_id}" / f"{fid_s}.{ext}",
+                data_dir / "image" / f"{video_id}" / f"{fid_s}.{ext}",
+            ])
+
+    if keyframe_path:
+        candidates.extend([
+            data_dir / "unified" / "keyframes" / keyframe_path,
+            data_dir / keyframe_path,
+            Path(keyframe_path),
+        ])
+
     for p in candidates:
         if p and p.is_file() and p.exists():
             return p
