@@ -9,7 +9,7 @@ const state = {
   mode: "kis", // kis, vqa, trake
   searchMode: "all", // all, embedding, ocr, asr
   query: "",
-  topK: 30,
+  topK: 50,
   useViranker: true,
   useJinaM0: false,
   selectedItems: new Map(), // key -> CandidateResult
@@ -81,8 +81,12 @@ function setupControls() {
   // Top-K
   const topKInput = document.getElementById("top-k-input");
   if (topKInput) {
+    state.topK = parseInt(topKInput.value, 10) || 50;
+    topKInput.addEventListener("input", (e) => {
+      state.topK = parseInt(e.target.value, 10) || 50;
+    });
     topKInput.addEventListener("change", (e) => {
-      state.topK = parseInt(e.target.value, 10) || 30;
+      state.topK = parseInt(e.target.value, 10) || 50;
     });
   }
 
