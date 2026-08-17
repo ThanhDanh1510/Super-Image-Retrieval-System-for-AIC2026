@@ -78,7 +78,8 @@ def fuse(
     for i, cand in enumerate(candidates):
         fused_val = alpha * t_norm[i] + (1.0 - alpha) * c_norm[i]
         # Pydantic CandidateResult
-        new_cand = cand.model_copy(update={"score": round(float(fused_val), 6)})
+        clamped_score = round(max(0.0, min(1.0, float(fused_val))), 6)
+        new_cand = cand.model_copy(update={"score": clamped_score})
         fused_candidates.append(new_cand)
 
     # 5. Sắp xếp giảm dần theo fused score

@@ -16,9 +16,9 @@ KHÔNG ĐƯỢC:
 from __future__ import annotations
 
 from enum import Enum
-from typing import Annotated
+from typing import Annotated, Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 # =============================================================================
@@ -74,6 +74,18 @@ class CandidateResult(BaseModel):
         le=1.0,
         description="Điểm relevance tổng hợp sau RRF (hoặc sau reranker). Cao hơn = tốt hơn.",
     )
+
+    @field_validator("score", mode="before")
+    @classmethod
+    def clamp_score(cls, v: Any) -> float:
+        """Tự động kẹp giá trị điểm số về khoảng an toàn [0.0, 1.0] tránh lỗi float precision."""
+        if v is None:
+            return 0.0
+        try:
+            val = float(v)
+            return max(0.0, min(1.0, val))
+        except (ValueError, TypeError):
+            return 0.0
 
 
 # =============================================================================
