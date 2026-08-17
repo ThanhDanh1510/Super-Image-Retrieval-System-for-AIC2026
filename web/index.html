@@ -100,11 +100,16 @@
             <input type="number" id="num-events-input" min="2" max="10" value="3" class="number-input-field" />
           </div>
 
-          <div class="control-group">
-            <label class="spider-switch" title="Bật/Tắt Reranker (Bật sẽ chính xác hơn nhưng tăng độ trễ ~0.2s)">
-              <input type="checkbox" id="use-reranker-checkbox" />
+          <div class="control-group reranker-switch-group">
+            <label class="spider-switch switch-viranker" title="ViRanker Text Cross-Encoder (bge-reranker-v2-m3 trên OCR/ASR/Caption - Độ trễ ~0.2s)">
+              <input type="checkbox" id="use-viranker-checkbox" checked />
               <span class="slider"></span>
-              <span class="label-text">🚀 Reranker</span>
+              <span class="label-text">📝 ViRanker</span>
+            </label>
+            <label class="spider-switch switch-jina" title="Jina M0 Visual Cross-Encoder (jina-reranker-m0 trực tiếp trên pixel ảnh - Độ trễ ~1-2s)">
+              <input type="checkbox" id="use-jina-checkbox" />
+              <span class="slider"></span>
+              <span class="label-text">👁️ Jina M0</span>
             </label>
           </div>
 

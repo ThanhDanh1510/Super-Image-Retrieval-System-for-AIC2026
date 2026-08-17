@@ -10,7 +10,8 @@ const state = {
   searchMode: "all", // all, embedding, ocr, asr
   query: "",
   topK: 30,
-  useReranker: false,
+  useViranker: true,
+  useJinaM0: false,
   selectedItems: new Map(), // key -> CandidateResult
   rawResults: [],
   selectedFile: null,
@@ -167,14 +168,33 @@ function setupControls() {
     });
   }
 
-  // Reranker Checkbox Switch
-  const rerankerCheckbox = document.getElementById("use-reranker-checkbox");
-  if (rerankerCheckbox) {
-    // Sync UI with state initial value
-    rerankerCheckbox.checked = state.useReranker;
-    rerankerCheckbox.addEventListener("change", (e) => {
-      state.useReranker = e.target.checked;
-      statusBar.textContent = `⚙️ Reranker đã được ${state.useReranker ? "BẬT" : "TẮT"}`;
+  // Reranker Checkbox Switches (ViRanker Text & Jina M0 Visual)
+  function updateRerankerStatus() {
+    const parts = [];
+    if (state.useViranker) parts.push("ViRanker Text");
+    if (state.useJinaM0) parts.push("Jina M0 Visual");
+    if (parts.length === 0) {
+      statusBar.textContent = "⚙️ Reranker: Đã TẮT (Chế độ tìm kiếm siêu tốc <50ms)";
+    } else {
+      statusBar.textContent = `⚙️ Reranker: Đang BẬT [${parts.join(" + ")}]`;
+    }
+  }
+
+  const virankerCheckbox = document.getElementById("use-viranker-checkbox");
+  if (virankerCheckbox) {
+    virankerCheckbox.checked = state.useViranker;
+    virankerCheckbox.addEventListener("change", (e) => {
+      state.useViranker = e.target.checked;
+      updateRerankerStatus();
+    });
+  }
+
+  const jinaCheckbox = document.getElementById("use-jina-checkbox");
+  if (jinaCheckbox) {
+    jinaCheckbox.checked = state.useJinaM0;
+    jinaCheckbox.addEventListener("change", (e) => {
+      state.useJinaM0 = e.target.checked;
+      updateRerankerStatus();
     });
   }
 }
@@ -278,7 +298,7 @@ async function triggerSearch() {
         formData.append("file", blob, "query_image.webp");
       }
 
-      const resp = await fetch(`${API_BASE}/api/v1/similar-image?top_k=${state.topK}&use_reranker=${state.useReranker}`, {
+      const resp = await fetch(`${API_BASE}/api/v1/similar-image?top_k=${state.topK}&use_viranker=${state.useViranker}&use_jina_m0=${state.useJinaM0}`, {
         method: "POST",
         body: formData,
       });
@@ -318,7 +338,8 @@ async function triggerSearch() {
       search_mode: state.searchMode,
       top_k: state.topK,
       user_choices: [],
-      use_reranker: state.useReranker
+      use_viranker: state.useViranker,
+      use_jina_m0: state.useJinaM0
     };
 
     if (state.mode === "vqa") {

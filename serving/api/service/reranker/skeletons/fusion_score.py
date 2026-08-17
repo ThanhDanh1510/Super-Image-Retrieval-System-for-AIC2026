@@ -64,23 +64,30 @@ def fuse(
             except Exception:
                 alpha = 0.6
 
-    # 2. Xử lý khớp length
+    # 2. Xử lý khớp length và điểm số từng nhánh
     n = len(candidates)
-    t_scores = list(text_scores) if len(text_scores) == n else [c.score for c in candidates]
-    c_scores = list(crossmodal_scores) if (crossmodal_scores is not None and len(crossmodal_scores) == n) else [c.score for c in candidates]
-
-    # 3. Min-Max Normalization
-    t_norm = _normalize(t_scores)
-    c_norm = _normalize(c_scores)
-
-    # 4. Hợp nhất điểm số
-    fused_candidates = []
-    for i, cand in enumerate(candidates):
-        fused_val = alpha * t_norm[i] + (1.0 - alpha) * c_norm[i]
-        # Pydantic CandidateResult
-        clamped_score = round(max(0.0, min(1.0, float(fused_val))), 6)
-        new_cand = cand.model_copy(update={"score": clamped_score})
-        fused_candidates.append(new_cand)
+    if text_scores is not None and crossmodal_scores is not None:
+        t_norm = _normalize(list(text_scores) if len(text_scores) == n else [c.score for c in candidates])
+        c_norm = _normalize(list(crossmodal_scores) if len(crossmodal_scores) == n else [c.score for c in candidates])
+        fused_candidates = []
+        for i, cand in enumerate(candidates):
+            fused_val = alpha * t_norm[i] + (1.0 - alpha) * c_norm[i]
+            clamped_score = round(max(0.0, min(1.0, float(fused_val))), 6)
+            fused_candidates.append(cand.model_copy(update={"score": clamped_score}))
+    elif text_scores is not None:
+        t_norm = _normalize(list(text_scores) if len(text_scores) == n else [c.score for c in candidates])
+        fused_candidates = []
+        for i, cand in enumerate(candidates):
+            clamped_score = round(max(0.0, min(1.0, float(t_norm[i]))), 6)
+            fused_candidates.append(cand.model_copy(update={"score": clamped_score}))
+    elif crossmodal_scores is not None:
+        c_norm = _normalize(list(crossmodal_scores) if len(crossmodal_scores) == n else [c.score for c in candidates])
+        fused_candidates = []
+        for i, cand in enumerate(candidates):
+            clamped_score = round(max(0.0, min(1.0, float(c_norm[i]))), 6)
+            fused_candidates.append(cand.model_copy(update={"score": clamped_score}))
+    else:
+        return candidates
 
     # 5. Sắp xếp giảm dần theo fused score
     fused_candidates.sort(key=lambda x: x.score, reverse=True)
