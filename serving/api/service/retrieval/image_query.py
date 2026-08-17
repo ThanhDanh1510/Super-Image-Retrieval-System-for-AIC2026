@@ -107,7 +107,8 @@ async def _encode_image(
     if not image_bytes:
         raise ValueError("image_bytes không được rỗng")
 
-    vec = embedder.encode_from_bytes(image_bytes)
+    import asyncio
+    vec = await asyncio.to_thread(embedder.encode_from_bytes, image_bytes)
     if hasattr(vec, "tolist"):
         return vec.tolist()
     return list(vec)

@@ -517,32 +517,28 @@ function renderSingleCard(candidate) {
 
 // --- Quick 1-Click Similar Image Search ---
 async function searchSimilarByCandidate(cand) {
-  statusBar.textContent = `🖼️ Đang nạp ảnh mẫu ${cand.video_id} #f${cand.frame_id}...`;
+  statusBar.textContent = `🖼️ Đang tìm ảnh tương tự với ${cand.video_id} #f${cand.frame_id}...`;
   try {
     const imgUrl = `${API_BASE}/api/v1/image/${cand.video_id}/${cand.frame_id}`;
     const res = await fetch(imgUrl);
     if (!res.ok) throw new Error("Không thể tải file ảnh keyframe mẫu");
     const blob = await res.blob();
     state.selectedFile = new File([blob], `${cand.video_id}_${cand.frame_id}.webp`, { type: blob.type || "image/webp" });
+    state.selectedImageBase64 = null;
 
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      state.selectedImageBase64 = evt.target.result.split(",")[1];
-      const chipEl = document.getElementById("image-preview-chip");
-      const chipNameEl = document.getElementById("chip-filename");
-      if (chipNameEl) chipNameEl.textContent = `Ảnh mẫu: ${cand.video_id} #f${cand.frame_id}`;
-      if (chipEl) chipEl.style.display = "inline-flex";
+    const chipEl = document.getElementById("image-preview-chip");
+    const chipNameEl = document.getElementById("chip-filename");
+    if (chipNameEl) chipNameEl.textContent = `Ảnh mẫu: ${cand.video_id} #f${cand.frame_id}`;
+    if (chipEl) chipEl.style.display = "inline-flex";
 
-      // Tự động đóng Lightbox nếu đang mở và thực hiện tìm kiếm
-      const modal = document.getElementById("lightbox-modal");
-      if (modal && modal.style.display !== "none") {
-        modal.style.display = "none";
-        closeLightboxVideo();
-      }
+    // Tự động đóng Lightbox nếu đang mở và thực hiện tìm kiếm tức thì
+    const modal = document.getElementById("lightbox-modal");
+    if (modal && modal.style.display !== "none") {
+      modal.style.display = "none";
+      closeLightboxVideo();
+    }
 
-      triggerSearch();
-    };
-    reader.readAsDataURL(blob);
+    triggerSearch();
   } catch (err) {
     statusBar.textContent = `❌ Lỗi nạp ảnh: ${err.message}`;
   }
