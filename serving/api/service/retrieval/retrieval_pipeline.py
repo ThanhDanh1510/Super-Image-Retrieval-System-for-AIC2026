@@ -189,11 +189,12 @@ async def _run_text(
     raw_query = getattr(request, "query", "")
     top_k = getattr(request, "top_k", 100)
     search_mode = getattr(request, "search_mode", "all")
+    retrieve_k = max(top_k * 3, 50)
 
     query_input = TextQueryInput(
         raw_query=raw_query,
         task_type=task_type,
-        top_k=top_k,
+        top_k=retrieve_k,
         search_mode=search_mode,
     )
 

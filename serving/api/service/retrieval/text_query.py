@@ -264,9 +264,27 @@ async def _enhance_query(raw_query: str) -> tuple[str, str]:
 
     if has_vietnamese_accent:
         # Query gốc là tiếng Việt -> Dịch sang tiếng Anh cho CLIP
-        translated_en = await _translate(cleaned_query, "en")
+        # Với cụm từ ngắn (<= 6 từ), dùng Title Case khi dịch để bảo toàn danh từ riêng (Đào Sơn Tây -> Dao Son Tay)
+        words = cleaned_query.split()
+        query_to_translate = cleaned_query.title() if len(words) <= 6 else cleaned_query
+
+        import unicodedata
+        nfkd = unicodedata.normalize('NFKD', cleaned_query)
+        unaccented = ''.join([c for c in nfkd if not unicodedata.combining(c)]).replace('đ', 'd').replace('Đ', 'D')
+        title_cased = unaccented.title()
+
+        translated_en = await _translate(query_to_translate, "en")
+        if not translated_en or not _is_valid_translation(translated_en, query_to_translate):
+            translated_en = await _translate(cleaned_query, "en")
+
         if translated_en and _is_valid_translation(translated_en, cleaned_query):
-            en_query = sanitize_search_query(translated_en)
+            en_clean = sanitize_search_query(translated_en)
+            if en_clean.lower() != unaccented.lower():
+                en_query = f"{en_clean} {title_cased}"
+            else:
+                en_query = en_clean
+        else:
+            en_query = f"{title_cased} {unaccented}"
     else:
         # Query gốc là tiếng Anh -> Dịch sang tiếng Việt cho Qwen2/OCR/ASR
         translated_vi = await _translate(cleaned_query, "vi")

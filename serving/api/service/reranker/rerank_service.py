@@ -50,10 +50,11 @@ async def rerank(
     if not candidates:
         return []
 
-    query_for_rerank = enhanced_query or query
+    viranker_query = query if query else (enhanced_query or "")
+    jina_query = enhanced_query or query
 
-    # Chỉ rerank top 20 candidates để tăng tốc
-    rerank_candidates = candidates[:20] if len(candidates) > 20 else candidates
+    # Chỉ rerank top 50 candidates để tăng tốc và đảm bảo độ bao phủ
+    rerank_candidates = candidates[:50] if len(candidates) > 50 else candidates
 
     try:
         viranker_bundle = None
@@ -66,11 +67,11 @@ async def rerank(
         if use_visual_reranker:
             _t_inference_start = time.perf_counter()
             text_task = asyncio.to_thread(
-                viranker.score, query_for_rerank, rerank_candidates, viranker_bundle
+                viranker.score, viranker_query, rerank_candidates, viranker_bundle
             )
             visual_task = asyncio.to_thread(
                 jina_reranker_m0.score,
-                query_for_rerank,
+                jina_query,
                 rerank_candidates,
                 keyframes_root_dir,
                 jina_bundle,
@@ -89,7 +90,7 @@ async def rerank(
         else:
             _t_inference_start = time.perf_counter()
             text_scores = await asyncio.to_thread(
-                viranker.score, query_for_rerank, rerank_candidates, viranker_bundle
+                viranker.score, viranker_query, rerank_candidates, viranker_bundle
             )
             visual_scores = None
             _t_inference_end = time.perf_counter()
@@ -109,8 +110,8 @@ async def rerank(
             f"[PROFILE] Total rerank process took {(_t_end - _t_start) * 1000:.2f}ms"
         )
 
-        if len(candidates) > 20:
-            return fused + candidates[20:]
+        if len(candidates) > len(rerank_candidates):
+            return fused + candidates[len(rerank_candidates):]
         return fused
     except Exception as e:
         logger.warning(f"Reranking error: {e}")

@@ -211,72 +211,70 @@ async def search_by_text_match(
     if not query_text or not query_text.strip():
         return []
 
-    collection_name = await _resolve_collection(client, collection_name)
-
-    # Phân tách từ khóa để tạo bộ lọc thả lỏng (should)
-    # Giữ các từ có độ dài từ 2 ký tự trở lên để tăng tính chính xác
     clean_query = query_text.strip()
     words = [w for w in clean_query.split() if len(w) > 1]
-    
-    should_conditions = []
-    
-    # 1. Thêm cả cụm nguyên văn (Khớp đầy đủ cả cụm từ là tốt nhất)
-    should_conditions.append(
-        FieldCondition(key=field_name, match=MatchText(text=clean_query))
-    )
-    
-    # 2. Tạo các cụm 2 từ liên tiếp (bigrams) nếu câu dài
-    if len(words) >= 3:
-        for i in range(len(words) - 1):
-            bigram = f"{words[i]} {words[i+1]}"
-            should_conditions.append(
-                FieldCondition(key=field_name, match=MatchText(text=bigram))
-            )
-            
-    # 3. Thêm các từ đơn lẻ (độ dài >= 3 để lọc từ quá ngắn)
-    for word in words:
-        if len(word) >= 3:
-            should_conditions.append(
-                FieldCondition(key=field_name, match=MatchText(text=word))
-            )
+    collection_name = await _resolve_collection(client, collection_name)
+    seen_pids = set()
+    all_points = []
 
-    # Dự phòng: Nếu không có từ nào đủ dài, dùng tất cả các từ
-    if not should_conditions:
-        should_conditions = [
-            FieldCondition(key=field_name, match=MatchText(text=w)) for w in clean_query.split()
-        ]
+    # 1. Tier 1: Khớp đầy đủ toàn bộ từ khóa trong câu (Must MatchText)
+    try:
+        res_must, _ = await client.scroll(
+            collection_name=collection_name,
+            scroll_filter=Filter(must=[FieldCondition(key=field_name, match=MatchText(text=clean_query))]),
+            limit=limit,
+            with_payload=True,
+            with_vectors=False,
+        )
+        for p in res_must:
+            seen_pids.add(str(p.id))
+            all_points.append(p)
+    except Exception as e:
+        logger.warning(f"Error in must MatchText scroll: {e}")
 
-    # Sử dụng Qdrant scroll với bộ lọc should để tìm kiếm thả lỏng
-    res, _ = await client.scroll(
-        collection_name=collection_name,
-        scroll_filter=Filter(should=should_conditions),
-        limit=limit * 2, # Lấy nhiều hơn một chút để lọc trùng khớp tốt ở python
-        with_payload=True,
-        with_vectors=False,
-    )
+    # 2. Tier 2: Khớp thả lỏng (OR matching) với các bigrams và từ đơn lẻ
+    if len(all_points) < limit:
+        remaining_limit = (limit - len(all_points)) * 2
+        should_conditions = []
+        if len(words) >= 3:
+            for i in range(len(words) - 1):
+                bigram = f"{words[i]} {words[i+1]}"
+                should_conditions.append(FieldCondition(key=field_name, match=MatchText(text=bigram)))
+        for word in words:
+            if len(word) >= 3:
+                should_conditions.append(FieldCondition(key=field_name, match=MatchText(text=word)))
+
+        if should_conditions:
+            try:
+                res_should, _ = await client.scroll(
+                    collection_name=collection_name,
+                    scroll_filter=Filter(should=should_conditions),
+                    limit=remaining_limit,
+                    with_payload=True,
+                    with_vectors=False,
+                )
+                for p in res_should:
+                    pid_str = str(p.id)
+                    if pid_str not in seen_pids:
+                        seen_pids.add(pid_str)
+                        all_points.append(p)
+            except Exception as e:
+                logger.warning(f"Error in should MatchText scroll: {e}")
 
     cands_with_scores = []
-    for point in res:
+    for point in all_points:
         try:
             cand = _scored_point_to_candidate(point)
-            # Lấy trường text tương ứng từ payload để chấm điểm
             db_text = cand.ocr_text if field_name == "ocr_text" else cand.asr_text
-            
-            # Tính điểm độ tương thích
             score = _calculate_match_score(clean_query, db_text)
-            
-            # Chỉ lấy các kết quả có độ trùng khớp tối thiểu (ví dụ: khớp ít nhất 1 từ khóa)
             if score > 0.0:
                 cand.score = score
                 cands_with_scores.append(cand)
         except Exception as e:
             logger.warning(f"Error parsing point in loose text match: {e}")
-            pass
 
     # Sắp xếp danh sách candidates theo điểm số độ khớp giảm dần
     cands_with_scores.sort(key=lambda x: x.score, reverse=True)
-    
-    # Lấy đúng số lượng giới hạn limit
     return cands_with_scores[:limit]
 
 
@@ -330,12 +328,12 @@ async def search_by_text_vectors(
         weights = cfg.get("weights", {})
         rrf_k = float(cfg.get("rrf", {}).get("k", 60))
     except Exception:
-        weights = {"image_dense": 2.5, "ocr_dense": 0.5, "asr_dense": 0.3, "ocr_sparse": 0.2, "asr_sparse": 0.2}
+        weights = {"image_dense": 2.0, "ocr_dense": 2.5, "asr_dense": 1.5, "ocr_sparse": 0.2, "asr_sparse": 0.2}
         rrf_k = 60.0
 
-    w_image = float(weights.get("image_dense", 2.5))
-    w_ocr_dense = float(weights.get("ocr_dense", 0.5))
-    w_asr_dense = float(weights.get("asr_dense", 0.3))
+    w_image = float(weights.get("image_dense", 2.0))
+    w_ocr_dense = float(weights.get("ocr_dense", 2.5))
+    w_asr_dense = float(weights.get("asr_dense", 1.5))
 
     tasks = []
     task_weights = []
@@ -419,10 +417,9 @@ async def search_by_text_vectors(
         if isinstance(branch_res, list):
             points = branch_res
             for rank, cand in enumerate(points, start=1):
-                pid = f"{cand.video_id}::{cand.scene_id}" # Tạo ID nhất quán cho map
-                # Tái cấu trúc point giả lập để _scored_point_to_candidate hoạt động nếu cần,
-                # hoặc lưu trực tiếp candidate vào point_map
-                score_contrib = weight * (1.0 / (rrf_k + rank))
+                pid = f"{cand.video_id}_{cand.frame_id}"  # Tạo ID nhất quán theo video_id + frame_id
+                # Nhân trọng số với cand.score để câu khớp chính xác (1.5) vượt trội so với câu khớp yếu (0.33)
+                score_contrib = weight * max(float(cand.score), 0.1) * (1.0 / (rrf_k + rank))
                 rrf_scores[pid] = rrf_scores.get(pid, 0.0) + score_contrib
                 if pid not in point_map:
                     point_map[pid] = cand
@@ -430,7 +427,11 @@ async def search_by_text_vectors(
             # Nếu là kết quả từ client.query_points (ScoredPoint)
             points = getattr(branch_res, "points", branch_res)
             for rank, point in enumerate(points, start=1):
-                pid = str(point.id)
+                payload = getattr(point, "payload", {}) or {}
+                if "video_id" in payload and "frame_id" in payload:
+                    pid = f"{payload['video_id']}_{payload['frame_id']}"
+                else:
+                    pid = str(point.id)
                 score_contrib = weight * (1.0 / (rrf_k + rank))
                 rrf_scores[pid] = rrf_scores.get(pid, 0.0) + score_contrib
                 if pid not in point_map:
