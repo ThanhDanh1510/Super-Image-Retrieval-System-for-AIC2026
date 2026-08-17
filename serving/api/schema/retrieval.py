@@ -135,9 +135,17 @@ class KISRequest(BaseModel):
         default_factory=list,
         description="Danh sách các frame do người dùng tự chọn bằng tay để xếp lên đầu."
     )
-    use_reranker: bool = Field(
+    use_viranker: bool = Field(
+        default=True,
+        description="Bật/Tắt ViRanker (bge-reranker-v2-m3) chấm điểm ngữ nghĩa văn bản (OCR/ASR/Caption)."
+    )
+    use_jina_m0: bool = Field(
         default=False,
-        description="Bật/Tắt tính năng Reranker cho kết quả tìm kiếm (Mặc định: False để tăng tốc tối đa)."
+        description="Bật/Tắt Jina Reranker M0 chấm điểm trực quan trên pixel ảnh keyframe."
+    )
+    use_reranker: bool | None = Field(
+        default=None,
+        description="Tương thích ngược: Nếu truyền True -> bật Jina M0; nếu False -> giữ theo use_viranker."
     )
 
 
@@ -153,9 +161,17 @@ class VQARequest(BaseModel):
         default_factory=list,
         description="Danh sách các frame và câu trả lời do người dùng tự chọn bằng tay."
     )
-    use_reranker: bool = Field(
+    use_viranker: bool = Field(
+        default=True,
+        description="Bật/Tắt ViRanker (bge-reranker-v2-m3) chấm điểm ngữ nghĩa văn bản (OCR/ASR/Caption)."
+    )
+    use_jina_m0: bool = Field(
         default=False,
-        description="Bật/Tắt tính năng Reranker cho kết quả tìm kiếm (Mặc định: False để tăng tốc tối đa)."
+        description="Bật/Tắt Jina Reranker M0 chấm điểm trực quan trên pixel ảnh keyframe."
+    )
+    use_reranker: bool | None = Field(
+        default=None,
+        description="Tương thích ngược"
     )
 
 
@@ -175,18 +191,21 @@ class TRAKERequest(BaseModel):
     input_type: InputType = Field(default=InputType.TEXT)
     search_mode: str = Field(default="all")
     top_k: Annotated[int, Field(ge=1, le=500)] = Field(default=100)
+    use_viranker: bool = Field(default=True)
+    use_jina_m0: bool = Field(default=False)
+    use_reranker: bool | None = Field(default=None)
 
 
 class ImageSearchRequest(BaseModel):
     """
     Request cho Image-to-Image Search (Similar Image Search).
-
-    Lưu ý: Controller nhận file upload (multipart/form-data), extract base64,
-    rồi tạo ImageSearchRequest này để truyền vào service.
     """
 
     image_base64: str = Field(..., description="Ảnh query dạng base64-encoded string")
     top_k: Annotated[int, Field(ge=1, le=200)] = Field(default=100)
+    use_viranker: bool = Field(default=False)
+    use_jina_m0: bool = Field(default=False)
+    use_reranker: bool | None = Field(default=None)
 
 
 # =============================================================================

@@ -1021,15 +1021,52 @@ mark.highlight-match {
   box-shadow: 0 0 8px var(--spider-blue);
 }
 
-.spider-switch .label-text {
-  font-size: 0.85rem;
-  color: var(--text-sub);
-  font-weight: 600;
-  transition: color 0.3s;
+.reranker-switch-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  background: rgba(18, 20, 29, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 4px 10px;
 }
 
-.spider-switch input:checked ~ .label-text {
-  color: var(--spider-blue);
+/* Switch ViRanker (Cyan Text theme) */
+.switch-viranker .slider {
+  border-color: rgba(0, 240, 255, 0.4);
+  box-shadow: 0 0 4px rgba(0, 240, 255, 0.2);
+}
+.switch-viranker input:checked + .slider {
+  background-color: rgba(0, 240, 255, 0.15);
+  border-color: #00f0ff;
+  box-shadow: 0 0 10px rgba(0, 240, 255, 0.5);
+}
+.switch-viranker input:checked + .slider::before {
+  background-color: #00f0ff;
+  box-shadow: 0 0 8px #00f0ff;
+}
+.switch-viranker input:checked ~ .label-text {
+  color: #00f0ff;
+  text-shadow: 0 0 8px rgba(0, 240, 255, 0.4);
+}
+
+/* Switch Jina M0 (Spidey Red Visual theme) */
+.switch-jina .slider {
+  border-color: rgba(255, 0, 60, 0.4);
+  box-shadow: 0 0 4px rgba(255, 0, 60, 0.2);
+}
+.switch-jina input:checked + .slider {
+  background-color: rgba(255, 0, 60, 0.15);
+  border-color: var(--spider-red);
+  box-shadow: 0 0 10px var(--spider-red-glow);
+}
+.switch-jina input:checked + .slider::before {
+  background-color: var(--spider-red);
+  box-shadow: 0 0 8px var(--spider-red);
+}
+.switch-jina input:checked ~ .label-text {
+  color: var(--spider-red);
+  text-shadow: 0 0 8px var(--spider-red-glow);
 }
 
 /* =============================================================================

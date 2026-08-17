@@ -114,13 +114,23 @@ async def run(
     if candidates and input_type in (InputType.TEXT, InputType.VOICE) and task_type in (TaskType.KIS, TaskType.VQA):
         raw_query = getattr(request, "query", "")
         if raw_query and raw_query.strip():
-            use_reranker = getattr(request, "use_reranker", False)
+            use_viranker = getattr(request, "use_viranker", True)
+            use_jina_m0 = getattr(request, "use_jina_m0", False)
+            use_reranker = getattr(request, "use_reranker", None)
+            if use_reranker is not None:
+                if use_reranker is False:
+                    use_viranker = False
+                    use_jina_m0 = False
+                elif use_reranker is True:
+                    use_jina_m0 = True
+
             candidates = await rerank_service.rerank(
                 query=raw_query,
                 candidates=candidates,
                 enhanced_query=pipeline_res.enhanced_query,
                 keyframes_root_dir=str(get_settings().DATA_DIR),
-                use_visual_reranker=use_reranker,
+                use_viranker=use_viranker,
+                use_jina_m0=use_jina_m0,
                 model_registry=model_registry,
             )
 

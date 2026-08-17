@@ -82,6 +82,7 @@ def score(
             if img_path and img_path.exists():
                 try:
                     img = Image.open(img_path).convert("RGB")
+                    img.thumbnail((512, 512))
                     sentence_pairs.append([query, img])
                 except Exception:
                     sentence_pairs.append([query, None])
