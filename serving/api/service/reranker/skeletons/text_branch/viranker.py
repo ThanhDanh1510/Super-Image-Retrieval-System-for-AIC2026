@@ -80,7 +80,8 @@ def score(
             return_tensors="pt",
         ).to(model.device)
 
-        with torch.no_grad():
+        device_type = "cuda" if device == "cuda" else "cpu"
+        with torch.no_grad(), torch.amp.autocast(device_type=device_type, enabled=(device == "cuda")):
             outputs = model(**inputs)
             logits = outputs.logits
             if logits.dim() > 1:
