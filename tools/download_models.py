@@ -23,24 +23,21 @@ def main():
         config = yaml.safe_load(f)
 
     # 2. Thu thập danh sách model IDs
-    model_ids = []
-    
-    # Text embedding & reranker & description
-    models_section = config.get("models", {})
-    for category in ["text_embedding", "text_reranker", "crossmodal_reranker", "description_embedding"]:
-        info = models_section.get(category, {})
-        if "model_id" in info:
-            model_ids.append(info["model_id"])
+    model_ids = [
+        "openai/clip-vit-large-patch14",
+        "Alibaba-NLP/gte-Qwen2-1.5B-instruct",
+        "BAAI/bge-reranker-v2-m3",
+        "jinaai/jina-reranker-m0",
+        "vinai/PhoWhisper-medium",
+        "BAAI/bge-large-en-v1.5",
+    ]
 
-    # Image embedding
-    clip_info = models_section.get("image_embedding", {}).get("clip", {})
-    if "model_id" in clip_info:
-        model_ids.append(clip_info["model_id"])
-
-    # ASR model
-    asr_info = models_section.get("asr", {}).get("phowhisper", {})
-    if "model_id" in asr_info:
-        model_ids.append(asr_info["model_id"])
+    # Kiểm tra thêm trong model_versions.yaml
+    for key, val in config.items():
+        if isinstance(val, dict):
+            for sub_k, sub_v in val.items():
+                if isinstance(sub_v, str) and ("/" in sub_v):
+                    model_ids.append(sub_v)
 
     # Loại bỏ trùng lặp nếu có
     model_ids = sorted(list(set(model_ids)))

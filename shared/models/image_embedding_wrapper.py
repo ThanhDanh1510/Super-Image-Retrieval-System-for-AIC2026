@@ -52,18 +52,26 @@ class ImageEmbeddingWrapper:
             import transformers
             from transformers import CLIPModel, CLIPProcessor
 
-            device_str = "cuda" if (device == "cuda" and torch.cuda.is_available()) else "cpu"
+            from shared.utils.device_utils import resolve_torch_device
+
+            device_str = resolve_torch_device(device)
             if device_str == "cuda":
                 try:
                     # Test GPU kernel capability
                     _t = torch.zeros(1, device="cuda")
                 except Exception:
-                    logger.warning("CUDA execution failed (no kernel image for GPU architecture). Falling back to CPU for Real Model.")
+                    logger.warning("CUDA execution failed. Falling back to CPU for Real Model.")
+                    device_str = "cpu"
+            elif device_str == "mps":
+                try:
+                    _t = torch.zeros(1, device="mps")
+                except Exception:
+                    logger.warning("MPS execution failed. Falling back to CPU for Real Model.")
                     device_str = "cpu"
 
             logger.info(f"Loading CLIP model '{self.CLIP_MODEL_ID}' on {device_str} (transformers v{transformers.__version__})...")
             self.clip_processor = CLIPProcessor.from_pretrained(self.CLIP_MODEL_ID)
-            dtype = torch.float16 if device_str == "cuda" else torch.float32
+            dtype = torch.float16 if device_str in ("cuda", "mps") else torch.float32
             self.clip_model = CLIPModel.from_pretrained(
                 self.CLIP_MODEL_ID,
                 torch_dtype=dtype,

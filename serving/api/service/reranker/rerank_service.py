@@ -64,39 +64,38 @@ async def rerank(
             if use_visual_reranker:
                 jina_bundle = await model_registry.aget_jina_m0()
 
-        if use_visual_reranker:
-            _t_inference_start = time.perf_counter()
-            text_task = asyncio.to_thread(
-                viranker.score, viranker_query, rerank_candidates, viranker_bundle
-            )
-            visual_task = asyncio.to_thread(
-                jina_reranker_m0.score,
-                jina_query,
-                rerank_candidates,
-                keyframes_root_dir,
-                jina_bundle,
-            )
-            results = await asyncio.gather(text_task, visual_task, return_exceptions=True)
-
-            for res in results:
-                if isinstance(res, Exception):
-                    raise res
-
-            text_scores, visual_scores = results
-            _t_inference_end = time.perf_counter()
-            logger.info(
-                f"[PROFILE] Dual Reranking inference (ViRanker + Jina M0) took {(_t_inference_end - _t_inference_start) * 1000:.2f}ms"
-            )
+        _t_inference_start = time.perf_counter()
+        if model_registry and hasattr(model_registry, "gpu_lock"):
+            async with model_registry.gpu_lock:
+                text_scores = await asyncio.to_thread(
+                    viranker.score, viranker_query, rerank_candidates, viranker_bundle
+                )
+                visual_scores = None
+                if use_visual_reranker:
+                    visual_scores = await asyncio.to_thread(
+                        jina_reranker_m0.score,
+                        jina_query,
+                        rerank_candidates,
+                        keyframes_root_dir,
+                        jina_bundle,
+                    )
         else:
-            _t_inference_start = time.perf_counter()
             text_scores = await asyncio.to_thread(
                 viranker.score, viranker_query, rerank_candidates, viranker_bundle
             )
             visual_scores = None
-            _t_inference_end = time.perf_counter()
-            logger.info(
-                f"[PROFILE] ViRanker inference took {(_t_inference_end - _t_inference_start) * 1000:.2f}ms"
-            )
+            if use_visual_reranker:
+                visual_scores = await asyncio.to_thread(
+                    jina_reranker_m0.score,
+                    jina_query,
+                    rerank_candidates,
+                    keyframes_root_dir,
+                    jina_bundle,
+                )
+        _t_inference_end = time.perf_counter()
+        logger.info(
+            f"[PROFILE] Reranking inference (ViRanker{' + Jina M0' if use_visual_reranker else ''}) took {(_t_inference_end - _t_inference_start) * 1000:.2f}ms"
+        )
 
         _t_fuse_start = time.perf_counter()
         fused = fusion_score.fuse(text_scores, visual_scores, rerank_candidates)

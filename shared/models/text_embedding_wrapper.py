@@ -47,16 +47,24 @@ class TextEmbeddingWrapper:
             import transformers
             from transformers import AutoConfig, AutoModel, AutoTokenizer
 
-            device_str = "cuda" if (device == "cuda" and torch.cuda.is_available()) else "cpu"
+            from shared.utils.device_utils import resolve_torch_device
+
+            device_str = resolve_torch_device(device)
             if device_str == "cuda":
                 try:
                     _t = torch.zeros(1, device="cuda")
                 except Exception:
                     logger.warning("CUDA execution failed. Falling back to CPU for Real Text Model.")
                     device_str = "cpu"
+            elif device_str == "mps":
+                try:
+                    _t = torch.zeros(1, device="mps")
+                except Exception:
+                    logger.warning("MPS execution failed. Falling back to CPU for Real Text Model.")
+                    device_str = "cpu"
 
             logger.info(f"Loading Text Embedding model '{self.MODEL_ID}' on {device_str} (transformers v{transformers.__version__})...")
-            dtype = torch.float16 if device_str == "cuda" else torch.float32
+            dtype = torch.float16 if device_str in ("cuda", "mps") else torch.float32
 
             try:
                 # Thử dùng native transformers Qwen2Model implementation (tránh bug DynamicCache của remote code cũ)
@@ -88,7 +96,10 @@ class TextEmbeddingWrapper:
                 )
 
             self.model.eval()
-            self.model = self.model.to(dtype)
+            if device_str in ("cuda", "mps"):
+                self.model = self.model.to(device_str)
+            else:
+                self.model = self.model.to(dtype)
             self.torch = torch
             self.device_str = device_str
         except Exception as e:
