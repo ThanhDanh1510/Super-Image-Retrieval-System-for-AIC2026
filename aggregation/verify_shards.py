@@ -25,19 +25,9 @@ import numpy as np
 import pandas as pd
 
 from shared.utils.config_loader import load_shard_assignment
+from aggregation.common import REQUIRED_COLUMNS
 
 logger = logging.getLogger(__name__)
-
-# Schema các cột bắt buộc
-REQUIRED_COLUMNS = {
-    "scene_metadata.parquet": [
-        "scene_id", "video_id", "frame_id",
-        "timestamp_start", "timestamp_end", "timestamp_mid",
-        "fps", "keyframe_path"
-    ],
-    "ocr_text.parquet": ["scene_id", "video_id", "ocr_text"],
-    "asr_text.parquet": ["scene_id", "video_id", "asr_text"]
-}
 
 @dataclass
 class VerifyReport:
