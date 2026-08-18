@@ -448,8 +448,9 @@ async def search_by_text_vectors(
             points = branch_res
             for rank, cand in enumerate(points, start=1):
                 pid = f"{cand.video_id}_{cand.frame_id}"  # Tạo ID nhất quán theo video_id + frame_id
-                # Nhân trọng số với cand.score để câu khớp chính xác (1.5) vượt trội so với câu khớp yếu (0.33)
-                score_contrib = weight * max(float(cand.score), 0.1) * (1.0 / (rrf_k + rank))
+                # Nếu là exact substring match (cand.score >= 2.0), cho hệ số boost x3.0
+                exact_mult = 3.0 if float(cand.score) >= 2.0 else (1.5 if float(cand.score) >= 1.0 else 1.0)
+                score_contrib = weight * max(float(cand.score), 0.1) * exact_mult * (1.0 / (rrf_k + rank))
                 rrf_scores[pid] = rrf_scores.get(pid, 0.0) + score_contrib
                 if pid not in point_map:
                     point_map[pid] = cand
