@@ -60,4 +60,4 @@ jobs:
 
       - name: Run Core Unit & Pipeline Tests (All Platforms)
         run: |
-          uv run pytest tests/test_video_similar_search_ui.py tests/test_api_schema.py tests/test_build_unified_from_raw.py tests/test_merge_shards.py tests/test_rerank_service.py tests/test_retrieval_serving.py -v
+          uv run pytest tests/test_video_similar_search_ui.py tests/test_search_algorithms_and_device.py tests/test_api_schema.py tests/test_build_unified_from_raw.py tests/test_merge_shards.py tests/test_rerank_service.py tests/test_retrieval_serving.py -v
