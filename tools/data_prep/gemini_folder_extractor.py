@@ -2,6 +2,7 @@
 tools/data_prep/gemini_folder_extractor.py
 ============================================
 Trích xuất OCR & Mô tả ảnh chi tiết (Scene Description) bằng Gemini API.
+Cấu trúc tinh gọn: Chỉ gồm 2 trường cốt lõi `ocr_text` và `description`.
 Cơ chế: Chạy hết tất cả ảnh trong 1 folder video rồi tự động dừng lại.
 """
 
@@ -11,40 +12,24 @@ import json
 import time
 import argparse
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any
 from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field
 
 
 # =============================================================================
-# 1. Pydantic Response Schema cho Structured Output
+# 1. Pydantic Response Schema (2 Trường Cốt Lõi)
 # =============================================================================
 
 class KeyframeAnalysis(BaseModel):
     ocr_text: str = Field(
         default="", 
-        description="Toàn bộ chữ viết, văn bản, công thức, số hiệu, logo xuất hiện trong ảnh."
+        description="Toàn bộ chữ viết, văn bản, công thức toán Oxyz, số hiệu, logo xuất hiện trong ảnh."
     )
-    short_caption: str = Field(
+    description: str = Field(
         ..., 
-        description="Câu tóm tắt ngắn gọn súc tích 1 câu về nội dung chính."
-    )
-    detailed_description: str = Field(
-        ..., 
-        description="Mô tả chi tiết nhân vật, hành động, đồ vật, không gian, màu sắc, bối cảnh."
-    )
-    objects: List[str] = Field(
-        default_factory=list, 
-        description="Danh sách các đồ vật, thực thể xuất hiện trong ảnh."
-    )
-    scene_type: str = Field(
-        ..., 
-        description="Phân loại bối cảnh (ví dụ: lớp học, đường phố, trường quay, thể thao...)"
-    )
-    tags: List[str] = Field(
-        default_factory=list, 
-        description="Các từ khóa tra cứu quan trọng bằng tiếng Việt và tiếng Anh."
+        description="Đoạn văn mô tả chi tiết: Câu đầu tóm tắt trọng tâm, các câu sau mô tả nhân vật, hành động, đồ vật, không gian, màu sắc."
     )
 
 
@@ -56,12 +41,8 @@ SYSTEM_PROMPT = """Bạn là chuyên gia thị giác máy tính hàng đầu cho
 Nhiệm vụ của bạn là phân tích ảnh keyframe với độ chi tiết và chính xác tối đa.
 
 Quy tắc:
-1. OCR_TEXT: Đọc CHÍNH XÁC 100% tất cả văn bản trong ảnh (bảng hiệu, phụ đề, chữ viết tay, công thức toán học/hình học Oxyz, số hiệu, logo). Giữ nguyên dấu tiếng Việt và ký hiệu toán. Nếu không có chữ, trả về "".
-2. SHORT_CAPTION: Một câu tiếng Việt ngắn gọn mô tả sự kiện/hành động chính.
-3. DETAILED_DESCRIPTION: Đoạn văn mô tả chi tiết người, đồ vật, hành động, không gian, màu sắc, ánh sáng.
-4. OBJECTS: Danh sách các thực thể/vật thể có trong ảnh.
-5. SCENE_TYPE: Thể loại bối cảnh (ví dụ: 'bài giảng toán', 'giao thông', 'phim tài liệu'...).
-6. TAGS: Danh sách từ khóa song ngữ (Việt - Anh) phục vụ tìm kiếm.
+1. OCR_TEXT: Đọc CHÍNH XÁC 100% tất cả văn bản trong ảnh (bảng hiệu, phụ đề, chữ viết tay, công thức toán học/hình học Oxyz, số hiệu, logo). Giữ nguyên dấu tiếng Việt và ký hiệu toán. Nếu không có chữ, trả về chuỗi rỗng "".
+2. DESCRIPTION: Viết 1 đoạn văn tiếng Việt hoàn chỉnh. Câu đầu tiên tóm tắt hành động/đối tượng chính; các câu tiếp theo mô tả chi tiết người, đồ vật, hành động, không gian, màu sắc, ánh sáng.
 """
 
 def analyze_single_image(client: genai.Client, model_name: str, image_path: Path) -> Dict[str, Any]:
@@ -106,9 +87,8 @@ def process_video_folder(folder_path: str, output_dir: str, model_name: str = "g
     video_name = folder.name
     out_dir = Path(output_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_file = out_dir / f"{video_name}_gemini_descriptions.json"
+    out_file = out_dir / f"{video_name}_descriptions.json"
 
-    # Đọc checkpoint trước đó nếu có (Resume)
     results: Dict[str, Any] = {}
     if out_file.exists():
         try:
@@ -140,12 +120,10 @@ def process_video_folder(folder_path: str, output_dir: str, model_name: str = "g
             data = analyze_single_image(client, model_name, img_path)
             duration = time.time() - t0
 
-            data["image_path"] = str(img_path.name)
             results[frame_key] = data
             success_count += 1
             print(f"✅ Xong ({duration:.2f}s) | OCR: {len(data.get('ocr_text', ''))} ký tự")
 
-            # Lưu ngay sau mỗi ảnh
             with open(out_file, "w", encoding="utf-8") as f:
                 json.dump(results, f, ensure_ascii=False, indent=2)
 

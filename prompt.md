@@ -4,17 +4,15 @@ Tài liệu này cung cấp **Prompt chuẩn hóa 1-Click** để sử dụng tr
 
 ---
 
-## 1. 📋 Cấu Trúc JSON Chuẩn Hóa (1 Trường `description` Duy Nhất)
+## 1. 📋 Cấu Trúc JSON Siêu Tinh Gọn (Chỉ 2 Trường Cốt Lõi)
 
-Mỗi ảnh keyframe sau khi phân tích sẽ được ghi vào file JSON theo đúng cấu trúc 4 trường tinh gọn:
+Dữ liệu đầu ra được tối giản hóa 100% để khớp trực tiếp với cơ sở dữ liệu `unified` (Parquet/Qdrant):
 
 ```json
 {
   "18316": {
-    "ocr_text": "Câu 4: Trong không gian Oxyz, cho điểm A(4; -2; 2) và mặt cầu (S): x^2 + y^2 + z^2 = 4... Chọn D.",
-    "description": "Thầy giáo đang giảng bài toán hình học không gian Oxyz trên bảng đen. Bảng viết chi tiết các bước tính bán kính r của đường tròn ngoại tiếp tam giác BCD, bên phải có sơ đồ tọa độ và mặt cầu minh họa, không gian phòng học sáng rõ.",
-    "objects": ["thầy giáo", "bảng đen", "phấn trắng", "sơ đồ hình học Oxyz", "mặt cầu"],
-    "tags": ["hình học không gian", "mặt cầu", "bài giảng toán", "Oxyz", "math lecture"]
+    "ocr_text": "Câu 4: Trong không gian Oxyz, cho điểm A(4; -2; 2) và mặt cầu (S): x^2 + y^2 + z^2 = 4. Biết B, C, D là ba điểm phân biệt trên (S)... Chọn D.",
+    "description": "Thầy giáo đang giảng bài toán hình học không gian Oxyz trên bảng đen. Bảng viết chi tiết các bước tính bán kính r của đường tròn ngoại tiếp tam giác BCD, bên góc phải có sơ đồ tọa độ và mặt cầu minh họa, không gian phòng học sáng rõ."
   }
 }
 ```
@@ -34,9 +32,7 @@ Quy trình thực hiện:
 1. Sử dụng công cụ `list_dir` để liệt kê tất cả các file ảnh (.webp, .jpg, .png) trong thư mục mục tiêu.
 2. Với từng ảnh, sử dụng công cụ `view_file` để xem và phân tích chi tiết nội dung thị giác:
    - `ocr_text`: Đọc CHÍNH XÁC 100% tất cả chữ viết, công thức toán học/hình học Oxyz, số hiệu, logo, biển báo, phụ đề trên ảnh. Giữ nguyên dấu tiếng Việt và ký hiệu toán học. Nếu không có chữ, trả về chuỗi rỗng `""`.
-   - `description`: Viết 1 đoạn văn tiếng Việt hoàn chỉnh. Câu đầu tiên tóm tắt hành động/đối tượng trọng tâm; các câu tiếp theo mô tả chi tiết nhân vật, trang phục, hành động, đồ vật xung quanh, bối cảnh không gian, màu sắc và ánh sáng.
-   - `objects`: Mảng danh sách các đồ vật, thực thể có mặt trong ảnh.
-   - `tags`: Mảng các từ khóa tìm kiếm quan trọng bằng tiếng Việt và tiếng Anh.
+   - `description`: Viết 1 đoạn văn tiếng Việt hoàn chỉnh và chi tiết. Câu đầu tiên tóm tắt hành động/đối tượng trọng tâm của ảnh; các câu tiếp theo mô tả đầy đủ nhân vật, trang phục, hành động, các đồ vật xung quanh, bối cảnh không gian, màu sắc chủ đạo và ánh sáng.
 3. Tổng hợp toàn bộ kết quả vào một đối tượng JSON với key là tên ảnh (frame_id, ví dụ "18316").
 4. Sử dụng công cụ `write_to_file` để lưu kết quả vào file `data/gemini_output/{video_id}_descriptions.json` (ví dụ `data/gemini_output/V017_descriptions.json`).
 5. Sau khi hoàn thành toàn bộ ảnh trong thư mục này, hãy báo cáo tổng số ảnh đã xử lý và DỪNG LẠI (không tự ý chạy sang thư mục video khác).
@@ -46,11 +42,11 @@ Quy trình thực hiện:
 
 ## 3. 💡 Quy Tắc Vàng Khi Phân Tích
 
-1. **OCR Trung Thực 100%**:
+1. **OCR Trung Thực Tuyệt Đối**:
    * Đọc chính xác từng ký tự, dấu ngoặc, tọa độ (ví dụ `A(4; -2; 2)`), công thức toán học.
    * Không tự ý thêm bớt từ ngữ không có trên ảnh.
-2. **Description Có Cấu Trúc**:
-   * *Câu 1 (Lead Sentence)*: Tóm tắt bức tranh toàn cảnh (phục vụ mô hình CLIP).
-   * *Các câu tiếp theo*: Mô tả chi tiết các góc cạnh, màu sắc, vị trí vật thể (phục vụ mô hình Text Dense & Reranker).
-3. **Tiết Kiệm Token & Tốc Độ Tối Đa**:
-   * Việc dùng 1 trường `description` duy nhất giúp Antigravity đọc và xử lý nhanh gấp đôi, không bị lặp từ và dễ dàng nạp trực tiếp vào cơ sở dữ liệu vector.
+2. **Description Giàu Chi Tiết & Có Cấu Trúc**:
+   * *Câu đầu tiên*: Tóm tắt bức tranh toàn cảnh (tối ưu cho mô hình Text-to-Image CLIP).
+   * *Các câu tiếp theo*: Mô tả chi tiết các vật thể, màu sắc, vị trí tương đối (tối ưu cho mô hình Dense gte-Qwen2 và ViRanker).
+3. **Tối Đa Hóa Tốc Độ & Tiết Kiệm Token**:
+   * Việc chỉ dùng đúng 2 trường `ocr_text` và `description` giúp tốc độ sinh nhanh gấp đôi và dữ liệu có thể nạp thẳng vào pipeline tìm kiếm mà không cần chuyển đổi.
