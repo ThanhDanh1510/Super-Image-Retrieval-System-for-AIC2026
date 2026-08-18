@@ -944,6 +944,21 @@ mark.highlight-match {
   box-shadow: 0 0 10px var(--spider-red-glow);
 }
 
+.video-similar-btn {
+  border-color: var(--spider-blue);
+  color: var(--spider-blue);
+}
+
+.video-similar-btn:hover {
+  box-shadow: 0 0 10px var(--spider-blue-glow);
+}
+
+.video-similar-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
 .video-error-msg {
   margin-top: 12px;
   color: var(--spider-red);
