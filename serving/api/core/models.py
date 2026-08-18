@@ -32,8 +32,12 @@ def free_memory() -> None:
 
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            if hasattr(torch.mps, "empty_cache"):
+                torch.mps.empty_cache()
     except Exception:
         pass
+
 
 
 class ModelRegistry:
@@ -68,6 +72,13 @@ class ModelRegistry:
         self._last_used: dict[str, float] = {}
         self._load_lock = threading.Lock()
         self._async_locks: dict[str, asyncio.Lock] = {}
+        self._gpu_lock: Optional[asyncio.Lock] = None
+
+    @property
+    def gpu_lock(self) -> asyncio.Lock:
+        if self._gpu_lock is None:
+            self._gpu_lock = asyncio.Lock()
+        return self._gpu_lock
 
     def _get_async_lock(self, key: str) -> asyncio.Lock:
         if key not in self._async_locks:
@@ -251,16 +262,20 @@ class ModelRegistry:
     def _load_viranker(self):
         import torch
         from transformers import AutoModelForSequenceClassification, AutoTokenizer
+        from shared.utils.device_utils import resolve_torch_device
 
         model_name = "BAAI/bge-reranker-v2-m3"
-        logger.info(f"ModelRegistry: lazy-loading ViRanker ({model_name})...")
+        device = resolve_torch_device(self._device)
+        logger.info(f"ModelRegistry: lazy-loading ViRanker ({model_name}) on {device}...")
         tokenizer = AutoTokenizer.from_pretrained(model_name)
-        device = self._device if torch.cuda.is_available() and self._device == "cuda" else "cpu"
+        dtype = torch.float16 if device in ("cuda", "mps") else torch.float32
         model = AutoModelForSequenceClassification.from_pretrained(
             model_name,
-            torch_dtype=torch.float16 if device == "cuda" else torch.float32,
-            device_map=device,
+            torch_dtype=dtype,
+            device_map=device if device == "cuda" else None,
         )
+        if device in ("cuda", "mps"):
+            model.to(device)
         model.eval()
         return {"model": model, "tokenizer": tokenizer, "device": device}
 
@@ -268,10 +283,11 @@ class ModelRegistry:
         import torch
         import transformers
         from transformers import AutoModel
+        from shared.utils.device_utils import resolve_torch_device
 
         model_name = "jinaai/jina-reranker-m0"
-        device = self._device if torch.cuda.is_available() and self._device == "cuda" else "cpu"
-        dtype = torch.float16 if device == "cuda" else torch.float32
+        device = resolve_torch_device(self._device)
+        dtype = torch.float16 if device in ("cuda", "mps") else torch.float32
         logger.info(f"ModelRegistry: lazy-loading Jina Reranker M0 ({model_name}) on {device}...")
 
         orig_verbosity = transformers.logging.get_verbosity()
@@ -291,18 +307,21 @@ class ModelRegistry:
     def _load_event_splitter(self):
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
+        from shared.utils.device_utils import resolve_torch_device
 
         model_id = "Qwen/Qwen2.5-1.5B-Instruct"
-        device = self._device if torch.cuda.is_available() and self._device == "cuda" else "cpu"
-        logger.info(f"ModelRegistry: lazy-loading Event Splitter ({model_id})...")
+        device = resolve_torch_device(self._device)
+        logger.info(f"ModelRegistry: lazy-loading Event Splitter ({model_id}) on {device}...")
 
         tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
         model = AutoModelForCausalLM.from_pretrained(
             model_id,
-            torch_dtype=torch.float16 if device == "cuda" else torch.float32,
-            device_map=device,
+            torch_dtype=torch.float16 if device in ("cuda", "mps") else torch.float32,
+            device_map=device if device == "cuda" else None,
             trust_remote_code=True,
         )
+        if device in ("cuda", "mps"):
+            model.to(device)
         model.eval()
         return {"model": model, "tokenizer": tokenizer, "device": device}
 
