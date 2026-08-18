@@ -4,11 +4,15 @@ on:
   push:
     branches:
       - main
-      - macos
   pull_request:
     branches:
       - main
       - macos
+
+# Tự động hủy lượt chạy cũ nếu có commit mới được push vào cùng một PR / Branch
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
@@ -56,4 +60,4 @@ jobs:
 
       - name: Run Core Unit & Pipeline Tests (All Platforms)
         run: |
-          uv run pytest tests/test_api_schema.py tests/test_build_unified_from_raw.py tests/test_merge_shards.py tests/test_rerank_service.py tests/test_retrieval_serving.py -v
+          uv run pytest tests/test_video_similar_search_ui.py tests/test_api_schema.py tests/test_build_unified_from_raw.py tests/test_merge_shards.py tests/test_rerank_service.py tests/test_retrieval_serving.py -v
