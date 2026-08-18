@@ -194,7 +194,7 @@ def _calculate_match_score(query: str, target_text: str) -> float:
             if bigram in t_norm:
                 overlap_ratio += 0.15
                 
-    return round(overlap_ratio, 6)
+    return min(1.0, max(0.0, round(overlap_ratio, 6)))
 
 
 async def search_by_text_match(
@@ -267,6 +267,7 @@ async def search_by_text_match(
             cand = _scored_point_to_candidate(point)
             db_text = cand.ocr_text if field_name == "ocr_text" else cand.asr_text
             score = _calculate_match_score(clean_query, db_text)
+            score = min(1.0, max(0.0, float(score)))
             if score > 0.0:
                 cand.score = score
                 cands_with_scores.append(cand)
@@ -440,6 +441,9 @@ async def search_by_text_vectors(
     # Sắp xếp theo Weighted RRF score giảm dần
     sorted_ids = sorted(rrf_scores.keys(), key=lambda pid: rrf_scores[pid], reverse=True)[:top_k]
 
+    max_rrf = max(rrf_scores.values()) if rrf_scores else 1.0
+    norm_factor = max_rrf if max_rrf > 1.0 else 1.0
+
     final_candidates = []
     for pid in sorted_ids:
         item = point_map[pid]
@@ -447,7 +451,7 @@ async def search_by_text_vectors(
             cand = item
         else:
             cand = _scored_point_to_candidate(item)
-        cand.score = round(float(rrf_scores[pid]), 6)
+        cand.score = min(1.0, max(0.0, round(float(rrf_scores[pid] / norm_factor), 6)))
         final_candidates.append(cand)
 
     logger.debug(f"search_by_text_vectors: {len(final_candidates)} candidates via Weighted RRF from {len(tasks)} branches")
@@ -535,6 +539,9 @@ def _scored_point_to_candidate(scored_point: any) -> CandidateResult:
     if not desc:
         desc = _get_scene_desc(scene_id)
 
+    raw_score = float(getattr(scored_point, "score", 0.0) or 0.0)
+    clamped_score = min(1.0, max(0.0, raw_score))
+
     return CandidateResult(
         video_id=payload["video_id"],
         scene_id=scene_id,
@@ -546,7 +553,7 @@ def _scored_point_to_candidate(scored_point: any) -> CandidateResult:
         ocr_text=payload.get("ocr_text", ""),
         asr_text=payload.get("asr_text", ""),
         description=desc,
-        score=float(getattr(scored_point, "score", 0.0) or 0.0),
+        score=clamped_score,
     )
 
 

@@ -37,15 +37,19 @@ def score(
         try:
             import torch
             from transformers import AutoModelForSequenceClassification, AutoTokenizer
+            from shared.utils.device_utils import resolve_torch_device
 
             model_name = "BAAI/bge-reranker-v2-m3"
             tokenizer = AutoTokenizer.from_pretrained(model_name)
-            device = "cuda" if torch.cuda.is_available() else "cpu"
+            device = resolve_torch_device()
+            dtype = torch.float16 if device == "cuda" else torch.float32
             model = AutoModelForSequenceClassification.from_pretrained(
                 model_name,
-                torch_dtype=torch.float16 if device == "cuda" else torch.float32,
-                device_map=device,
+                torch_dtype=dtype,
+                device_map=device if device == "cuda" else None,
             )
+            if device in ("cuda", "mps"):
+                model.to(device)
             model.eval()
             model_bundle = {"model": model, "tokenizer": tokenizer, "device": device}
         except Exception as e:
@@ -54,10 +58,11 @@ def score(
 
     try:
         import torch
+        from shared.utils.device_utils import resolve_torch_device
 
         model = model_bundle["model"]
         tokenizer = model_bundle["tokenizer"]
-        device = model_bundle.get("device", "cpu")
+        device = resolve_torch_device(model_bundle.get("device", "cpu"))
 
         # Chuẩn bị query đa dạng hoa/thường cho cross-encoder
         words = query.strip().split()
@@ -80,27 +85,33 @@ def score(
                 doc = doc[:2000]
             pairs.append([query_for_model, doc])
 
-        inputs = tokenizer(
-            pairs,
-            padding=True,
-            truncation=True,
-            max_length=512,
-            return_tensors="pt",
-        ).to(model.device)
+        batch_size = 50  # Single batch cho toàn bộ candidates → 1 kernel launch, giảm synchronization overhead
+        all_scores: list[float] = []
+        device_type = "cuda" if device == "cuda" else ("mps" if device == "mps" else "cpu")
 
-        device_type = "cuda" if device == "cuda" else "cpu"
-        with torch.no_grad(), torch.amp.autocast(device_type=device_type, enabled=(device == "cuda")):
-            outputs = model(**inputs)
-            logits = outputs.logits
-            if logits.dim() > 1:
-                logits = logits.squeeze(-1)
-            scores_tensor = torch.sigmoid(logits)
-            scores = scores_tensor.cpu().numpy().tolist()
+        for i in range(0, len(pairs), batch_size):
+            batch_pairs = pairs[i : i + batch_size]
+            inputs = tokenizer(
+                batch_pairs,
+                padding=True,
+                truncation=True,
+                max_length=384,
+                return_tensors="pt",
+            ).to(model.device)
 
-        if isinstance(scores, float):
-            scores = [scores]
+            with torch.no_grad(), torch.amp.autocast(device_type=device_type, enabled=(device in ("cuda", "mps"))):
+                outputs = model(**inputs)
+                logits = outputs.logits
+                if logits.dim() > 1:
+                    logits = logits.squeeze(-1)
+                scores_tensor = torch.sigmoid(logits)
+                batch_scores = scores_tensor.cpu().numpy().tolist()
 
-        return [float(s) for s in scores]
+            if isinstance(batch_scores, (float, int)):
+                batch_scores = [batch_scores]
+            all_scores.extend([float(s) for s in batch_scores])
+
+        return all_scores
     except Exception as e:
         logger.error(f"Lỗi trong quá trình rerank ViRanker: {e}. Fallback score gốc.")
         return [float(c.score) for c in candidates]

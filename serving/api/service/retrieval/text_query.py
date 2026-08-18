@@ -76,6 +76,7 @@ async def process(
     qdrant_client,
     text_embedder: TextEmbeddingWrapper,
     image_embedder: ImageEmbeddingWrapper,
+    model_registry=None,
 ) -> TextQueryOutput:
     """
     Xử lý toàn bộ luồng text query: song ngữ EN/VI → encode (text + image vectors) → retrieve.
@@ -93,22 +94,31 @@ async def process(
         sub_events = _split_events(en_query)
         logger.info(f"TRAKE: tách được {len(sub_events)} sub-events từ query.")
 
-    # Tối ưu hóa: Nếu chỉ tìm kiếm bằng OCR hoặc ASR, không cần chạy model Qwen2 để sinh embedding text
-    # vì hệ thống sẽ sử dụng cơ chế so khớp từ khóa văn bản thuần túy (MatchText).
+    # Tối ưu hóa encoding dựa trên search_mode:
+    # - "all": Qdrant dùng MatchText cho OCR/ASR → KHÔNG CẦN chạy Qwen2 1.5B (tiết kiệm ~200-400ms)
+    # - "embedding": Qdrant dùng dense vector search → CẦN cả Qwen2 + CLIP
+    # - "ocr"/"asr": Chỉ dùng MatchText → KHÔNG CẦN encoding nào
     ocr_vector = []
     asr_vector = []
     image_vector = []
 
-    if query_input.search_mode in ["all", "embedding"]:
-        # Chạy song song sinh embedding cho Image (CLIP) và Text (Qwen2)
-        (ocr_vector, asr_vector), image_vector = await asyncio.gather(
-            _encode_text(vi_query, text_embedder),
-            _encode_text_to_image_vector(en_query, image_embedder),
-        )
-    else:
-        # Đối với chế độ ocr hoặc asr, chỉ cần chạy CLIP (nếu cần), hoặc bỏ qua nếu không dùng
-        # Ở đây ta khởi tạo rỗng để tiết kiệm tối đa thời gian xử lý và tài nguyên GPU
-        pass
+    if query_input.search_mode == "all":
+        # Chỉ cần CLIP text-to-image encoding (~50ms), bỏ qua Qwen2 1.5B hoàn toàn
+        if model_registry and hasattr(model_registry, "gpu_lock"):
+            async with model_registry.gpu_lock:
+                image_vector = await _encode_text_to_image_vector(en_query, image_embedder)
+        else:
+            image_vector = await _encode_text_to_image_vector(en_query, image_embedder)
+    elif query_input.search_mode == "embedding":
+        # Cần cả Qwen2 (OCR/ASR dense) + CLIP (image dense)
+        if model_registry and hasattr(model_registry, "gpu_lock"):
+            async with model_registry.gpu_lock:
+                (ocr_vector, asr_vector) = await _encode_text(vi_query, text_embedder)
+                image_vector = await _encode_text_to_image_vector(en_query, image_embedder)
+        else:
+            (ocr_vector, asr_vector) = await _encode_text(vi_query, text_embedder)
+            image_vector = await _encode_text_to_image_vector(en_query, image_embedder)
+    # else: search_mode == "ocr" hoặc "asr" → không cần encoding nào, giữ vectors rỗng
 
     _t2 = time.perf_counter()
     logger.info(f"[PROFILE] encode_text+image: {(_t2 - _t1) * 1000:.2f}ms")
@@ -151,28 +161,15 @@ _GOOGLE_ERROR_MARKERS = (
     "the server encountered an error",
 )
 
+import functools
+
 # deep_translator không set timeout cho requests.get() -> có thể treo vô hạn.
-# Giới hạn cứng mỗi lần dịch để request API không bao giờ bị chặn lâu.
-TRANSLATE_TIMEOUT_S = 15.0
+TRANSLATE_TIMEOUT_S = 2.0
 
 
 def _is_valid_translation(text: str, source: str) -> bool:
     """
     Kiểm tra output của GoogleTranslator có phải bản dịch hợp lệ hay không.
-
-    deep_translator đôi khi trả về trang lỗi HTML của Google như một "bản dịch"
-    thành công (không raise). Hàm này lọc các chuỗi không phải dịch thật:
-      - Rỗng / chỉ khoảng trắng.
-      - Chứa marker lỗi của Google ("Error 500", "That's an error", ...).
-      - Rò rỉ HTML (`<tag>`) hoặc ký tự không in được.
-      - Không chứa từ tiếng Latinh thật (error page thường chỉ là symbol noise).
-
-    Args:
-        text: Output mà translator trả về.
-        source: Query nguồn gốc (dùng để chặn output quá lệch).
-
-    Returns:
-        True nếu text được coi là bản dịch hợp lệ, ngược lại False.
     """
     if not text or not text.strip():
         return False
@@ -180,57 +177,48 @@ def _is_valid_translation(text: str, source: str) -> bool:
     lowered = text.lower()
     if any(marker in lowered for marker in _GOOGLE_ERROR_MARKERS):
         return False
-    # Rò rỉ HTML markup -> đánh dấu là lỗi
     if "<" in text and ">" in text:
         return False
-    # Phải chứa ít nhất một từ Latinh (2 ký tự chữ trở lên)
     if not re.search(r"[A-Za-zÀ-ỹ]{2,}", text):
         return False
-    # Bản dịch hợp lệ hiếm khi dài hơn một bội số hợp lý so với nguồn
     if len(text) > 5 * max(len(source), 1) + 500:
         return False
     return True
 
 
+@functools.lru_cache(maxsize=1024)
+def _cached_translate_sync(query: str, target: str) -> str | None:
+    from deep_translator import GoogleTranslator
+    try:
+        translator = GoogleTranslator(source="auto", target=target)
+        out = translator.translate(query)
+        if out and _is_valid_translation(out, query):
+            return out
+    except Exception as e:
+        logger.warning(f"GoogleTranslator ({query} -> {target}) failed: {e}")
+    return None
+
+
 async def _translate(query: str, target: str) -> str | None:
     """
-    Dịch `query` sang ngôn ngữ `target` bằng deep_translator.GoogleTranslator,
-    kèm validate + retry để trang lỗi HTML của Google không bao giờ lọt vào kết quả.
+    Dịch `query` sang ngôn ngữ `target` với LRU Cache và timeout 2.0s.
 
     Args:
         query: Query nguồn (tiếng Việt hoặc tiếng Anh).
         target: Mã ngôn ngữ đích ("en" / "vi").
 
     Returns:
-        Bản dịch hợp lệ, hoặc None nếu mọi lần dịch đều lỗi/không hợp lệ.
+        Bản dịch hợp lệ, hoặc None nếu lỗi/timeout.
     """
     import asyncio
-    from deep_translator import GoogleTranslator
-
-    attempts = 0
-    while attempts < 2:
-        attempts += 1
-        try:
-            translator = GoogleTranslator(source="auto", target=target)
-            # deep_translator KHÔNG set timeout cho requests.get() -> có thể treo vô hạn.
-            # Bọc thêm timeout cứng để không bao giờ chặn request > TRANSLATE_TIMEOUT_S.
-            out = await asyncio.wait_for(
-                asyncio.to_thread(translator.translate, query),
-                timeout=TRANSLATE_TIMEOUT_S,
-            )
-        except Exception as e:
-            logger.warning(f"GoogleTranslator (attempt {attempts} -> {target}) failed: {e}")
-            out = None
-
-        if out and _is_valid_translation(out, query):
-            return out
-
-        logger.warning(
-            f"GoogleTranslator (attempt {attempts} -> {target}) returned non-translation "
-            f"output (len={len(out or '')}): {str(out)[:120]!r}. Falling back."
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(_cached_translate_sync, query, target),
+            timeout=TRANSLATE_TIMEOUT_S,
         )
-
-    return None
+    except Exception as e:
+        logger.warning(f"Translation timeout/error for '{query}' -> {target}: {e}")
+        return None
 
 
 async def _enhance_query(raw_query: str) -> tuple[str, str]:
@@ -418,12 +406,51 @@ Sự kiện:"""
         return []
 
 
+# =============================================================================
+# Embedding LRU Cache — cache GPU inference results cho query lặp lại
+# =============================================================================
+
+_text_embed_cache: dict[str, tuple[list[float], list[float]]] = {}
+_clip_embed_cache: dict[str, list[float]] = {}
+_EMBED_CACHE_MAXSIZE = 512
+
+
+def _get_text_embed_cached(text: str, embedder: TextEmbeddingWrapper) -> tuple[list[float], list[float]]:
+    """Encode text qua Qwen2 với LRU cache (key = text string)."""
+    if text in _text_embed_cache:
+        return _text_embed_cache[text]
+    vec = embedder.encode(text)
+    vec_list = vec.tolist() if hasattr(vec, "tolist") else list(vec)
+    result = (vec_list, vec_list)
+    # Evict oldest if cache full
+    if len(_text_embed_cache) >= _EMBED_CACHE_MAXSIZE:
+        oldest_key = next(iter(_text_embed_cache))
+        del _text_embed_cache[oldest_key]
+    _text_embed_cache[text] = result
+    return result
+
+
+def _get_clip_embed_cached(text: str, embedder: ImageEmbeddingWrapper) -> list[float]:
+    """Encode text qua CLIP text encoder với LRU cache (key = text string)."""
+    if text in _clip_embed_cache:
+        return _clip_embed_cache[text]
+    vec = embedder.encode_text(text)
+    vec_list = vec.tolist() if hasattr(vec, "tolist") else list(vec)
+    # Evict oldest if cache full
+    if len(_clip_embed_cache) >= _EMBED_CACHE_MAXSIZE:
+        oldest_key = next(iter(_clip_embed_cache))
+        del _clip_embed_cache[oldest_key]
+    _clip_embed_cache[text] = vec_list
+    return vec_list
+
+
 async def _encode_text(
     text: str,
     embedder: TextEmbeddingWrapper,
 ) -> tuple[list[float], list[float]]:
     """
     Encode text thành 2 dense vectors: ocr_vector và asr_vector (dim=1536).
+    Sử dụng LRU cache để skip GPU inference cho query lặp lại.
 
     Args:
         text: Text đã enhanced.
@@ -433,13 +460,7 @@ async def _encode_text(
         Tuple (ocr_vector, asr_vector) list[float], len=1536.
     """
     import asyncio
-    vec = await asyncio.to_thread(embedder.encode, text)
-    if hasattr(vec, "tolist"):
-        vec_list = vec.tolist()
-    else:
-        vec_list = list(vec)
-
-    return vec_list, vec_list
+    return await asyncio.to_thread(_get_text_embed_cached, text, embedder)
 
 
 def _encode_sparse(text: str) -> tuple[object | None, object | None]:
@@ -456,6 +477,7 @@ async def _encode_text_to_image_vector(
 ) -> list[float]:
     """
     Encode text query thành image dense vector (Text-to-Image) dùng CLIP text encoder (dim=1024).
+    Sử dụng LRU cache để skip GPU inference cho query lặp lại.
 
     Args:
         text: Text đã enhanced.
@@ -465,8 +487,5 @@ async def _encode_text_to_image_vector(
         list[float], len=1024, L2-normalized.
     """
     import asyncio
-    vec = await asyncio.to_thread(embedder.encode_text, text)
-    if hasattr(vec, "tolist"):
-        return vec.tolist()
-    return list(vec)
+    return await asyncio.to_thread(_get_clip_embed_cached, text, embedder)
 

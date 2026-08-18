@@ -101,7 +101,7 @@ async def run(
 
     # 1. Thu thập candidates thô theo input type
     if input_type == InputType.TEXT:
-        pipeline_res = await _run_text(request, task_type, qdrant_client, text_embedder, image_embedder)
+        pipeline_res = await _run_text(request, task_type, qdrant_client, text_embedder, image_embedder, model_registry)
     elif input_type == InputType.VOICE:
         pipeline_res = await _run_voice(request, task_type, qdrant_client, text_embedder, image_embedder, asr_model)
     elif input_type == InputType.IMAGE:
@@ -109,17 +109,17 @@ async def run(
     else:
         raise ValueError(f"Unsupported input_type: {input_type}")
 
-    # 2. Thực hiện Rerank nếu có candidates và là task KIS/VQA
+    # 2. Thực hiện Rerank nếu có candidates và là task KIS/VQA và reranker được bật
     candidates = pipeline_res.candidates
-    if candidates and task_type in (TaskType.KIS, TaskType.VQA):
-        use_reranker = getattr(request, "use_reranker", False)
+    use_reranker = getattr(request, "use_reranker", False)
+    if candidates and task_type in (TaskType.KIS, TaskType.VQA) and use_reranker:
         raw_query = getattr(request, "query", "")
         candidates = await rerank_service.rerank(
             query=raw_query,
             candidates=candidates,
             enhanced_query=pipeline_res.enhanced_query,
             keyframes_root_dir=str(get_settings().DATA_DIR),
-            use_visual_reranker=use_reranker,
+            use_visual_reranker=False,  # Jina M0 tắt mặc định, bật riêng nếu cần
             model_registry=model_registry,
         )
 
@@ -185,6 +185,7 @@ async def _run_text(
     qdrant_client,
     text_embedder,
     image_embedder,
+    model_registry=None,
 ) -> PipelineResult:
     raw_query = getattr(request, "query", "")
     top_k = getattr(request, "top_k", 100)
@@ -203,6 +204,7 @@ async def _run_text(
         qdrant_client=qdrant_client,
         text_embedder=text_embedder,
         image_embedder=image_embedder,
+        model_registry=model_registry,
     )
 
     return PipelineResult(
