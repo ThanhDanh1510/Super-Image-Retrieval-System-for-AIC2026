@@ -100,7 +100,18 @@ def score(
         if isinstance(scores, float):
             scores = [scores]
 
-        return [float(s) for s in scores]
+        q_lower = query.lower().strip()
+        final_scores = []
+        for i, s in enumerate(scores):
+            sc = float(s)
+            c = candidates[i]
+            ocr = (getattr(c, "ocr_text", "") or "").lower()
+            desc = (getattr(c, "description", "") or "").lower()
+            if q_lower and (q_lower in ocr or q_lower in desc):
+                sc = min(sc + 0.35, 1.0)
+            final_scores.append(sc)
+
+        return final_scores
     except Exception as e:
         logger.error(f"Lỗi trong quá trình rerank ViRanker: {e}. Fallback score gốc.")
         return [float(c.score) for c in candidates]
