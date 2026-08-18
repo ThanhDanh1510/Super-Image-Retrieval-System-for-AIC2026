@@ -933,14 +933,18 @@ if (modalEl) {
   // Tìm ảnh tương tự từ Lightbox
   const videoSearchSimBtn = document.getElementById("video-search-similar-btn");
   if (videoSearchSimBtn) {
-    videoSearchSimBtn.addEventListener("click", (e) => {
+    const syncVideoSearchButton = () => {
+      videoSearchSimBtn.disabled = !currentVideoId || !modalVideoEl.paused;
+    };
+    modalVideoEl.addEventListener("loadedmetadata", syncVideoSearchButton);
+    modalVideoEl.addEventListener("play", syncVideoSearchButton);
+    modalVideoEl.addEventListener("pause", syncVideoSearchButton);
+    syncVideoSearchButton();
+
+    videoSearchSimBtn.addEventListener("click", async (e) => {
       e.stopPropagation();
-      if (!currentVideoId) return;
-      const targetCand = {
-        video_id: currentVideoId,
-        frame_id: currentVideoFrame(),
-      };
-      searchSimilarByCandidate(targetCand);
+      if (!currentVideoId || !modalVideoEl.paused) return;
+      await searchSimilarToCurrentFrame();
     });
   }
 
@@ -975,6 +979,64 @@ if (modalEl) {
     updateDrawer();
     showToast(`➕ Đã thêm ${newCand.video_id},${newCand.frame_id} vào giỏ`);
   });
+
+}
+
+// Chụp khung hình đang dừng trong video-modal rồi gọi API image-to-image search
+async function searchSimilarToCurrentFrame() {
+  if (!modalVideoEl.videoWidth || !modalVideoEl.videoHeight) {
+    showToast("⚠️ Chưa sẵn sàng khung hình để tìm kiếm");
+    return;
+  }
+
+  const button = document.getElementById("video-search-similar-btn");
+  const prevLabel = button ? button.textContent : "";
+  if (button) {
+    button.disabled = true;
+    button.textContent = "⏳ Đang tìm...";
+  }
+  statusBar.textContent = "🕸️ Spidey đang tìm ảnh tương đồng với khung hình đang dừng...";
+
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = modalVideoEl.videoWidth;
+    canvas.height = modalVideoEl.videoHeight;
+    canvas.getContext("2d").drawImage(modalVideoEl, 0, 0, canvas.width, canvas.height);
+
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
+    if (!blob) throw new Error("Không thể chụp khung hình từ video");
+
+    const formData = new FormData();
+    formData.append("file", blob, "frame.jpg");
+
+    const startTime = performance.now();
+    const resp = await fetch(`${API_BASE}/api/v1/similar-image?top_k=${state.topK}`, {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    const duration = ((performance.now() - startTime) / 1000).toFixed(2);
+
+    state.rawResults = data.results || [];
+    renderResults(state.rawResults);
+
+    modalEl.style.display = "none";
+    closeLightboxVideo();
+
+    statusBar.textContent = `✅ Tìm thấy ${state.rawResults.length} ảnh tương đồng với khung hình đã chọn`;
+    speedTag.textContent = `${duration}s`;
+    speedTag.style.display = "inline-block";
+  } catch (err) {
+    statusBar.textContent = `❌ Lỗi khi tìm ảnh tương đồng: ${err.message}`;
+    showToast(`❌ Lỗi: ${err.message}`);
+  } finally {
+    if (button) {
+      button.disabled = !currentVideoId || !modalVideoEl.paused;
+      button.textContent = prevLabel;
+    }
+  }
 }
 
 // Text Zoom Modal Handling (Click any box to enlarge Image Description/OCR/ASR text)
