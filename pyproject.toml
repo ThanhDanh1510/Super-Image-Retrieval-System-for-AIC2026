@@ -31,6 +31,15 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+macos-server = [
+    # Runtime imports used by the API and local indexing on macOS.
+    "opencv-python>=4.10.0,<5.0.0",
+    "pandas>=2.2.0,<3.0.0",
+    "pyarrow>=17.0.0,<20.0.0",
+    "rank-bm25==0.2.2",
+    "deep-translator==1.11.4",
+]
+
 # MỘT extra duy nhất — cài tất cả trong 1 virtual environment duy nhất
 # (serving + ingestion + dev tools + Kaggle CLI). Không tách venv riêng.
 all = [

@@ -45,18 +45,13 @@ cd Super-Image-Retrieval-System-for-AIC2026
 # Cài đặt uv
 pip3 install uv
 
-# Tạo môi trường ảo & Kích hoạt
-uv venv .venv
-source .venv/bin/activate
-
-# Cài đặt PyTorch mặc định (Tự động hỗ trợ Apple Silicon MPS hoặc Intel CPU)
-uv pip install torch torchvision torchaudio
-
-# Cài đặt toàn bộ dependencies
-uv pip install -e ".[all]"
+# Cài dependency đã khóa phiên bản cho API/local indexing.
+# Không dùng extra `all` trên macOS vì nó chứa paddlepaddle-gpu (chỉ dành cho CUDA).
+uv sync --locked --extra macos-server
 ```
 *Lưu ý cho macOS:* 
-- Nếu bạn dùng máy Mac chip **Apple Silicon (M1/M2/M3)**, hãy sửa biến môi trường trong file `.env` thành `AIC_DEVICE=mps` để sử dụng GPU tích hợp (Metal Performance Shaders).
+- Nếu bạn dùng máy Mac chip **Apple Silicon (M1/M2/M3/M4)**, hệ thống đã hỗ trợ tăng tốc GPU Metal với `AIC_DEVICE=mps`.
+- Đặt `AIC_PRELOAD_MODELS=false` nếu muốn tiết kiệm RAM (lazy-load), hoặc `AIC_PRELOAD_MODELS=true` để warmup sẵn models.
 - Nếu dùng máy Mac chip **Intel**, hãy để `AIC_DEVICE=cpu`.
 
 
@@ -431,4 +426,3 @@ Get-Content "server.log" | Select-String "PROFILE"
 2. **Aggregation (Local):** `pull_shards`, `verify_shards`, `merge_datasets`, `map_keyframes_to_unified` → `data/unified/`.
 3. **Indexing (Qdrant):** `run_index` nạp vectors + metadata + BM42 sparse → gắn alias `production`.
 4. **Serving (FastAPI):** query text/voice/ảnh → embeddings → Weighted RRF trên 5 branches → rerank → trả kết quả. TRAKE thêm bước temporal alignment (DANTE).
-
