@@ -32,6 +32,8 @@ def free_memory() -> None:
 
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+        elif hasattr(torch, "mps") and hasattr(torch.mps, "empty_cache"):
+            torch.mps.empty_cache()
     except Exception:
         pass
 
