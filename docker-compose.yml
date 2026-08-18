@@ -8,3 +8,21 @@ services:
     volumes:
       - ./data/qdrant_storage:/qdrant/storage
     restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: aic2026_api
+    ports:
+      - "8000:8000"
+    environment:
+      - QDRANT_URL=http://qdrant:6333
+      - AIC_DEVICE=cpu
+      - DATA_DIR=/app/data
+    volumes:
+      - ./data:/app/data
+      - ./data/hf_cache:/root/.cache/huggingface
+    depends_on:
+      - qdrant
+    restart: unless-stopped
