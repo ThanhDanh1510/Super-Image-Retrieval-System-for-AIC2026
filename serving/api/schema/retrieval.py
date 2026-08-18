@@ -67,6 +67,7 @@ class CandidateResult(BaseModel):
     ocr_text: str = Field(default="", description="Text OCR nhận dạng được từ keyframe")
     asr_text: str = Field(default="", description="Transcript ASR của scene")
     description: str = Field(default="", description="Mô tả cảnh AI VLM từ scene_descriptions.parquet")
+    answer: str = Field(default="", description="Câu trả lời VQA của user choice nếu có")
 
     score: float = Field(
         ...,

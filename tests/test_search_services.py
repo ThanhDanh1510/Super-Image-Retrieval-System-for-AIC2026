@@ -10,21 +10,37 @@ Systematic automated test suite for all retrieval search services:
 
 import httpx
 import pytest
+from starlette.testclient import TestClient
+from serving.api.main import app
 
-BASE_URL = "http://localhost:8000"
+
+@pytest.fixture(scope="module")
+def client():
+    """Tự động sử dụng Live Server nếu đang chạy, hoặc TestClient in-process."""
+    try:
+        r = httpx.get("http://127.0.0.1:8000/health", timeout=0.5)
+        if r.status_code == 200:
+            c = httpx.Client(base_url="http://127.0.0.1:8000", timeout=120.0)
+            yield c
+            c.close()
+            return
+    except Exception:
+        pass
+    with TestClient(app) as tc:
+        yield tc
 
 
 # =============================================================================
 # 1. KIS (Known-Item Search) Endpoint Tests
 # =============================================================================
 
-def test_kis_text_search():
+def test_kis_text_search(client):
     """Test standard KIS text query retrieval."""
     payload = {
         "query": "người phụ nữ đi xe máy trên đường phố",
         "top_k": 5
     }
-    res = httpx.post(f"{BASE_URL}/api/v1/kis", json=payload, timeout=120.0)
+    res = client.post("/api/v1/kis", json=payload)
     assert res.status_code == 200
     data = res.json()
     assert "results" in data
@@ -38,7 +54,7 @@ def test_kis_text_search():
     assert "score" in first_res
 
 
-def test_kis_user_choices_prioritization():
+def test_kis_user_choices_prioritization(client):
     """Test user manual frame selection override in KIS."""
     user_choice = {
         "video_id": "CUSTOM_VID_001",
@@ -56,11 +72,10 @@ def test_kis_user_choices_prioritization():
         "top_k": 5,
         "user_choices": [user_choice]
     }
-    res = httpx.post(f"{BASE_URL}/api/v1/kis", json=payload, timeout=120.0)
+    res = client.post("/api/v1/kis", json=payload)
     assert res.status_code == 200
     data = res.json()
     assert len(data["results"]) > 0
-    # First result must be the user choice override
     first = data["results"][0]
     assert first["video_id"] == "CUSTOM_VID_001"
     assert first["frame_id"] == 999
@@ -71,14 +86,14 @@ def test_kis_user_choices_prioritization():
 # 2. VQA (Visual Question Answering) Endpoint Tests
 # =============================================================================
 
-def test_vqa_search():
+def test_vqa_search(client):
     """Test Visual Question Answering retrieval service."""
     payload = {
         "query": "cảnh gian hàng bán trái cây trong chợ",
         "question": "Có những loại quả nào trên bàn?",
         "top_k": 5
     }
-    res = httpx.post(f"{BASE_URL}/api/v1/vqa", json=payload, timeout=120.0)
+    res = client.post("/api/v1/vqa", json=payload)
     assert res.status_code == 200
     data = res.json()
     assert "results" in data
@@ -87,7 +102,7 @@ def test_vqa_search():
     assert data["total"] <= 5
 
 
-def test_vqa_user_choices_with_answer():
+def test_vqa_user_choices_with_answer(client):
     """Test VQA manual selection carrying user-typed answer."""
     user_choice = {
         "video_id": "L10_V005",
@@ -102,7 +117,7 @@ def test_vqa_user_choices_with_answer():
         "top_k": 3,
         "user_choices": [user_choice]
     }
-    res = httpx.post(f"{BASE_URL}/api/v1/vqa", json=payload, timeout=120.0)
+    res = client.post("/api/v1/vqa", json=payload)
     assert res.status_code == 200
     data = res.json()
     assert len(data["results"]) > 0
@@ -114,27 +129,24 @@ def test_vqa_user_choices_with_answer():
 # 3. TRAKE (Temporal Retrieval / Multi-event) Endpoint Tests
 # =============================================================================
 
-def test_trake_temporal_search():
+def test_trake_temporal_search(client):
     """Test Temporal Retrieval multi-event chain matching."""
     payload = {
         "query": "Đầu tiên người đàn ông mở cửa đi vào nhà. Sau đó ông ta ngồi xuống ghế sofa mở tivi.",
         "num_events": 2,
         "top_k": 3
     }
-    res = httpx.post(f"{BASE_URL}/api/v1/trake", json=payload, timeout=30.0)
+    res = client.post("/api/v1/trake", json=payload)
     assert res.status_code == 200
     data = res.json()
     assert "results" in data
     assert "num_events" in data
     assert data["num_events"] == 2
-    # Each item in results should be a list of N CandidateResult items from the SAME video
     for chain in data["results"]:
         assert isinstance(chain, list)
         assert len(chain) == 2
-        # CRITICAL CONSTRAINTS: All candidates in chain must belong to the exact same video_id
         video_ids = {cand["video_id"] for cand in chain}
         assert len(video_ids) == 1, f"TRAKE chain contains candidates from multiple videos: {video_ids}"
-        # CRITICAL CONSTRAINTS: Timestamps within a chain must be strictly increasing (NO exact duplicates)
         timestamps = [round(cand["timestamp_mid"], 2) for cand in chain]
         assert len(set(timestamps)) == len(timestamps), f"TRAKE chain contains duplicate exact timestamps: {timestamps}"
         assert timestamps == sorted(timestamps), f"TRAKE chain timestamps are not sequential: {timestamps}"
@@ -144,7 +156,7 @@ def test_trake_temporal_search():
 # 4. Similar Image Search Endpoint Tests
 # =============================================================================
 
-def test_similar_image_search():
+def test_similar_image_search(client):
     """Test Image-to-Image visual similarity search."""
     png_bytes = (
         b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00"
@@ -152,7 +164,7 @@ def test_similar_image_search():
         b"\x8d\xb0\x00\x00\x00\x00IEND\xaeB`\x82"
     )
     files = {"file": ("query_image.png", png_bytes, "image/png")}
-    res = httpx.post(f"{BASE_URL}/api/v1/similar-image?top_k=5", files=files, timeout=30.0)
+    res = client.post("/api/v1/similar-image?top_k=5", files=files)
     assert res.status_code == 200
     data = res.json()
     assert "results" in data

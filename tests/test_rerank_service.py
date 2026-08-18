@@ -109,7 +109,7 @@ async def test_rerank_uses_enhanced_query_over_raw_query(candidates, mock_rerank
     viranker, jina, _ = mock_rerankers
     await rerank_service.rerank("câu hỏi tiếng Việt", candidates, enhanced_query="english query", use_visual_reranker=True)
 
-    viranker.score.assert_called_once_with("english query", candidates, None)
+    viranker.score.assert_called_once_with("câu hỏi tiếng Việt", candidates, None)
     jina.score.assert_called_once_with("english query", candidates, "", None)
 
 
