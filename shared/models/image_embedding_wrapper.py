@@ -1,14 +1,12 @@
 """
 shared/models/image_embedding_wrapper.py
 =========================================
-Wrapper chuẩn hóa cho image embedding model (CLIP ViT-L/14).
+Wrapper chuẩn hóa cho CLIP ViT-L/14 image embedding model.
 
 RÀNG BUỘC CỨNG:
-  - encode() phải trả về L2-normalized vector dim=1024.
-  - Dim phải khớp với named_vector_spec.IMAGE_DENSE.dim = 1024.
-
-GHI CHÚ RAM: Chỉ load CLIP (1 model duy nhất) — BEiT đã được bỏ khỏi
-wrapper để giảm bộ nhớ; fused BEiT + CLIP chỉ tồn tại phía indexing.
+  - encode() phải trả về L2-normalized vector.
+  - dim của output phải bằng đúng named_vector_spec.IMAGE_DENSE.dim (1024).
+  - Tương thích đa nền tảng: CUDA (NVIDIA), MPS (Apple Silicon), CPU.
 """
 
 from __future__ import annotations
@@ -16,9 +14,10 @@ from __future__ import annotations
 import io
 import logging
 from typing import Union
-
 import numpy as np
 from PIL import Image
+
+from shared.utils.device_utils import resolve_torch_device
 
 logger = logging.getLogger(__name__)
 
@@ -52,18 +51,23 @@ class ImageEmbeddingWrapper:
             import transformers
             from transformers import CLIPModel, CLIPProcessor
 
-            device_str = "cuda" if (device == "cuda" and torch.cuda.is_available()) else "cpu"
+            device_str = resolve_torch_device(device)
             if device_str == "cuda":
                 try:
-                    # Test GPU kernel capability
                     _t = torch.zeros(1, device="cuda")
                 except Exception:
-                    logger.warning("CUDA execution failed (no kernel image for GPU architecture). Falling back to CPU for Real Model.")
+                    logger.warning("CUDA execution failed. Falling back to CPU for Real Model.")
+                    device_str = "cpu"
+            elif device_str == "mps":
+                try:
+                    _t = torch.zeros(1, device="mps")
+                except Exception:
+                    logger.warning("MPS execution failed. Falling back to CPU for Real Model.")
                     device_str = "cpu"
 
             logger.info(f"Loading CLIP model '{self.CLIP_MODEL_ID}' on {device_str} (transformers v{transformers.__version__})...")
             self.clip_processor = CLIPProcessor.from_pretrained(self.CLIP_MODEL_ID)
-            dtype = torch.float16 if device_str == "cuda" else torch.float32
+            dtype = torch.float16 if device_str in ("cuda", "mps") else torch.float32
             self.clip_model = CLIPModel.from_pretrained(
                 self.CLIP_MODEL_ID,
                 torch_dtype=dtype,
@@ -99,7 +103,6 @@ class ImageEmbeddingWrapper:
         """Tạo deterministic mock vector 1024-dim cho 1 PIL Image khi offline."""
         img_rgb = img.convert("RGB").resize((64, 64))
         arr = np.array(img_rgb, dtype=np.float32) / 255.0
-        # Seed dựa trên mean pixel values
         seed = int(np.sum(arr * 1000.0)) % (2**31 - 1)
         rng = np.random.RandomState(seed)
         raw_vec = rng.randn(1024).astype(np.float32)
