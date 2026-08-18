@@ -104,7 +104,7 @@ async def lifespan(app: FastAPI):
     app.state.model_registry = registry
 
     if settings.PRELOAD_MODELS:
-        logger.info("PRELOAD_MODELS=true — warmup toàn bộ model ngay lúc startup...")
+        logger.info("PRELOAD_MODELS=true — warmup đồng thời toàn bộ model ngay lúc startup (loại trừ Jina Reranker M0)...")
         await registry.warmup_async()
     else:
         logger.info(

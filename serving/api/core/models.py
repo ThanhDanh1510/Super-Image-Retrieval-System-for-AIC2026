@@ -148,12 +148,15 @@ class ModelRegistry:
     # Warmup / Unload Lifecycle
     # =========================================================================
 
-    async def warmup_async(self) -> None:
-        """Preload toàn bộ các model đã đăng ký (dùng khi PRELOAD_MODELS=true)."""
-        keys = list(self._loaders().keys())
+    async def warmup_async(self, exclude_keys: tuple[str, ...] = ("jina_m0",)) -> None:
+        """
+        Preload đồng thời tất cả các model đã đăng ký (trừ các model trong exclude_keys).
+        Mặc định loại trừ 'jina_m0' để tiết kiệm VRAM và chỉ load khi người dùng bật thủ công trên UI.
+        """
+        keys = [k for k in self._loaders().keys() if k not in exclude_keys]
         tasks = [self.aget(k) for k in keys]
         await asyncio.gather(*tasks, return_exceptions=True)
-        logger.info(f"ModelRegistry: warmup hoàn tất cho {len(keys)} models/engines.")
+        logger.info(f"ModelRegistry: warmup hoàn tất đồng thời cho {len(keys)} models/engines (loại trừ: {list(exclude_keys)}).")
 
     def unload(self, key: str) -> None:
         """Giải phóng 1 model khỏi RAM/VRAM."""
