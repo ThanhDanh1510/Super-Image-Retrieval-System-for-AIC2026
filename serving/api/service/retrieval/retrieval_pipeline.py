@@ -134,7 +134,10 @@ async def run(
                 model_registry=model_registry,
             )
 
-    # 3. Ghép user choices (nếu có) lên đầu danh sách
+    # 3. Áp dụng bộ lọc đa dạng hóa thời gian/slide (Temporal Diversity Filter)
+    candidates = _apply_temporal_diversity_filter(candidates)
+
+    # 4. Ghép user choices (nếu có) lên đầu danh sách
     user_choices = getattr(request, "user_choices", [])
     top_k = getattr(request, "top_k", 100)
     final_candidates = _merge_user_choices(user_choices, candidates, top_k)
@@ -184,6 +187,42 @@ def _merge_user_choices(
             final_results.append(cand)
 
     return final_results
+
+
+def _apply_temporal_diversity_filter(
+    candidates: list[CandidateResult],
+    max_frames_per_cluster: int = 2,
+    time_window_sec: float = 6.0,
+) -> list[CandidateResult]:
+    """
+    Giảm thiểu hiện tượng 'ngập lụt' các frame trùng lặp sát nhau trong cùng 1 video (ví dụ slide bài giảng lặp lại).
+    Giữ tối đa `max_frames_per_cluster` frame có điểm cao nhất trong cùng cửa sổ `time_window_sec`,
+    các frame còn lại được xếp về sau để đảm bảo kết quả tìm kiếm đa dạng nhiều video và bối cảnh.
+    """
+    if len(candidates) <= 1:
+        return candidates
+
+    selected: list[CandidateResult] = []
+    overflow: list[CandidateResult] = []
+
+    video_timestamps: dict[str, list[float]] = {}
+
+    for cand in candidates:
+        vid = cand.video_id
+        t = cand.timestamp_mid if cand.timestamp_mid is not None else (cand.frame_id / 25.0)
+
+        if vid not in video_timestamps:
+            video_timestamps[vid] = [t]
+            selected.append(cand)
+        else:
+            close_count = sum(1 for prev_t in video_timestamps[vid] if abs(prev_t - t) <= time_window_sec)
+            if close_count < max_frames_per_cluster:
+                video_timestamps[vid].append(t)
+                selected.append(cand)
+            else:
+                overflow.append(cand)
+
+    return selected + overflow
 
 
 # =============================================================================
