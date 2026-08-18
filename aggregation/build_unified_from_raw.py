@@ -38,6 +38,11 @@ import pandas as pd
 import numpy as np
 
 from shared.utils.text_normalizer import normalize_nfc, clean_whitespace
+from aggregation.common import (
+    DEFAULT_FPS,
+    IMAGE_EXTENSIONS,
+    parse_video_and_frame_id,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -57,50 +62,13 @@ def parse_raw_images(image_dir: str | Path) -> pd.DataFrame:
         raise FileNotFoundError(f"Không tìm thấy thư mục ảnh: {image_dir}")
 
     records = []
-    # Tìm các file ảnh .webp, .jpg, .jpeg, .png
-    img_extensions = {".webp", ".jpg", ".jpeg", ".png"}
-
     for file_path in image_dir.rglob("*"):
-        if file_path.suffix.lower() not in img_extensions:
+        if file_path.suffix.lower() not in IMAGE_EXTENSIONS:
             continue
 
-        # Extract frame_id từ stem (ví dụ "10141" -> 10141)
-        stem = file_path.stem
-        try:
-            frame_id = int(stem)
-        except ValueError:
-            # Nếu stem chứa chữ, thử tìm số cuối cùng trong stem
-            numbers = re.findall(r"\d+", stem)
-            if not numbers:
-                continue
-            frame_id = int(numbers[-1])
-
-        # Extract video_id từ các parent directories
-        # Ví dụ: file_path = .../L21/L21/V001/10141.webp
-        # parts: ..., 'L21', 'L21', 'V001', '10141.webp'
-        parts = file_path.parts
-        video_id = None
-
-        # Thử ghép group + video: nếu parent folder dạng 'V001' và grand-parent dạng 'L21'
-        for i in range(len(parts) - 1, 0, -1):
-            part = parts[i]
-            # Match dạng 'L21_V001' hoặc 'V001'
-            if re.match(r"^L\d+_V\d+$", part, re.IGNORECASE):
-                video_id = part.upper()
-                break
-            elif re.match(r"^V\d+$", part, re.IGNORECASE) and i >= 1:
-                parent_part = parts[i - 1]
-                if re.match(r"^L\d+$", parent_part, re.IGNORECASE):
-                    video_id = f"{parent_part.upper()}_{part.upper()}"
-                    break
-
-        if not video_id:
-            # Fallback nếu folder là 'V001' mà không tìm thấy 'L21'
-            v_match = re.search(r"(L\d+_V\d+|V\d+)", file_path.as_posix(), re.IGNORECASE)
-            if v_match:
-                video_id = v_match.group(1).upper()
-            else:
-                continue
+        video_id, frame_id = parse_video_and_frame_id(file_path)
+        if not video_id or frame_id is None:
+            continue
 
         records.append({
             "video_id": video_id,

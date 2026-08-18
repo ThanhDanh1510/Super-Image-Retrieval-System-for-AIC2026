@@ -28,6 +28,8 @@ import numpy as np
 import pandas as pd
 import torch
 
+from aggregation.common import slice_and_save_vector_file
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -235,31 +237,17 @@ def main():
         desc_df.to_parquet(desc_meta, index=False)
         logger.info(f"Đã lưu scene_descriptions.parquet mới: {len(desc_df)} rows")
 
-    # Cắt và lưu lại các file vector .npy
-    for vec_name in ["image_vectors.npy", "ocr_vectors.npy", "asr_vectors.npy"]:
+    # Cắt và lưu lại các file vector .npy & .pt
+    keep_indices = np.where(keep_mask_txt)[0]
+    for vec_name in ["image_vectors.npy", "ocr_vectors.npy", "asr_vectors.npy", "description_vectors.npy", "description_embeddings.pt"]:
         vec_path = unified_dir / vec_name
         if vec_path.exists():
             logger.info(f"Đang cắt và cập nhật {vec_name}...")
-            vecs = np.load(vec_path)
-            if len(vecs) == len(keep_mask_txt):
-                new_vecs = vecs[keep_mask_txt]
-                np.save(vec_path, new_vecs)
-                logger.info(f"Đã lưu {vec_name} mới: shape={new_vecs.shape}")
+            ok = slice_and_save_vector_file(vec_path, keep_indices)
+            if ok:
+                logger.info(f"Đã cập nhật {vec_name} thành công.")
             else:
-                logger.warning(f"Độ dài {vec_name} ({len(vecs)}) không khớp scene_ids.txt ({len(keep_mask_txt)}). Bỏ qua.")
-
-    # Cắt và lưu lại description_embeddings.pt nếu có
-    pt_path = unified_dir / "description_embeddings.pt"
-    if pt_path.exists():
-        try:
-            logger.info("Đang cắt và cập nhật description_embeddings.pt...")
-            desc_t = torch.load(pt_path, map_location="cpu")
-            if len(desc_t) == len(keep_mask_txt):
-                new_desc_t = desc_t[keep_mask_txt]
-                torch.save(new_desc_t, pt_path)
-                logger.info(f"Đã lưu description_embeddings.pt mới: shape={new_desc_t.shape}")
-        except Exception as e:
-            logger.error(f"Lỗi cập nhật description_embeddings.pt: {e}")
+                logger.warning(f"Không thể cắt hoặc cập nhật {vec_name}.")
 
     # Đồng bộ xóa trong thư mục data/ocr_output/ (L21_ocr.parquet, L22_ocr.parquet, ...)
     ocr_output_dir = unified_dir.parent / "ocr_output"
