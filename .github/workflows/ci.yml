@@ -38,21 +38,21 @@ jobs:
         run: |
           uv venv .venv
           uv pip install torch torchvision torchaudio
-          uv pip install -e ".[macos-server,all]"
+          uv pip install -e ".[macos-server,test]"
 
       - name: Install PyTorch & Dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
           uv venv .venv
           uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
-          uv pip install -e ".[all]"
+          uv pip install -e ".[test]"
 
       - name: Install PyTorch & Dependencies (Windows)
         if: runner.os == 'Windows'
         run: |
           uv venv .venv
           uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
-          uv pip install -e ".[all]"
+          uv pip install -e ".[test]"
 
       - name: Run Core Unit & Pipeline Tests (All Platforms)
         run: |
