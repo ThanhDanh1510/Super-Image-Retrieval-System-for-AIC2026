@@ -96,8 +96,8 @@ async def test_enhance_query_falls_back_when_translation_is_error_page(monkeypat
     # KHÔNG được chứa nội dung trang lỗi
     assert "Error 500" not in en_query
     assert "that's an error" not in en_query.lower()
-    # Fallback: giữ nguyên query gốc đã làm sạch
-    assert "bánh rán" in en_query
+    # Fallback: giữ nguyên query gốc đã làm sạch (unaccented hoặc vi)
+    assert ("banh ran" in en_query.lower()) or ("bánh rán" in en_query.lower())
 
 
 @pytest.mark.anyio

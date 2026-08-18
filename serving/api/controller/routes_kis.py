@@ -200,11 +200,12 @@ async def search_vqa(
             model_registry=model_registry,
         )
 
+        answers = [getattr(c, "answer", "") for c in pipeline_res.candidates]
         return VQAResponse(
             results=pipeline_res.candidates,
+            answers=answers,
             total=len(pipeline_res.candidates),
             query_text=pipeline_res.enhanced_query or request.query,
-            answer="",
         )
     except Exception as e:
         logger.error(f"Error in search_vqa: {e}", exc_info=True)

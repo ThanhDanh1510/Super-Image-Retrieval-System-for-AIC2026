@@ -174,6 +174,7 @@ def _merge_user_choices(
                     keyframe_path=choice.keyframe_path,
                     ocr_text=choice.ocr_text,
                     asr_text=choice.asr_text,
+                    answer=getattr(choice, "answer", ""),
                     score=1.0,
                 )
             )
