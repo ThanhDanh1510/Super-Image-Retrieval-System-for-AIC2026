@@ -1,0 +1,59 @@
+name: CI - Multi-Platform Tests
+
+on:
+  push:
+    branches:
+      - main
+      - macos
+  pull_request:
+    branches:
+      - main
+      - macos
+
+jobs:
+  test:
+    name: Test on ${{ matrix.os }} (Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+        python-version: ["3.11"]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Install PyTorch & Dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          uv venv .venv
+          uv pip install torch torchvision torchaudio
+          uv pip install -e ".[macos-server,all]"
+
+      - name: Install PyTorch & Dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          uv venv .venv
+          uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+          uv pip install -e ".[all]"
+
+      - name: Install PyTorch & Dependencies (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          uv venv .venv
+          uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+          uv pip install -e ".[all]"
+
+      - name: Run Core Unit & Pipeline Tests (All Platforms)
+        run: |
+          uv run pytest tests/test_api_schema.py tests/test_build_unified_from_raw.py tests/test_merge_shards.py tests/test_rerank_service.py tests/test_retrieval_serving.py -v
