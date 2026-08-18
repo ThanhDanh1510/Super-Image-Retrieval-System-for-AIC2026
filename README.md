@@ -21,7 +21,8 @@ Nếu bạn muốn chạy hệ thống ngay lập tức mà không cần cài đ
    ```
 
 2. **Chuẩn bị Dữ liệu (`data/`):**
-   * Tải thư mục `data/` từ Google Drive và đặt vào thư mục gốc dự án.
+   * 📥 **Tải bộ dữ liệu trọn gói tại**: [Google Drive Data Folder (AIC2026)](https://drive.google.com/drive/folders/174LtGV8Zex9TSD0eTajtVaY59DSi23kF)
+   * Giải nén và đặt thư mục `data/` vào thư mục gốc của dự án.
    * **Mẹo siêu tốc:** Nếu bạn tải sẵn thư mục **`data/qdrant_storage/`** (đã index sẵn toàn bộ 99.288 vectors), hệ thống sẽ khởi động có data ngay lập tức!
    * *(Nếu tải thư mục `data/unified/` thô, chỉ cần nạp dữ liệu vào Qdrant bằng lệnh: `docker compose run --rm api python -m indexing.run_index --dataset-dir /app/data/unified --collection aic2026_clean_v3 --create-collection`)*
 
@@ -73,7 +74,9 @@ docker compose up -d qdrant
 ```
 
 #### Bước 3: Tải Dữ liệu & Index vào Qdrant
-📥 Tải dữ liệu đặt vào thư mục `data/`:
+📥 **Tải dữ liệu tại**: [Google Drive Data Folder (AIC2026)](https://drive.google.com/drive/folders/174LtGV8Zex9TSD0eTajtVaY59DSi23kF)
+
+Giải nén và đặt vào thư mục `data/`:
 ```text
 data/
 ├── image/           # Keyframes: data/image/{Group}/{Group}/{Video}/*.webp
