@@ -179,16 +179,20 @@ infra/
 
 ---
 
-## `data/` — Local, không commit git, không có video chia sẻ giữa member
+## `data/` — Dữ liệu cục bộ (Local, không commit git)
 
 ```
 data/
-├── raw_shard/          # Video gốc CHỈ thuộc shard của mình — KHÔNG upload/chia sẻ nguyên video
-├── shard_output_v3/    # Output (keyframe, metadata, vector) trước khi publish Kaggle Dataset riêng
-├── unified_v3/         # Bản đã gộp từ aggregation/ (gồm metadata parquet và vector npy/npz)
-├── unified/            # Toàn bộ ảnh keyframe của tất cả các shard phục vụ hiển thị UI — tên chuẩn
-│                       # {video_id}-{scene_id}-{frame_id}.webp (flat, không thư mục con)
-└── unified_keyframes/  # (CŨ, đã thay bằng unified/) — xóa sau khi mapping
+├── image/                     # Keyframe images (.webp) theo cấu trúc data/image/{Group}/{Group}/{Video}/*.webp
+├── video/                     # File video (.mp4) theo cấu trúc data/video/{Group}/{Video}.mp4
+├── ASR/                       # Transcript lời thoại bóc tách từ video
+├── ocr_output/                # File OCR parquet theo từng batch L21..L30
+├── unified/                   # Metadata Parquet (scene_metadata, ocr_text, asr_text) & Vector matrices (.npy)
+├── qdrant_storage/            # Storage cơ sở dữ liệu Qdrant Vector DB (Docker volume)
+├── qdrant_db/                 # Fallback storage cho Embedded Qdrant
+├── filtered_keyframes.json    # Master list các frame cần lọc/loại bỏ khỏi tập tìm kiếm
+├── L.json                     # Bản mapping mô tả gốc
+└── reports/                   # Thư mục chứa toàn bộ báo cáo phân tích, trùng lặp và filter logs
 ```
 
 ---
