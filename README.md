@@ -10,124 +10,84 @@
 
 ## 🚀 Hướng dẫn cài đặt nhanh (Quick Start)
 
-### Yêu cầu hệ thống (Prerequisites)
-- Python 3.10+
-- NVIDIA GPU với CUDA 12.4+ (khuyến nghị: RTX 3060/4060/5060 Ti với 8GB+ VRAM)
-- Docker Desktop (để chạy Qdrant vector database)
-- Package manager `uv`
+### 🌟 LỰA CHỌN 1: Chạy Full-Stack 1 Lệnh bằng Docker (Khuyên dùng cho máy mới)
 
-### Bước 1: Clone & Cài đặt thư viện
+Nếu bạn muốn chạy hệ thống ngay lập tức mà không cần cài đặt môi trường Python hay CUDA:
 
-#### Dành cho Windows:
+1. **Clone repository:**
+   ```bash
+   git clone https://github.com/ThanhDanh1510/Super-Image-Retrieval-System-for-AIC2026.git
+   cd Super-Image-Retrieval-System-for-AIC2026
+   ```
+
+2. **Chuẩn bị Dữ liệu (`data/`):**
+   * Tải thư mục `data/` từ Google Drive và đặt vào thư mục gốc dự án.
+   * **Mẹo siêu tốc:** Nếu bạn tải sẵn thư mục **`data/qdrant_storage/`** (đã index sẵn toàn bộ 99.288 vectors), hệ thống sẽ khởi động có data ngay lập tức!
+   * *(Nếu tải thư mục `data/unified/` thô, chỉ cần nạp dữ liệu vào Qdrant bằng lệnh: `docker compose run --rm api python -m indexing.run_index --dataset-dir /app/data/unified --collection aic2026_clean_v3 --create-collection`)*
+
+3. **Khởi chạy hệ thống:**
+   ```bash
+   docker compose up -d
+   ```
+   * 🌐 **Spider-Man Web UI:** http://localhost:8000/ui/index.html
+   * 📚 **API Swagger Docs:** http://localhost:8000/docs
+   * 🗄️ **Qdrant Dashboard:** http://localhost:6333/dashboard
+
+---
+
+### 💻 LỰA CHỌN 2: Cài đặt Native trên Windows / macOS (Tối ưu GPU CUDA / Apple Silicon MPS)
+
+#### Bước 1: Cài đặt Môi trường & Thư viện
+
+##### 🪟 Dành cho Windows (NVIDIA GPU CUDA):
 ```powershell
 git clone https://github.com/ThanhDanh1510/Super-Image-Retrieval-System-for-AIC2026.git
 cd Super-Image-Retrieval-System-for-AIC2026
 
-# Cài đặt uv
 pip install uv
-
-# Tạo môi trường ảo & Kích hoạt
 uv venv .venv
 .venv\Scripts\Activate.ps1
 
-# Cài đặt PyTorch hỗ trợ GPU CUDA (NVIDIA)
+# Cài đặt PyTorch hỗ trợ CUDA 12.4
 uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
-
-# Cài đặt toàn bộ dependencies
 uv pip install -e ".[all]"
 ```
 
-#### Dành cho macOS (Apple Silicon M1/M2/M3/M4 & Intel):
+##### 🍏 Dành cho macOS (Apple Silicon M1/M2/M3/M4 & Intel):
 ```bash
 git clone https://github.com/ThanhDanh1510/Super-Image-Retrieval-System-for-AIC2026.git
 cd Super-Image-Retrieval-System-for-AIC2026
 
-# Cài đặt uv
 pip3 install uv
-
-# Tạo môi trường ảo & Kích hoạt
 uv venv .venv
 source .venv/bin/activate
 
-# Cài đặt PyTorch mặc định (Tự động hỗ trợ Apple Silicon MPS hoặc CPU)
+# Cài đặt PyTorch & Dependencies (Tự động nhận diện GPU Metal MPS trên Apple Silicon)
 uv pip install torch torchvision torchaudio
-
-# Cài đặt toàn bộ dependencies (hoặc profile macos-server)
-uv pip install -e ".[all]"
+uv pip install -e ".[macos-server,test]"
 ```
-*Lưu ý cho macOS:* 
-- Hệ thống đã tích hợp module **`shared.utils.device_utils`** tự động nhận diện phần cứng:
-  - Máy Mac chip **Apple Silicon (M1/M2/M3/M4)**: Tự động kích hoạt **Metal Performance Shaders (`mps`)** để tăng tốc inference trên GPU tích hợp.
-  - Máy Mac chip **Intel / Linux không có GPU**: Tự động fallback về `cpu`.
 
-
-### Bước 2: Khởi động Qdrant (Docker)
-```powershell
-docker compose up -d
-# Kiểm tra:
-curl.exe http://localhost:6333/
+#### Bước 2: Khởi động Qdrant Vector Database
+```bash
+docker compose up -d qdrant
 ```
-Lưu ý: Dự án có sẵn `docker-compose.yml`. Nếu không có Docker, hệ thống sẽ tự động fallback sang Local Embedded Qdrant tại `./data/qdrant_db/`.
 
-### Bước 3: Tải Dữ liệu
-📥 Tải data tại: [Google Drive - TBD](https://drive.google.com/drive/folders/174LtGV8Zex9TSD0eTajtVaY59DSi23kF?usp=sharing)
-
-Sau khi tải về, giải nén, ta sẽ có cấu trúc thư mục như sau:
+#### Bước 3: Tải Dữ liệu & Index vào Qdrant
+📥 Tải dữ liệu đặt vào thư mục `data/`:
 ```text
 data/
 ├── image/           # Keyframes: data/image/{Group}/{Group}/{Video}/*.webp
-├── unified/         # Unified dataset + embeddings
-│   ├── scene_metadata.parquet
-│   ├── ocr_text.parquet
-│   ├── asr_text.parquet
-│   ├── image_vectors.npy    # N x 1024 (CLIP)
-│   ├── ocr_vectors.npy      # N x 1536 (gte-Qwen2)
-│   ├── asr_vectors.npy      # N x 1536 (gte-Qwen2)
-│   └── scene_ids.txt
-├── OCR/             # JSON OCR per video
-├── ASR/             # ASR transcripts
-└── ocr_output/      # Newest OCR parquets per batch
+├── unified/         # Unified dataset + embeddings (.parquet & .npy)
+└── qdrant_storage/  # (Tùy chọn) Storage Qdrant đã index sẵn
 ```
 
-### Bước 4: Cấu hình Môi trường
-```powershell
-copy .env.example .env
-```
-Tùy chỉnh các đường dẫn lưu cache mô hình AI (tránh đầy ổ C) và thư mục dữ liệu trong file `.env`. Xem chi tiết tại mục [Biến Môi Trường (`.env`)](#️-biến-môi-trường-env).
-
-### Bước 5: Index Dữ liệu vào Qdrant
-```powershell
-python -m indexing.run_index --dataset-dir ./data/unified --collection aic2026_v1 --create-collection
-```
-Quá trình này mất khoảng ~7 phút. Nó sẽ tạo collection và thiết lập alias `production`.
-
-### Bước 6: Tải AI Models (Pre-download)
-
-Tất cả models được tải tự động từ HuggingFace Hub lần đầu chạy. Để tránh chờ lần đầu, nên tải trước:
-
-```powershell
-# Cách 1: Dùng script (khuyên dùng)
-python tools/download_models.py
-
-# Cách 2: Makefile
-make download-models
+*Nếu chưa có `qdrant_storage/` sẵn, chạy lệnh nạp dữ liệu (~5-7 phút):*
+```bash
+python -m indexing.run_index --dataset-dir ./data/unified --collection aic2026_clean_v3 --create-collection
 ```
 
-**Danh sách models (~15GB):**
-
-| Model | Mục đích | Device | RAM |
-|---|---|---|---|
-| **CLIP ViT-L/14** | Image embedding | GPU | ~1.7GB |
-| **gte-Qwen2-1.5B** | Text embedding (OCR+ASR) | GPU | ~3GB |
-| **bge-reranker-v2-m3** | Text rerank (luôn bật) | GPU | ~2.3GB |
-| **jina-reranker-m0** | Crossmodal rerank (tắt mặc định) | GPU | ~2.5GB |
-| **PhoWhisper-medium** | ASR tiếng Việt | CPU | ~1.5GB |
-| **bge-large-en-v1.5** | Hybrid search | CPU | ~2GB |
-
-> 💡 Models được cache tại `~/.cache/huggingface/` (hoặc `data/hf_cache/` nếu đặt `HF_HOME`).
-
-### Bước 7: Khởi động Server
-```powershell
+#### Bước 4: Khởi động Search Server
+```bash
 python start_api.py
 ```
 - **Web UI:** http://localhost:8000/ui/index.html
