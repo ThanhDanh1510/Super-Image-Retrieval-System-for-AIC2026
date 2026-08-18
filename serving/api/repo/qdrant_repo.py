@@ -167,7 +167,10 @@ def _normalize_text_for_scoring(text: str) -> str:
 
 
 def _calculate_match_score(query: str, target_text: str) -> float:
-    """Tính điểm khớp từ khóa (overlap score) giữa câu query và đoạn văn bản trong database."""
+    """
+    Tính điểm khớp từ khóa (overlap score) giữa câu query và đoạn văn bản trong database.
+    Ưu tiên tuyệt đối cho khớp chính xác 100% nguyên cụm (Exact Phrase Substring Match).
+    """
     if not target_text:
         return 0.0
     
@@ -180,20 +183,37 @@ def _calculate_match_score(query: str, target_text: str) -> float:
         
     t_words = set(t_norm.split())
     
-    # Tính tỉ lệ từ khóa trùng lặp
+    # 1. Tier 1: Khớp chính xác 100% nguyên cụm từ liên tiếp (Exact Phrase Match)
+    if q_norm in t_norm:
+        # Gán điểm vượt trội tuyệt đối (>= 2.0)
+        return round(2.0 + min(len(q_words) * 0.1, 1.0), 6)
+    
+    # 2. Tính tỉ lệ từ khóa trùng lặp
     matches = sum(1 for w in q_words if w in t_words)
     overlap_ratio = matches / len(q_words)
     
-    # Cộng điểm bonus nếu khớp nguyên cả cụm từ liên tiếp (substring match)
-    if q_norm in t_norm:
-        overlap_ratio += 0.5
-    else:
-        # Check khớp các cụm 2 từ liên tiếp nếu có
-        for i in range(len(q_words) - 1):
-            bigram = f"{q_words[i]} {q_words[i+1]}"
-            if bigram in t_norm:
-                overlap_ratio += 0.15
-                
+    # 3. Tier 2: Khớp các cụm từ con liên tiếp (n-grams)
+    longest_subphrase_len = 0
+    for n in range(min(len(q_words), 5), 1, -1):
+        for i in range(len(q_words) - n + 1):
+            ngram = " ".join(q_words[i:i + n])
+            if ngram in t_norm:
+                longest_subphrase_len = max(longest_subphrase_len, n)
+                break
+        if longest_subphrase_len > 0:
+            break
+
+    if longest_subphrase_len >= 3:
+        overlap_ratio += 0.4 * (longest_subphrase_len / len(q_words))
+    elif longest_subphrase_len == 2:
+        overlap_ratio += 0.15
+
+    # 4. Phạt nếu thiếu nhiều từ khóa quan trọng trong câu query
+    if overlap_ratio < 1.0:
+        missing_count = len(q_words) - matches
+        if missing_count >= 2:
+            overlap_ratio *= 0.6  # Giảm 40% nếu thiếu từ 2 từ trở lên
+
     return round(overlap_ratio, 6)
 
 
@@ -232,14 +252,24 @@ async def search_by_text_match(
     except Exception as e:
         logger.warning(f"Error in must MatchText scroll: {e}")
 
-    # 2. Tier 2: Khớp thả lỏng (OR matching) với các bigrams và từ đơn lẻ
+    # 2. Tier 2: Khớp thả lỏng (OR matching) với các cụm n-grams dài trước, rồi mới đến từ đơn lẻ
     if len(all_points) < limit:
         remaining_limit = (limit - len(all_points)) * 2
         should_conditions = []
+        
+        # 2.1 Thêm cụm 3-grams hoặc 4-grams nếu có
+        if len(words) >= 4:
+            for i in range(len(words) - 2):
+                trigram = f"{words[i]} {words[i+1]} {words[i+2]}"
+                should_conditions.append(FieldCondition(key=field_name, match=MatchText(text=trigram)))
+        
+        # 2.2 Thêm cụm bigrams
         if len(words) >= 3:
             for i in range(len(words) - 1):
                 bigram = f"{words[i]} {words[i+1]}"
                 should_conditions.append(FieldCondition(key=field_name, match=MatchText(text=bigram)))
+                
+        # 2.3 Thêm từ đơn lẻ dài >= 3 ký tự
         for word in words:
             if len(word) >= 3:
                 should_conditions.append(FieldCondition(key=field_name, match=MatchText(text=word)))
