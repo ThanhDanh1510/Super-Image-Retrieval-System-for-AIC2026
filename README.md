@@ -37,7 +37,7 @@ uv pip install torch torchvision torchaudio --index-url https://download.pytorch
 uv pip install -e ".[all]"
 ```
 
-#### Dành cho macOS:
+#### Dành cho macOS (Apple Silicon M1/M2/M3/M4 & Intel):
 ```bash
 git clone https://github.com/ThanhDanh1510/Super-Image-Retrieval-System-for-AIC2026.git
 cd Super-Image-Retrieval-System-for-AIC2026
@@ -49,15 +49,16 @@ pip3 install uv
 uv venv .venv
 source .venv/bin/activate
 
-# Cài đặt PyTorch mặc định (Tự động hỗ trợ Apple Silicon MPS hoặc Intel CPU)
+# Cài đặt PyTorch mặc định (Tự động hỗ trợ Apple Silicon MPS hoặc CPU)
 uv pip install torch torchvision torchaudio
 
-# Cài đặt toàn bộ dependencies
+# Cài đặt toàn bộ dependencies (hoặc profile macos-server)
 uv pip install -e ".[all]"
 ```
 *Lưu ý cho macOS:* 
-- Nếu bạn dùng máy Mac chip **Apple Silicon (M1/M2/M3)**, hãy sửa biến môi trường trong file `.env` thành `AIC_DEVICE=mps` để sử dụng GPU tích hợp (Metal Performance Shaders).
-- Nếu dùng máy Mac chip **Intel**, hãy để `AIC_DEVICE=cpu`.
+- Hệ thống đã tích hợp module **`shared.utils.device_utils`** tự động nhận diện phần cứng:
+  - Máy Mac chip **Apple Silicon (M1/M2/M3/M4)**: Tự động kích hoạt **Metal Performance Shaders (`mps`)** để tăng tốc inference trên GPU tích hợp.
+  - Máy Mac chip **Intel / Linux không có GPU**: Tự động fallback về `cpu`.
 
 
 ### Bước 2: Khởi động Qdrant (Docker)
@@ -175,10 +176,10 @@ Super-Image-Retrieval-System-for-AIC2026/
 
 | Endpoint | Method | Body / Params | Mô tả |
 |---|---|---|---|
-| `/api/v1/kis` | POST | `{query, input_type: "text"\|"voice"\|"image", search_mode: "all", top_k (1-500), use_reranker?, user_choices?}` | Known-Item Search |
-| `/api/v1/vqa` | POST | `{query, question, input_type, search_mode, top_k, use_reranker?, user_choices?}` | Visual QA — trả `results` + `answers` |
+| `/api/v1/kis` | POST | `{query, input_type: "text"\|"voice"\|"image", search_mode: "all", top_k (1-500), use_viranker?, use_jina_m0?, user_choices?}` | Known-Item Search |
+| `/api/v1/vqa` | POST | `{query, question, input_type, search_mode, top_k, use_viranker?, use_jina_m0?, user_choices?}` | Visual QA — trả `results` + `answers` |
 | `/api/v1/trake` | POST | `{query, num_events (2-10), input_type, search_mode, top_k}` | Temporal Retrieval — trả `list[list[CandidateResult]]` |
-| `/api/v1/similar-image` | POST | multipart `file` + query param `top_k` (1-100), `use_reranker?` | Image Search |
+| `/api/v1/similar-image` | POST | multipart `file` + query param `top_k` (1-100), `use_viranker?`, `use_jina_m0?` | Image Search |
 | `/api/v1/search/hybrid` | GET | query params: `query_vi`, `query_en?`, `mode`, `top_k` | Hybrid Search (Weighted Convex + RRF) |
 | `/api/v1/image/{video_id}/{frame_id}` | GET | path params: `video_id`, `frame_id` | Lấy file ảnh keyframe thực tế |
 | `/api/v1/video/{video_id}` | GET | path param: `video_id` (hỗ trợ HTTP Range) | Lấy file video gốc |
@@ -186,9 +187,10 @@ Super-Image-Retrieval-System-for-AIC2026/
 
 Tất cả response retrieval trả về danh sách `CandidateResult`: `video_id`, `scene_id`, `frame_id`, `timestamp_start`, `timestamp_mid`, `timestamp_end`, `keyframe_path`, `ocr_text`, `asr_text`, `description`, `score`.
 
-**Tham số `use_reranker`:** Mặc định `false`.
-- Khi `false`: Chỉ chạy text reranker **ViRanker (bge-reranker-v2-m3)** trên GPU (~0.2s, rất nhẹ).
-- Khi `true`: Chạy song song cả **ViRanker** và **Jina Reranker M0** (crossmodal image-text) trên GPU để tối ưu độ chính xác.
+**Cơ chế Dual Reranker độc lập:**
+- **`use_viranker` (ViRanker - bge-reranker-v2-m3):** Text Reranker chuyên sâu cho tiếng Việt, tái xếp hạng Top-K dựa trên câu hỏi và văn bản OCR/ASR/Description (~0.1-0.2s).
+- **`use_jina_m0` (Jina Reranker M0 - jina-reranker-m0):** Multimodal Cross-Encoder Reranker so sánh trực tiếp tương đồng giữa text query và hình ảnh keyframe thực tế.
+- Trên Web UI có sẵn **2 nút gạt Toggle Switch độc lập** cho phép tùy ý bật/tắt từng reranker tùy theo bài toán.
 
 ---
 
