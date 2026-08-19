@@ -1367,6 +1367,74 @@ mark.highlight-match {
   box-shadow: 0 0 10px var(--spider-red-glow);
 }
 
+.video-replace-btn {
+  border-color: #ff9800;
+  color: #ff9800;
+  background: rgba(255, 152, 0, 0.12);
+}
+
+.video-replace-btn:hover {
+  background: #ff9800;
+  color: #000;
+  box-shadow: 0 0 12px rgba(255, 152, 0, 0.6);
+}
+
+/* Video Replace Event Menu */
+.video-replace-menu {
+  margin-top: 8px;
+  background: rgba(14, 20, 32, 0.98);
+  border: 1px solid rgba(255, 152, 0, 0.5);
+  border-radius: 8px;
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+}
+
+.video-replace-menu span {
+  font-size: 0.8rem;
+  color: var(--text-sub);
+}
+
+.video-replace-menu strong {
+  color: var(--spider-yellow);
+}
+
+.replace-event-btn {
+  background: rgba(0, 229, 255, 0.15);
+  border: 1px solid var(--spider-blue);
+  color: #00e5ff;
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.replace-event-btn:hover {
+  background: var(--spider-blue);
+  color: #000;
+  box-shadow: 0 0 10px var(--spider-blue-glow);
+}
+
+.replace-cancel-btn {
+  background: none;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: var(--text-sub);
+  font-size: 0.75rem;
+  padding: 4px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.replace-cancel-btn:hover {
+  color: #fff;
+  border-color: #fff;
+}
+
 .video-similar-btn {
   border-color: var(--spider-blue);
   color: var(--spider-blue);

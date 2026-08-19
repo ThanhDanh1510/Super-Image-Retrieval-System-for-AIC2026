@@ -13,7 +13,8 @@ const state = {
   useViranker: true,
   useJinaM0: false,
   selectedItems: new Map(), // key -> CandidateResult or TrakeChain
-  batchQueries: new Map(),  // queryId -> { queryId, mode, count, csvString, timestamp, items }
+  batchQueries: new Map(),  // queryId -> { queryId, mode, count, csvString, timestamp, items, queryText, searchMode, resultsCache }
+  queryCache: new Map(),    // cacheKey -> { results, duration, count, timestamp }
   rawResults: [],
   currentResultsList: [],   // Flattened list for sequential Lightbox navigation
   currentLightboxIndex: -1, // Current index in Lightbox
@@ -213,32 +214,69 @@ function setupControls() {
   }
 }
 
-// --- Keyboard Shortcuts (Lightbox Navigation & Copy on Hover) ---
+let isVideoInteractMode = false;
+
+// --- Keyboard Shortcuts (Lightbox Navigation, Video Backspace Control & Copy on Hover) ---
 function setupKeyboardShortcuts() {
   document.addEventListener("keydown", (e) => {
     const modal = document.getElementById("lightbox-modal");
     const isModalOpen = modal && modal.style.display !== "none";
 
     if (isModalOpen) {
-      // Escape closes modal
+      // Escape: Đóng modal
       if (e.key === "Escape") {
         modal.style.display = "none";
         closeLightboxVideo();
         return;
       }
-      // Left arrow / Key A: Previous image
-      if (e.key === "ArrowLeft" || e.code === "KeyA") {
+
+      // Phím Backspace: Toggle Play/Pause video và kích hoạt Chế độ Tương Tác Video
+      if (e.key === "Backspace") {
         if (["INPUT", "TEXTAREA"].includes(document.activeElement.tagName)) return;
         e.preventDefault();
-        showLightboxAt(state.currentLightboxIndex - 1);
+        isVideoInteractMode = true;
+        if (modalVideoEl.paused) {
+          modalVideoEl.play().catch(() => {});
+          showToast("▶️ Video đang phát (Phím ←/→ tua 3s)");
+        } else {
+          modalVideoEl.pause();
+          showToast("⏸️ Video tạm dừng (Phím ←/→ tua 3s)");
+        }
         return;
       }
-      // Right arrow / Key D: Next image
-      if (e.key === "ArrowRight" || e.code === "KeyD") {
-        if (["INPUT", "TEXTAREA"].includes(document.activeElement.tagName)) return;
-        e.preventDefault();
-        showLightboxAt(state.currentLightboxIndex + 1);
-        return;
+
+      // Khi đã bấm Backspace (isVideoInteractMode === true): Left/Right Arrow tua 3 giây
+      if (isVideoInteractMode) {
+        if (e.key === "ArrowLeft" || e.code === "KeyA") {
+          if (["INPUT", "TEXTAREA"].includes(document.activeElement.tagName)) return;
+          e.preventDefault();
+          modalVideoEl.currentTime = Math.max(0, modalVideoEl.currentTime - 3);
+          updateVideoInfoLabel();
+          showToast(`⏪ Tua lùi 3s (f${currentVideoFrame()})`);
+          return;
+        }
+        if (e.key === "ArrowRight" || e.code === "KeyD") {
+          if (["INPUT", "TEXTAREA"].includes(document.activeElement.tagName)) return;
+          e.preventDefault();
+          modalVideoEl.currentTime = Math.min(modalVideoEl.duration || 999999, modalVideoEl.currentTime + 3);
+          updateVideoInfoLabel();
+          showToast(`⏩ Tua tiến 3s (f${currentVideoFrame()})`);
+          return;
+        }
+      } else {
+        // Khi chưa bấm Backspace: Left/Right Arrow dùng để chuyển qua lại giữa các ảnh kết quả
+        if (e.key === "ArrowLeft" || e.code === "KeyA") {
+          if (["INPUT", "TEXTAREA"].includes(document.activeElement.tagName)) return;
+          e.preventDefault();
+          showLightboxAt(state.currentLightboxIndex - 1);
+          return;
+        }
+        if (e.key === "ArrowRight" || e.code === "KeyD") {
+          if (["INPUT", "TEXTAREA"].includes(document.activeElement.tagName)) return;
+          e.preventDefault();
+          showLightboxAt(state.currentLightboxIndex + 1);
+          return;
+        }
       }
     }
 
@@ -404,6 +442,15 @@ async function triggerSearch() {
     const duration = ((performance.now() - startTime) / 1000).toFixed(2);
     state.rawResults = resultsList;
     renderResults(state.rawResults);
+
+    // Save to queryCache
+    const cacheKey = `${state.mode}_${state.searchMode}_${queryText}`;
+    state.queryCache.set(cacheKey, {
+      results: [...state.rawResults],
+      duration: duration,
+      count: state.rawResults.length,
+      timestamp: Date.now(),
+    });
 
     statusBar.textContent = `✅ Tìm thấy ${state.rawResults.length} kết quả (Nhánh: ${state.searchMode.toUpperCase()})`;
     speedTag.textContent = `${duration}s`;
@@ -931,6 +978,9 @@ function addCurrentCartToBatch() {
     count: itemsArr.length,
     csvString: csvContent,
     items: Array.from(state.selectedItems.entries()),
+    queryText: state.lastQuery || (queryInput ? queryInput.value.trim() : ""),
+    searchMode: state.searchMode,
+    resultsCache: [...state.rawResults],
     timestamp: new Date().toLocaleTimeString(),
   });
 
@@ -972,10 +1022,10 @@ function renderBatchManagerUI() {
     itemDiv.innerHTML = `
       <div class="batch-query-info">
         <span class="batch-query-name">📄 ${qid}.csv</span>
-        <span class="batch-query-meta">${qData.count} dòng • ${qData.mode.toUpperCase()}</span>
+        <span class="batch-query-meta">${qData.count} dòng • ${qData.mode.toUpperCase()}${qData.queryText ? ` • "${qData.queryText.substring(0, 15)}..."` : ''}</span>
       </div>
       <div class="batch-item-actions">
-        <button class="batch-load-btn" onclick="loadBatchQueryToCart('${qid}')" title="Nạp lại câu này vào Giỏ Nộp Bài để xem và chỉnh sửa">👁️ Nạp lại</button>
+        <button class="batch-load-btn" onclick="loadBatchQueryToCart('${qid}')" title="Nạp lại câu này và kết quả tìm kiếm gốc">👁️ Nạp lại</button>
         <button class="batch-remove-item-btn" onclick="removeBatchQuery('${qid}')" title="Xóa câu này khỏi gói">✕</button>
       </div>
     `;
@@ -983,7 +1033,7 @@ function renderBatchManagerUI() {
   });
 }
 
-// --- Nạp lại câu hỏi từ Gói Nộp Bài vào Giỏ để xem và chỉnh sửa ---
+// --- Nạp lại câu hỏi từ Gói Nộp Bài vào Giỏ & Tải lại kết quả tìm kiếm gốc từ Cache ---
 window.loadBatchQueryToCart = function(qid) {
   const qData = state.batchQueries.get(qid);
   if (!qData) return;
@@ -1001,17 +1051,50 @@ window.loadBatchQueryToCart = function(qid) {
   if (queryIdInput) queryIdInput.value = qid;
   if (btnLabel) btnLabel.textContent = `${qid}.csv`;
 
-  // 3. Nạp lại selectedItems
+  // 3. Phục hồi câu query gốc vào thanh tìm kiếm
+  if (queryInput) {
+    queryInput.value = qData.queryText || "";
+  }
+  state.lastQuery = qData.queryText || "";
+
+  // 4. Phục hồi chế độ tìm kiếm (searchMode)
+  if (qData.searchMode) {
+    state.searchMode = qData.searchMode;
+    document.querySelectorAll(".mode-btn").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.searchMode === qData.searchMode);
+    });
+  }
+
+  // 5. Nạp lại selectedItems vào Giỏ Nộp Bài
   state.selectedItems.clear();
   if (qData.items && Array.isArray(qData.items)) {
     qData.items.forEach(([k, v]) => {
       state.selectedItems.set(k, v);
     });
   }
-
   updateDrawer();
-  renderResults(state.rawResults);
-  showToast(`📂 Đã nạp lại ${qid} vào Giỏ Nộp Bài!`);
+
+  // 6. Hiển thị lại kết quả tìm kiếm tức thì từ Cache (0ms)
+  if (qData.resultsCache && qData.resultsCache.length > 0) {
+    state.rawResults = qData.resultsCache;
+    renderResults(state.rawResults);
+    statusBar.textContent = `⚡ Đã nạp lại ${state.rawResults.length} kết quả từ Query Cache cho "${qData.queryText || qid}"`;
+  } else {
+    // Fallback: Tìm trong queryCache toàn cục hoặc gọi API
+    const cacheKey = `${qData.mode}_${qData.searchMode || 'all'}_${qData.queryText || ''}`;
+    if (state.queryCache && state.queryCache.has(cacheKey)) {
+      const cached = state.queryCache.get(cacheKey);
+      state.rawResults = cached.results;
+      renderResults(state.rawResults);
+      statusBar.textContent = `⚡ Đã nạp lại ${state.rawResults.length} kết quả từ Query Cache cho "${qData.queryText || qid}"`;
+    } else if (qData.queryText && qData.queryText.trim()) {
+      triggerSearch();
+    } else {
+      renderResults(state.rawResults);
+    }
+  }
+
+  showToast(`📂 Đã nạp lại câu '${qid}' và kết quả tìm kiếm gốc!`);
 };
 
 window.removeBatchQuery = function(qid) {
@@ -1240,13 +1323,18 @@ function showLightboxAt(index) {
 async function loadLightboxVideo(cand, imgUrl) {
   currentVideoId = cand.video_id;
   currentLightboxCand = cand;
+  isVideoInteractMode = false;
   videoErrorMsgEl.style.display = "none";
 
   // Mặc định thử phát video ngay trong khung ảnh; nếu lỗi sẽ fallback về ảnh tĩnh.
   modalImgEl.style.display = "none";
   modalVideoEl.style.display = "block";
+  modalVideoEl.volume = 0.25; // 25% initial volume per requirement
   videoFrameBarEl.style.display = "flex";
   videoInfoLabelEl.textContent = `${cand.video_id},${cand.frame_id}`;
+
+  const repMenu = document.getElementById("video-replace-menu");
+  if (repMenu) repMenu.style.display = "none";
 
   // Lấy fps thật của video này để tính thời gian chính xác 100%
   let fps = 25.0;
@@ -1276,6 +1364,7 @@ async function loadLightboxVideo(cand, imgUrl) {
 
   const onLoadedMeta = () => {
     modalVideoEl.currentTime = seekTo;
+    modalVideoEl.volume = 0.25;
     updateVideoInfoLabel();
     modalVideoEl.removeEventListener("loadedmetadata", onLoadedMeta);
   };
@@ -1301,6 +1390,9 @@ function closeLightboxVideo() {
   modalVideoEl.load();
   modalVideoEl.onerror = null;
   currentVideoId = null;
+  isVideoInteractMode = false;
+  const repMenu = document.getElementById("video-replace-menu");
+  if (repMenu) repMenu.style.display = "none";
 }
 
 const modalEl = document.getElementById("lightbox-modal");
@@ -1359,6 +1451,15 @@ if (modalEl) {
     copyToClipboard({ video_id: currentVideoId, frame_id: currentVideoFrame() });
   });
 
+  // Thay Frame Trong Giỏ (Realignment)
+  const replaceFrameBtn = document.getElementById("video-replace-frame-btn");
+  if (replaceFrameBtn) {
+    replaceFrameBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      handleReplaceFrameInCart();
+    });
+  }
+
   // Tìm ảnh tương tự từ Lightbox
   const videoSearchSimBtn = document.getElementById("video-search-similar-btn");
   if (videoSearchSimBtn) {
@@ -1408,8 +1509,72 @@ if (modalEl) {
     updateDrawer();
     showToast(`➕ Đã thêm ${newCand.video_id},${newCand.frame_id} vào giỏ`);
   });
-
 }
+
+// --- Căn chỉnh & Thay thế Frame trong giỏ cho Video đang xem ---
+function handleReplaceFrameInCart() {
+  if (!currentVideoId) return;
+  const currentFrame = currentVideoFrame();
+  const replaceMenu = document.getElementById("video-replace-menu");
+  if (!replaceMenu) return;
+
+  // Tìm các item trong giỏ thuộc video này
+  const matchingEntries = Array.from(state.selectedItems.entries()).filter(([k, cand]) => {
+    if (cand.type === "trake_chain") return cand.video_id === currentVideoId;
+    return cand.video_id === currentVideoId;
+  });
+
+  if (matchingEntries.length === 0) {
+    alert(`⚠️ Giỏ nộp bài chưa có ảnh hoặc chuỗi TRAKE nào thuộc video ${currentVideoId}! Hãy bấm '➕ Thêm vào giỏ' hoặc chọn kết quả trước.`);
+    return;
+  }
+
+  // Lấy entry đầu tiên khớp video
+  const [cartKey, cartCand] = matchingEntries[0];
+
+  if (cartCand.type === "trake_chain") {
+    let buttonsHtml = `<span>Chọn Event của chuỗi <strong>${currentVideoId}</strong> muốn thay bằng frame <strong>f${currentFrame}</strong>:</span>`;
+    cartCand.frame_ids.forEach((fid, idx) => {
+      buttonsHtml += `
+        <button class="replace-event-btn" onclick="applyFrameReplacement('${cartKey}', ${idx}, ${currentFrame})">
+          Thay vào E${idx + 1} (cũ: f${fid})
+        </button>
+      `;
+    });
+    buttonsHtml += `<button class="replace-cancel-btn" onclick="document.getElementById('video-replace-menu').style.display='none'">✕ Hủy</button>`;
+    replaceMenu.innerHTML = buttonsHtml;
+    replaceMenu.style.display = "flex";
+  } else {
+    // KIS / VQA single item
+    const oldFrame = cartCand.frame_id;
+    cartCand.frame_id = currentFrame;
+    // Cập nhật lại key trong Map
+    state.selectedItems.delete(cartKey);
+    const newKey = `${cartCand.video_id}_${currentFrame}`;
+    state.selectedItems.set(newKey, cartCand);
+    updateDrawer();
+    renderResults(state.rawResults);
+    showToast(`🔄 Đã thay thế frame ${currentVideoId}: f${oldFrame} ➔ f${currentFrame}!`);
+    replaceMenu.style.display = "none";
+  }
+}
+
+window.applyFrameReplacement = function(cartKey, eventIdx, newFrameId) {
+  const item = state.selectedItems.get(cartKey);
+  if (!item || !item.frame_ids) return;
+
+  const oldFid = item.frame_ids[eventIdx];
+  item.frame_ids[eventIdx] = newFrameId;
+  if (item.chain_events && item.chain_events[eventIdx]) {
+    item.chain_events[eventIdx].frame_id = newFrameId;
+  }
+
+  updateDrawer();
+  renderResults(state.rawResults);
+  const repMenu = document.getElementById("video-replace-menu");
+  if (repMenu) repMenu.style.display = "none";
+  showToast(`🔄 Đã thay thế Event ${eventIdx + 1} (${item.video_id}): f${oldFid} ➔ f${newFrameId}!`);
+};
 
 // Chụp khung hình đang dừng trong video-modal rồi gọi API image-to-image search
 async function searchSimilarToCurrentFrame() {

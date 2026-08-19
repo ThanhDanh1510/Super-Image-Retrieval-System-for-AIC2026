@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;900&family=Roboto+Mono:wght@500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/ui/style.css?v=2026.5" />
+  <link rel="stylesheet" href="/ui/style.css?v=2026.6" />
   <!-- JSZip for 100% compliant client-side submission packaging -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 </head>
@@ -214,10 +214,13 @@
         <div class="video-frame-actions">
           <button id="video-goto-main-btn" class="video-seek-btn" title="Quay về đúng frame gốc đã tìm được">🎯 Về Frame Chính</button>
           <button id="video-copy-frame-btn" class="video-seek-btn" title="Copy <video_id,frame_id> của khung hình hiện tại">📋 Copy Frame</button>
+          <button id="video-replace-frame-btn" class="video-seek-btn video-replace-btn" title="Thay thế frame đang dừng vào 1 trong các ảnh/events đã chọn trong giỏ">🔄 Thay Frame Trong Giỏ</button>
           <button id="video-search-similar-btn" class="video-seek-btn" title="Tìm các keyframe tương đồng với ảnh/frame này">🔍 Tìm tương tự</button>
           <button id="video-add-frame-btn" class="video-seek-btn video-add-btn" title="Thêm khung hình đang dừng vào Giỏ Nộp Bài">➕ Thêm vào giỏ</button>
         </div>
       </div>
+      <!-- Menu chọn event muốn thay thế frame -->
+      <div id="video-replace-menu" class="video-replace-menu" style="display: none;"></div>
       <div id="video-error-msg" class="video-error-msg" style="display: none;">
         ⚠️ Không tìm thấy file video trên server. Kiểm tra lại thư mục data/video.
       </div>
@@ -244,6 +247,6 @@
     </div>
   </div>
 
-  <script src="/ui/app.js?v=2026.5"></script>
+  <script src="/ui/app.js?v=2026.6"></script>
 </body>
 </html>
