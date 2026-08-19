@@ -39,7 +39,18 @@ def format_trake_csv(items: list[dict]) -> str:
     safe = items[:100]
     lines = []
     for item in safe:
-        frames = item.get("event_frames") or [item["frame_id"]]
+        if not item or not item.get("video_id"):
+            continue
+        if item.get("type") == "trake_chain" and item.get("frame_ids"):
+            frames = item["frame_ids"]
+        elif item.get("event_frames"):
+            frames = item["event_frames"]
+        elif item.get("events"):
+            frames = [e.get("frame_id", item.get("frame_id")) for e in item["events"]]
+        elif item.get("frame_id") is not None:
+            frames = [item["frame_id"]]
+        else:
+            continue
         frame_str = ", ".join(str(f) for f in frames)
         lines.append(f"{item['video_id']}, {frame_str}")
     return "\r\n".join(lines) + ("\r\n" if lines else "")
@@ -161,3 +172,25 @@ def test_qa_csv_individual_vs_bulk_and_empty_frames():
     assert lines[0] == 'L01_V028, 3450, "Màu xanh dương"'
     assert lines[1] == 'L01_V028, 3600, "Màu đỏ"'
     assert lines[2] == 'L02_V011, 1200, ""'
+
+
+def test_trake_chain_cart_items_format_multiple_events():
+    items = [
+        {
+            "type": "trake_chain",
+            "video_id": "L10_V001",
+            "frame_ids": [1200, 1850, 2100, 2450],
+            "score": 0.95,
+        },
+        {
+            "type": "trake_chain",
+            "video_id": "L11_V003",
+            "frame_ids": [5100, 5700, 6200, 6800],
+            "score": 0.88,
+        },
+    ]
+    csv_str = format_trake_csv(items)
+    lines = [l.strip() for l in csv_str.strip().splitlines()]
+    assert len(lines) == 2
+    assert lines[0] == "L10_V001, 1200, 1850, 2100, 2450"
+    assert lines[1] == "L11_V003, 5100, 5700, 6200, 6800"

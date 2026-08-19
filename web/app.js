@@ -12,9 +12,11 @@ const state = {
   topK: 50,
   useViranker: true,
   useJinaM0: false,
-  selectedItems: new Map(), // key -> CandidateResult
-  batchQueries: new Map(),  // queryId -> { queryId, mode, count, csvString, timestamp }
+  selectedItems: new Map(), // key -> CandidateResult or TrakeChain
+  batchQueries: new Map(),  // queryId -> { queryId, mode, count, csvString, timestamp, items }
   rawResults: [],
+  currentResultsList: [],   // Flattened list for sequential Lightbox navigation
+  currentLightboxIndex: -1, // Current index in Lightbox
   selectedFile: null,
   selectedImageBase64: null,
   hoveredCand: null,
@@ -211,9 +213,35 @@ function setupControls() {
   }
 }
 
-// --- Keyboard Shortcuts (Copy on Hover) ---
+// --- Keyboard Shortcuts (Lightbox Navigation & Copy on Hover) ---
 function setupKeyboardShortcuts() {
   document.addEventListener("keydown", (e) => {
+    const modal = document.getElementById("lightbox-modal");
+    const isModalOpen = modal && modal.style.display !== "none";
+
+    if (isModalOpen) {
+      // Escape closes modal
+      if (e.key === "Escape") {
+        modal.style.display = "none";
+        closeLightboxVideo();
+        return;
+      }
+      // Left arrow / Key A: Previous image
+      if (e.key === "ArrowLeft" || e.code === "KeyA") {
+        if (["INPUT", "TEXTAREA"].includes(document.activeElement.tagName)) return;
+        e.preventDefault();
+        showLightboxAt(state.currentLightboxIndex - 1);
+        return;
+      }
+      // Right arrow / Key D: Next image
+      if (e.key === "ArrowRight" || e.code === "KeyD") {
+        if (["INPUT", "TEXTAREA"].includes(document.activeElement.tagName)) return;
+        e.preventDefault();
+        showLightboxAt(state.currentLightboxIndex + 1);
+        return;
+      }
+    }
+
     if ((e.key === "c" || e.key === "C") && state.hoveredCand) {
       // Don't trigger if user is actively typing in a text field
       if (["INPUT", "TEXTAREA"].includes(document.activeElement.tagName)) return;
@@ -391,6 +419,7 @@ async function triggerSearch() {
 function renderResults(results) {
   if (!results || results.length === 0) {
     resultsGrid.innerHTML = `<div class="empty-state">Không tìm thấy kết quả nào phù hợp.</div>`;
+    state.currentResultsList = [];
     return;
   }
 
@@ -400,12 +429,14 @@ function renderResults(results) {
   const isTrake = state.mode === "trake" && Array.isArray(results[0]);
 
   if (isTrake) {
+    state.currentResultsList = results.flat().filter(Boolean);
     // TRAKE: render từng chain trên 1 hàng
     results.forEach((chain, chainIdx) => {
       if (!Array.isArray(chain) || chain.length === 0) return;
       renderTrakeChain(chain, chainIdx);
     });
   } else {
+    state.currentResultsList = results || [];
     // KIS/VQA: render từng ảnh riêng lẻ
     results.forEach((candidate, idx) => {
       renderSingleCard(candidate);
@@ -416,6 +447,8 @@ function renderResults(results) {
 // --- Render 1 TRAKE chain (chuỗi ảnh nối tiếp) ---
 function renderTrakeChain(chain, chainIdx) {
   const avgScore = chain.reduce((sum, c) => sum + c.score, 0) / chain.length;
+  const chainKey = "trake_" + chain[0].video_id + "_" + chain.map((c) => c.frame_id).join("_");
+  const isChainSelected = state.selectedItems.has(chainKey);
 
   const chainContainer = document.createElement("div");
   chainContainer.className = "trake-chain";
@@ -424,16 +457,12 @@ function renderTrakeChain(chain, chainIdx) {
   chain.forEach((candidate, eventIdx) => {
     const imgUrl = `${API_BASE}/api/v1/image/${candidate.video_id}/${candidate.frame_id}`;
     const itemKey = `${candidate.video_id}_${candidate.frame_id}`;
-    const isSelected = state.selectedItems.has(itemKey);
 
     imagesHtml += `
       <div class="trake-event" data-key="${itemKey}">
         <div class="trake-img-wrapper">
           <img src="${imgUrl}" alt="${candidate.scene_id}" loading="lazy" />
           <span class="event-badge">E${eventIdx + 1}</span>
-          <button class="select-checkbox-btn ${isSelected ? 'selected' : ''}" data-key="${itemKey}">
-            ${isSelected ? '✓' : '+'}
-          </button>
         </div>
         <div class="trake-event-info">
           <span class="frame-label">f${candidate.frame_id}</span>
@@ -453,16 +482,28 @@ function renderTrakeChain(chain, chainIdx) {
       <span class="chain-index">#${chainIdx + 1}</span>
       <span class="chain-score">${(avgScore * 100).toFixed(0)}%</span>
       <span class="chain-video">${chain[0].video_id}</span>
+      <button class="trake-chain-select-btn ${isChainSelected ? 'selected' : ''}" data-chain-key="${chainKey}">
+        ${isChainSelected ? '✓ Đã chọn chuỗi này' : `➕ Chọn cả chuỗi (${chain.length} events)`}
+      </button>
     </div>
     <div class="trake-chain-images">
       ${imagesHtml}
     </div>
   `;
 
-  // Event listeners cho từng event trong chain
+  // Event listener cho nút chọn cả chuỗi TRAKE
+  const chainSelectBtn = chainContainer.querySelector(".trake-chain-select-btn");
+  if (chainSelectBtn) {
+    chainSelectBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggleSelectTrakeChain(chain, chainKey, chainSelectBtn);
+    });
+  }
+
+  // Event listeners cho từng event trong chain (Lightbox & Hover)
   chainContainer.querySelectorAll(".trake-event").forEach((eventEl) => {
     const key = eventEl.dataset.key;
-    const candidate = chain.find(c => `${c.video_id}_${c.frame_id}` === key);
+    const candidate = chain.find((c) => `${c.video_id}_${c.frame_id}` === key);
     if (!candidate) return;
 
     const imgUrl = `${API_BASE}/api/v1/image/${candidate.video_id}/${candidate.frame_id}`;
@@ -470,19 +511,36 @@ function renderTrakeChain(chain, chainIdx) {
     // Lightbox on click
     eventEl.querySelector("img").addEventListener("click", () => showLightbox(candidate, imgUrl));
 
-    // Selection
-    const selectBtn = eventEl.querySelector(".select-checkbox-btn");
-    selectBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      toggleSelect(key, candidate, selectBtn);
-    });
-
     // Hover tracking
     eventEl.addEventListener("mouseenter", () => { state.hoveredCand = candidate; });
     eventEl.addEventListener("mouseleave", () => { state.hoveredCand = null; });
   });
 
   resultsGrid.appendChild(chainContainer);
+}
+
+// --- Chọn / Bỏ chọn toàn bộ 1 chuỗi TRAKE ---
+function toggleSelectTrakeChain(chain, chainKey, btn) {
+  if (state.selectedItems.has(chainKey)) {
+    state.selectedItems.delete(chainKey);
+    if (btn) {
+      btn.classList.remove("selected");
+      btn.textContent = `➕ Chọn cả chuỗi (${chain.length} events)`;
+    }
+  } else {
+    state.selectedItems.set(chainKey, {
+      type: "trake_chain",
+      video_id: chain[0].video_id,
+      frame_ids: chain.map((c) => c.frame_id),
+      chain_events: chain,
+      score: chain.reduce((sum, c) => sum + c.score, 0) / chain.length,
+    });
+    if (btn) {
+      btn.classList.add("selected");
+      btn.textContent = "✓ Đã chọn chuỗi này";
+    }
+  }
+  updateDrawer();
 }
 
 // --- Render 1 single card (KIS/VQA) ---
@@ -601,6 +659,37 @@ function updateDrawer() {
 
   selectedList.innerHTML = "";
   state.selectedItems.forEach((cand, key) => {
+    // 1. Chuỗi sự kiện TRAKE
+    if (cand.type === "trake_chain") {
+      const div = document.createElement("div");
+      div.className = "trake-cart-item";
+      let thumbsHtml = "";
+      cand.chain_events.forEach((ev, idx) => {
+        const imgUrl = `${API_BASE}/api/v1/image/${ev.video_id}/${ev.frame_id}`;
+        thumbsHtml += `
+          <div class="trake-cart-thumb" title="${ev.video_id} f${ev.frame_id}">
+            <img src="${imgUrl}" alt="f${ev.frame_id}" onerror="this.style.display='none'" />
+            <span>f${ev.frame_id}</span>
+          </div>
+        `;
+        if (idx < cand.chain_events.length - 1) {
+          thumbsHtml += `<span class="trake-cart-arrow">→</span>`;
+        }
+      });
+      div.innerHTML = `
+        <div class="trake-cart-header">
+          <span>🎞️ ${cand.video_id} (${cand.frame_ids.length} events)</span>
+          <button onclick="removeItem('${key}')" style="background:none; border:none; color:var(--spider-red); cursor:pointer; font-weight:bold; font-size:0.9rem;" title="Xóa chuỗi này">✕</button>
+        </div>
+        <div class="trake-cart-thumbs">
+          ${thumbsHtml}
+        </div>
+      `;
+      selectedList.appendChild(div);
+      return;
+    }
+
+    // 2. Khung hình đơn lẻ (KIS / VQA)
     const div = document.createElement("div");
     div.className = "selected-item";
     const imgUrl = `${API_BASE}/api/v1/image/${cand.video_id}/${cand.frame_id}`;
@@ -623,7 +712,7 @@ function updateDrawer() {
   });
 
   // Attach event listener for VQA inputs
-  document.querySelectorAll(".vqa-ans-input").forEach(input => {
+  document.querySelectorAll(".vqa-ans-input").forEach((input) => {
     input.addEventListener("input", (e) => {
       const k = e.target.dataset.key;
       const item = state.selectedItems.get(k);
@@ -775,14 +864,17 @@ function buildCSVContent(mode, items) {
     });
   } else if (mode === "trake") {
     safeItems.forEach((cand) => {
-      if (!cand || !cand.video_id || cand.frame_id == null || cand.frame_id === "") return;
-      let frames = [cand.frame_id];
-      if (cand.events && Array.isArray(cand.events) && cand.events.length > 0) {
-        frames = cand.events.map((e) => e.frame_id || cand.frame_id);
+      if (!cand || !cand.video_id) return;
+      if (cand.type === "trake_chain" && Array.isArray(cand.frame_ids) && cand.frame_ids.length > 0) {
+        lines.push(`${cand.video_id}, ${cand.frame_ids.join(", ")}`);
+      } else if (cand.events && Array.isArray(cand.events) && cand.events.length > 0) {
+        const frames = cand.events.map((e) => e.frame_id || cand.frame_id);
+        lines.push(`${cand.video_id}, ${frames.join(", ")}`);
       } else if (cand.event_frames && Array.isArray(cand.event_frames) && cand.event_frames.length > 0) {
-        frames = cand.event_frames;
+        lines.push(`${cand.video_id}, ${cand.event_frames.join(", ")}`);
+      } else if (cand.frame_id != null && cand.frame_id !== "") {
+        lines.push(`${cand.video_id}, ${cand.frame_id}`);
       }
-      lines.push(`${cand.video_id}, ${frames.join(", ")}`);
     });
   } else {
     // KIS Format
@@ -838,6 +930,7 @@ function addCurrentCartToBatch() {
     mode: state.mode,
     count: itemsArr.length,
     csvString: csvContent,
+    items: Array.from(state.selectedItems.entries()),
     timestamp: new Date().toLocaleTimeString(),
   });
 
@@ -856,6 +949,7 @@ function addCurrentCartToBatch() {
   state.selectedItems.clear();
   updateDrawer();
   renderResults(state.rawResults);
+  showToast(`💾 Đã lưu câu '${queryId}.csv' vào Gói Nộp Bài!`);
 }
 
 // --- Render Gói Đề Thi UI ---
@@ -880,11 +974,45 @@ function renderBatchManagerUI() {
         <span class="batch-query-name">📄 ${qid}.csv</span>
         <span class="batch-query-meta">${qData.count} dòng • ${qData.mode.toUpperCase()}</span>
       </div>
-      <button class="batch-remove-item-btn" onclick="removeBatchQuery('${qid}')" title="Xóa câu này khỏi gói">✕</button>
+      <div class="batch-item-actions">
+        <button class="batch-load-btn" onclick="loadBatchQueryToCart('${qid}')" title="Nạp lại câu này vào Giỏ Nộp Bài để xem và chỉnh sửa">👁️ Nạp lại</button>
+        <button class="batch-remove-item-btn" onclick="removeBatchQuery('${qid}')" title="Xóa câu này khỏi gói">✕</button>
+      </div>
     `;
     batchListEl.appendChild(itemDiv);
   });
 }
+
+// --- Nạp lại câu hỏi từ Gói Nộp Bài vào Giỏ để xem và chỉnh sửa ---
+window.loadBatchQueryToCart = function(qid) {
+  const qData = state.batchQueries.get(qid);
+  if (!qData) return;
+
+  // 1. Chuyển tab sang mode tương ứng
+  state.mode = qData.mode;
+  document.querySelectorAll(".tab-btn").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.mode === qData.mode);
+  });
+  updateUIForMode();
+
+  // 2. Set query id input
+  const queryIdInput = document.getElementById("query-id-input");
+  const btnLabel = document.getElementById("btn-query-id-label");
+  if (queryIdInput) queryIdInput.value = qid;
+  if (btnLabel) btnLabel.textContent = `${qid}.csv`;
+
+  // 3. Nạp lại selectedItems
+  state.selectedItems.clear();
+  if (qData.items && Array.isArray(qData.items)) {
+    qData.items.forEach(([k, v]) => {
+      state.selectedItems.set(k, v);
+    });
+  }
+
+  updateDrawer();
+  renderResults(state.rawResults);
+  showToast(`📂 Đã nạp lại ${qid} vào Giỏ Nộp Bài!`);
+};
 
 window.removeBatchQuery = function(qid) {
   state.batchQueries.delete(qid);
@@ -1058,8 +1186,17 @@ function highlightMatchedText(fullText, query) {
 
 function showLightbox(cand, imgUrl) {
   currentLightboxCand = cand;
+  if (state.currentResultsList && state.currentResultsList.length > 0) {
+    const foundIdx = state.currentResultsList.findIndex(
+      (c) => c && c.video_id === cand.video_id && c.frame_id === cand.frame_id
+    );
+    if (foundIdx !== -1) {
+      state.currentLightboxIndex = foundIdx;
+    }
+  }
+
   const modal = document.getElementById("lightbox-modal");
-  document.getElementById("modal-title").textContent = `${cand.video_id} — Scene: ${cand.scene_id} (Frame ${cand.frame_id})`;
+  document.getElementById("modal-title").textContent = `${cand.video_id} — Scene: ${cand.scene_id || ''} (Frame ${cand.frame_id})`;
 
   const descBox = document.getElementById("modal-desc");
   const ocrBox = document.getElementById("modal-ocr");
@@ -1079,6 +1216,25 @@ function showLightbox(cand, imgUrl) {
   loadLightboxVideo(cand, imgUrl);
 
   modal.style.display = "flex";
+}
+
+// --- Điều hướng sang ảnh kết quả tại vị trí index trong modal ---
+function showLightboxAt(index) {
+  if (!state.currentResultsList || state.currentResultsList.length === 0) return;
+
+  // Wrap around vòng lặp
+  if (index < 0) {
+    index = state.currentResultsList.length - 1;
+  } else if (index >= state.currentResultsList.length) {
+    index = 0;
+  }
+
+  state.currentLightboxIndex = index;
+  const cand = state.currentResultsList[index];
+  if (!cand) return;
+
+  const imgUrl = `${API_BASE}/api/v1/image/${cand.video_id}/${cand.frame_id}`;
+  showLightbox(cand, imgUrl);
 }
 
 async function loadLightboxVideo(cand, imgUrl) {
@@ -1153,6 +1309,22 @@ if (modalEl) {
     modalEl.style.display = "none";
     closeLightboxVideo();
   });
+
+  const prevModalBtn = document.getElementById("modal-prev-btn");
+  if (prevModalBtn) {
+    prevModalBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      showLightboxAt(state.currentLightboxIndex - 1);
+    });
+  }
+
+  const nextModalBtn = document.getElementById("modal-next-btn");
+  if (nextModalBtn) {
+    nextModalBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      showLightboxAt(state.currentLightboxIndex + 1);
+    });
+  }
 
   modalEl.addEventListener("click", (e) => {
     if (e.target === modalEl) {
