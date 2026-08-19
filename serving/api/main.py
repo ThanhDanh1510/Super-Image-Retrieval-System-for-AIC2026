@@ -186,10 +186,13 @@ def create_app() -> FastAPI:
         response = await call_next(request)
         duration = time.perf_counter() - start_time
         
-        # Chỉ log chi tiết các API endpoints chính, bỏ qua static files hoặc assets UI để đỡ loãng log
         path = request.url.path
         if path.startswith("/api/v1/"):
             logger.info(f"⏱️ [HTTP] {request.method} {path} - Status {response.status_code} - took {duration:.4f}s")
+        elif path.startswith("/ui"):
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
             
         return response
 

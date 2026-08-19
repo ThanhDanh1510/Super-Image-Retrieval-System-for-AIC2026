@@ -38,6 +38,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupDrawer();
   setupVoice();
   setupKeyboardShortcuts();
+  updateUIForMode();
 });
 
 // --- Tab Setup ---
@@ -950,6 +951,13 @@ async function packageSubmissionZip() {
     alert("❌ Đã xảy ra lỗi khi tạo file zip: " + err.message);
   }
 }
+
+// Global window functions for direct access
+window.addCurrentCartToBatch = addCurrentCartToBatch;
+window.applyVqaAnswerToAll = applyVqaAnswerToAll;
+window.exportSingleCSV = exportSingleCSV;
+window.packageSubmissionZip = packageSubmissionZip;
+window.clearAllBatchQueries = clearAllBatchQueries;
 
 // Lightbox Modal — phát video tương tác ngay trong khung ảnh
 let currentLightboxCand = null;
