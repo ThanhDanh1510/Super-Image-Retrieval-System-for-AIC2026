@@ -23,9 +23,10 @@ def format_qa_csv(items: list[dict]) -> str:
     safe = items[:100]
     lines = []
     for item in safe:
-        ans = (item.get("user_answer") or item.get("answer") or "").strip()
-        if not ans:
-            ans = "Chưa có đáp án"
+        # Bỏ qua nếu không có keyframe hoặc video_id hợp lệ
+        if not item or not item.get("video_id") or item.get("frame_id") is None:
+            continue
+        ans = (item.get("user_answer") if item.get("user_answer") is not None else (item.get("answer") or "")).strip()
         if len(ans) > 100:
             ans = ans[:100]
         escaped = ans.replace('"', '""')
@@ -143,3 +144,20 @@ def test_submission_zip_contains_submission_folder():
         assert "submission/query-2-kis.csv" in namelist
         assert "submission/query-3-qa.csv" in namelist
         assert "submission/query-4-trake.csv" in namelist
+
+
+def test_qa_csv_individual_vs_bulk_and_empty_frames():
+    # User can set individual answers or empty answers, and lines without frames are skipped
+    items = [
+        {"video_id": "L01_V028", "frame_id": 3450, "user_answer": "Màu xanh dương"}, # individual
+        {"video_id": "L01_V028", "frame_id": 3600, "user_answer": "Màu đỏ"},          # different individual
+        {"video_id": "L02_V011", "frame_id": 1200, "user_answer": ""},                # empty answer
+        {"video_id": "L03_V999", "frame_id": None, "user_answer": "No frame"},         # invalid frame -> skipped
+    ]
+    csv_str = format_qa_csv(items)
+    lines = [l.strip() for l in csv_str.strip().splitlines()]
+    
+    assert len(lines) == 3
+    assert lines[0] == 'L01_V028, 3450, "Màu xanh dương"'
+    assert lines[1] == 'L01_V028, 3600, "Màu đỏ"'
+    assert lines[2] == 'L02_V011, 1200, ""'

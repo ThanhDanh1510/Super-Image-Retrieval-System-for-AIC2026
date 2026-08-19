@@ -737,6 +737,82 @@ body {
   box-shadow: 0 0 10px var(--spider-blue-glow);
 }
 
+/* VQA Bulk Answer Input Box */
+.vqa-bulk-box {
+  margin-top: 4px;
+  background: rgba(226, 54, 54, 0.08);
+  border: 1px solid rgba(226, 54, 54, 0.3);
+  border-radius: 6px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.vqa-bulk-input-group {
+  display: flex;
+  gap: 6px;
+}
+
+.spider-vqa-bulk-input {
+  flex: 1;
+  background: rgba(10, 14, 23, 0.95);
+  border: 1px solid var(--spider-red);
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.78rem;
+  padding: 5px 8px;
+  border-radius: 4px;
+  outline: none;
+}
+
+.spider-vqa-bulk-input:focus {
+  box-shadow: 0 0 8px var(--spider-red-glow);
+}
+
+.spider-vqa-apply-btn {
+  background: rgba(226, 54, 54, 0.2);
+  border: 1px solid var(--spider-red);
+  color: #ff8a80;
+  font-weight: 700;
+  font-size: 0.72rem;
+  padding: 5px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s;
+}
+
+.spider-vqa-apply-btn:hover {
+  background: var(--spider-red);
+  color: #fff;
+  box-shadow: 0 0 10px var(--spider-red-glow);
+}
+
+/* Per-item VQA input */
+.vqa-item-box {
+  margin-top: 4px;
+  width: 100%;
+}
+
+.vqa-ans-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: #080c14;
+  border: 1px solid rgba(0, 229, 255, 0.4);
+  color: #fff;
+  font-size: 0.75rem;
+  padding: 4px 6px;
+  border-radius: 4px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.vqa-ans-input:focus {
+  border-color: var(--spider-blue);
+  box-shadow: 0 0 6px var(--spider-blue-glow);
+}
+
 .sidebar-header {
   padding: 14px 16px;
   border-bottom: 1px solid var(--card-border);

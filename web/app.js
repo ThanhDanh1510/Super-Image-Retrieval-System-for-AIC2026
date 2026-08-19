@@ -55,15 +55,20 @@ function setupTabs() {
 
 function updateUIForMode() {
   const numEventsGroup = document.getElementById("num-events-group");
+  const vqaBulkBox = document.getElementById("vqa-bulk-box");
+
   if (state.mode === "trake") {
     queryInput.placeholder = "Gõ chuỗi sự kiện theo thứ tự... (VD: người đàn ông bước vào xe -> xe chạy trên đường -> dừng lại ở quán ăn)";
     if (numEventsGroup) numEventsGroup.style.display = "flex";
+    if (vqaBulkBox) vqaBulkBox.style.display = "none";
   } else if (state.mode === "vqa") {
     queryInput.placeholder = "Gõ câu hỏi VQA... (VD: Người lái xe mặc áo màu gì? / Có bao nhiêu người trong quán?)";
     if (numEventsGroup) numEventsGroup.style.display = "none";
+    if (vqaBulkBox) vqaBulkBox.style.display = "flex";
   } else {
     queryInput.placeholder = "Gõ câu miêu tả tìm kiếm... (VD: xe máy màu vàng, tiệm vàng Lê Tứ)";
     if (numEventsGroup) numEventsGroup.style.display = "none";
+    if (vqaBulkBox) vqaBulkBox.style.display = "none";
   }
   updateQueryIdInputForMode();
 }
@@ -601,11 +606,13 @@ function updateDrawer() {
     
     div.innerHTML = `
       <img src="${imgUrl}" alt="${cand.scene_id}" onerror="this.style.display='none'" />
-      <div style="flex:1;">
+      <div style="flex:1; min-width: 0;">
         <div style="font-weight:bold; font-size:0.85rem;">${cand.video_id}</div>
         <div style="font-size:0.75rem; color:var(--spider-blue); font-family:var(--font-code); font-weight:600;">f${cand.frame_id}</div>
         ${state.mode === "vqa" ? `
-          <input type="text" class="vqa-ans-input" data-key="${key}" placeholder="Nhập đáp án VQA..." value="${cand.user_answer || ''}" style="width:100%; margin-top:4px; font-size:0.75rem; padding:2px 4px; background:#000; border:1px solid var(--spider-blue); color:#fff; border-radius:4px;" />
+          <div class="vqa-item-box">
+            <input type="text" class="vqa-ans-input" data-key="${key}" placeholder="Đáp án riêng cho frame này..." value="${cand.user_answer != null ? cand.user_answer : (cand.answer || '')}" maxlength="100" />
+          </div>
         ` : ''}
       </div>
       <button onclick="copyItemKey('${cand.video_id}', ${cand.frame_id})" style="background:none; border:none; color:var(--spider-blue); cursor:pointer; font-size:1rem; margin-right:4px;" title="Copy">📋</button>
@@ -657,6 +664,12 @@ function setupDrawer() {
     toggleBtn.onclick = toggleSidebar;
   }
 
+  // VQA Bulk Answer Apply
+  const vqaApplyAllBtn = document.getElementById("vqa-apply-all-btn");
+  if (vqaApplyAllBtn) {
+    vqaApplyAllBtn.onclick = applyVqaAnswerToAll;
+  }
+
   // Query ID input sync
   const queryIdInput = document.getElementById("query-id-input");
   const btnQueryIdLabel = document.getElementById("btn-query-id-label");
@@ -692,6 +705,25 @@ function setupDrawer() {
   }
 }
 
+// --- Áp dụng 1 câu trả lời chung cho toàn bộ ảnh trong giỏ VQA ---
+function applyVqaAnswerToAll() {
+  const bulkInput = document.getElementById("vqa-bulk-answer-input");
+  const val = (bulkInput ? bulkInput.value.trim() : "").substring(0, 100);
+  if (!val) {
+    alert("⚠️ Vui lòng nhập nội dung đáp án chung trước khi bấm 'Áp dụng tất cả'!");
+    return;
+  }
+  if (state.selectedItems.size === 0) {
+    alert("⚠️ Giỏ nộp bài đang trống! Hãy chọn ảnh trước khi điền đáp án.");
+    return;
+  }
+
+  state.selectedItems.forEach((cand) => {
+    cand.user_answer = val;
+  });
+  updateDrawer();
+}
+
 // --- Query ID Utilities ---
 function getDefaultQueryId() {
   const suffix = state.mode === "vqa" ? "qa" : state.mode;
@@ -725,14 +757,16 @@ function updateQueryIdInputForMode() {
 // 4. KIS: <video_name>, <frame_id>
 // 5. Q&A: <video_name>, <frame_id>, "<answer>" (tối đa 100 ký tự)
 // 6. TRAKE: <video_name>, <frame_1>, <frame_2>, ..., <frame_N>
+// Lưu ý: Chỉ xuất những dòng có keyframe hợp lệ; answer trống thì để ""
 function buildCSVContent(mode, items) {
   const safeItems = Array.from(items).slice(0, 100);
   let lines = [];
 
   if (mode === "vqa") {
     safeItems.forEach((cand) => {
-      let ans = (cand.user_answer || cand.answer || "").trim();
-      if (!ans) ans = "Chưa có đáp án";
+      // Chỉ xuất khi có keyframe hợp lệ
+      if (!cand || !cand.video_id || cand.frame_id == null || cand.frame_id === "") return;
+      let ans = (cand.user_answer != null ? cand.user_answer : (cand.answer || "")).trim();
       if (ans.length > 100) ans = ans.substring(0, 100);
       // Double quote escaping for RFC 4180 / BTC rule
       const escapedAns = ans.replace(/"/g, '""');
@@ -740,6 +774,7 @@ function buildCSVContent(mode, items) {
     });
   } else if (mode === "trake") {
     safeItems.forEach((cand) => {
+      if (!cand || !cand.video_id || cand.frame_id == null || cand.frame_id === "") return;
       let frames = [cand.frame_id];
       if (cand.events && Array.isArray(cand.events) && cand.events.length > 0) {
         frames = cand.events.map((e) => e.frame_id || cand.frame_id);
@@ -751,6 +786,7 @@ function buildCSVContent(mode, items) {
   } else {
     // KIS Format
     safeItems.forEach((cand) => {
+      if (!cand || !cand.video_id || cand.frame_id == null || cand.frame_id === "") return;
       lines.push(`${cand.video_id}, ${cand.frame_id}`);
     });
   }

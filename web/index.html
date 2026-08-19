@@ -157,6 +157,14 @@
             <button id="add-to-batch-btn" class="spider-batch-add-btn" title="Lưu câu này vào gói đề thi">➕ Lưu Gói</button>
           </div>
         </div>
+        <!-- VQA Global / Batch Answer Input (chỉ hiện khi ở tab VQA) -->
+        <div id="vqa-bulk-box" class="vqa-bulk-box" style="display: none;">
+          <label for="vqa-bulk-answer-input" class="query-config-label">📝 Đáp án chung cho cả gói (tùy chọn):</label>
+          <div class="vqa-bulk-input-group">
+            <input type="text" id="vqa-bulk-answer-input" class="spider-vqa-bulk-input" placeholder="Gõ đáp án chung..." maxlength="100" />
+            <button id="vqa-apply-all-btn" class="spider-vqa-apply-btn" title="Điền đáp án này vào tất cả ảnh trong giỏ">⚡ Áp dụng tất cả</button>
+          </div>
+        </div>
         <span class="hotkey-tip">Tip: Rê chuột + phím C để copy nhanh</span>
       </div>
 
