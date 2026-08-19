@@ -13,6 +13,7 @@ const state = {
   useViranker: true,
   useJinaM0: false,
   selectedItems: new Map(), // key -> CandidateResult
+  batchQueries: new Map(),  // queryId -> { queryId, mode, count, csvString, timestamp }
   rawResults: [],
   selectedFile: null,
   selectedImageBase64: null,
@@ -64,6 +65,7 @@ function updateUIForMode() {
     queryInput.placeholder = "Gõ câu miêu tả tìm kiếm... (VD: xe máy màu vàng, tiệm vàng Lê Tứ)";
     if (numEventsGroup) numEventsGroup.style.display = "none";
   }
+  updateQueryIdInputForMode();
 }
 
 // --- Search Controls Setup ---
@@ -655,51 +657,262 @@ function setupDrawer() {
     toggleBtn.onclick = toggleSidebar;
   }
 
-  // CSV Exporter
+  // Query ID input sync
+  const queryIdInput = document.getElementById("query-id-input");
+  const btnQueryIdLabel = document.getElementById("btn-query-id-label");
+  if (queryIdInput) {
+    queryIdInput.addEventListener("input", (e) => {
+      let val = e.target.value.trim();
+      if (!val) val = getDefaultQueryId();
+      if (btnQueryIdLabel) {
+        btnQueryIdLabel.textContent = `${val}.csv`;
+      }
+    });
+  }
+
+  // Button actions
   const exportBtn = document.getElementById("export-csv-btn");
   if (exportBtn) {
-    exportBtn.onclick = exportCSV;
+    exportBtn.onclick = exportSingleCSV;
+  }
+
+  const addToBatchBtn = document.getElementById("add-to-batch-btn");
+  if (addToBatchBtn) {
+    addToBatchBtn.onclick = addCurrentCartToBatch;
+  }
+
+  const packageZipBtn = document.getElementById("package-zip-btn");
+  if (packageZipBtn) {
+    packageZipBtn.onclick = packageSubmissionZip;
+  }
+
+  const clearBatchBtn = document.getElementById("clear-batch-btn");
+  if (clearBatchBtn) {
+    clearBatchBtn.onclick = clearAllBatchQueries;
   }
 }
 
-// --- CSV Exporter per Task Standard ---
-function exportCSV() {
+// --- Query ID Utilities ---
+function getDefaultQueryId() {
+  const suffix = state.mode === "vqa" ? "qa" : state.mode;
+  return `query-${state.batchQueries.size + 1}-${suffix}`;
+}
+
+function updateQueryIdInputForMode() {
+  const queryIdInput = document.getElementById("query-id-input");
+  const btnQueryIdLabel = document.getElementById("btn-query-id-label");
+  if (queryIdInput) {
+    const currentVal = queryIdInput.value.trim();
+    const suffix = state.mode === "vqa" ? "qa" : state.mode;
+    // Replace trailing suffix or set default
+    const match = currentVal.match(/^(query-\d+)-(kis|qa|trake)$/);
+    if (match) {
+      queryIdInput.value = `${match[1]}-${suffix}`;
+    } else if (!currentVal || currentVal.startsWith("query-")) {
+      queryIdInput.value = `query-${state.batchQueries.size + 1}-${suffix}`;
+    }
+    if (btnQueryIdLabel) {
+      btnQueryIdLabel.textContent = `${queryIdInput.value.trim()}.csv`;
+    }
+  }
+}
+
+// --- CSV Generator per 100% BTC Official Specification ---
+// Quy chuẩn sotuyenaic.oj.io.vn/rules/:
+// 1. Encoding: UTF-8, Delimiter: dấu phẩy (,)
+// 2. TUYỆT ĐỐI KHÔNG CÓ DÒNG HEADER (Bắt đầu trực tiếp bằng dữ liệu)
+// 3. Tối đa 100 dòng cho mỗi file CSV
+// 4. KIS: <video_name>, <frame_id>
+// 5. Q&A: <video_name>, <frame_id>, "<answer>" (tối đa 100 ký tự)
+// 6. TRAKE: <video_name>, <frame_1>, <frame_2>, ..., <frame_N>
+function buildCSVContent(mode, items) {
+  const safeItems = Array.from(items).slice(0, 100);
+  let lines = [];
+
+  if (mode === "vqa") {
+    safeItems.forEach((cand) => {
+      let ans = (cand.user_answer || cand.answer || "").trim();
+      if (!ans) ans = "Chưa có đáp án";
+      if (ans.length > 100) ans = ans.substring(0, 100);
+      // Double quote escaping for RFC 4180 / BTC rule
+      const escapedAns = ans.replace(/"/g, '""');
+      lines.push(`${cand.video_id}, ${cand.frame_id}, "${escapedAns}"`);
+    });
+  } else if (mode === "trake") {
+    safeItems.forEach((cand) => {
+      let frames = [cand.frame_id];
+      if (cand.events && Array.isArray(cand.events) && cand.events.length > 0) {
+        frames = cand.events.map((e) => e.frame_id || cand.frame_id);
+      } else if (cand.event_frames && Array.isArray(cand.event_frames) && cand.event_frames.length > 0) {
+        frames = cand.event_frames;
+      }
+      lines.push(`${cand.video_id}, ${frames.join(", ")}`);
+    });
+  } else {
+    // KIS Format
+    safeItems.forEach((cand) => {
+      lines.push(`${cand.video_id}, ${cand.frame_id}`);
+    });
+  }
+
+  return lines.join("\r\n") + (lines.length > 0 ? "\r\n" : "");
+}
+
+// --- Xuất lẻ 1 file CSV cho câu hỏi hiện tại ---
+function exportSingleCSV() {
   if (state.selectedItems.size === 0) {
-    alert("Chưa có item nào được chọn để xuất CSV!");
+    alert("⚠️ Chưa có bức ảnh nào trong Giỏ Nộp Bài! Hãy click dấu (+) trên ảnh để chọn.");
     return;
   }
 
-  let csvContent = "";
+  const queryIdInput = document.getElementById("query-id-input");
+  let queryId = (queryIdInput ? queryIdInput.value.trim() : "") || getDefaultQueryId();
+  // Strip .csv if user accidentally typed it
+  queryId = queryId.replace(/\.csv$/i, "");
 
-  if (state.mode === "vqa") {
-    // VQA Format: video_id,frame_id,answer
-    csvContent = "video_id,frame_id,answer\n";
-    state.selectedItems.forEach((cand) => {
-      const ans = (cand.user_answer || '').replace(/"/g, '""');
-      csvContent += `${cand.video_id},${cand.frame_id},"${ans}"\n`;
-    });
-  } else if (state.mode === "trake") {
-    // TRAKE Format: video_id,frame_id_1,frame_id_2,frame_id_3,frame_id_4
-    csvContent = "video_id,frame_id_1,frame_id_2,frame_id_3,frame_id_4\n";
-    state.selectedItems.forEach((cand) => {
-      csvContent += `${cand.video_id},${cand.frame_id},${cand.frame_id},${cand.frame_id},${cand.frame_id}\n`;
-    });
-  } else {
-    // KIS Format: ONLY video_id,frame_id (Standard BTC)
-    csvContent = "video_id,frame_id\n";
-    state.selectedItems.forEach((cand) => {
-      csvContent += `${cand.video_id},${cand.frame_id}\n`;
-    });
-  }
-
-  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+  const csvContent = buildCSVContent(state.mode, state.selectedItems.values());
+  const blob = new Blob(["\uFEFF" + csvContent], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.setAttribute("href", url);
-  link.setAttribute("download", `submission_${state.mode}_${Date.now()}.csv`);
+  link.setAttribute("download", `${queryId}.csv`);
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+// --- Lưu câu hiện tại vào Gói Nộp Bài (Batch Package) ---
+function addCurrentCartToBatch() {
+  if (state.selectedItems.size === 0) {
+    alert("⚠️ Giỏ nộp bài đang trống! Hãy chọn ít nhất 1 ảnh trước khi lưu vào gói.");
+    return;
+  }
+
+  const queryIdInput = document.getElementById("query-id-input");
+  let queryId = (queryIdInput ? queryIdInput.value.trim() : "") || getDefaultQueryId();
+  queryId = queryId.replace(/\.csv$/i, "");
+
+  const itemsArr = Array.from(state.selectedItems.values());
+  const csvContent = buildCSVContent(state.mode, itemsArr);
+
+  state.batchQueries.set(queryId, {
+    queryId: queryId,
+    mode: state.mode,
+    count: itemsArr.length,
+    csvString: csvContent,
+    timestamp: new Date().toLocaleTimeString(),
+  });
+
+  renderBatchManagerUI();
+
+  // Suggest next query ID (e.g. query-1-kis -> query-2-kis)
+  const match = queryId.match(/^(query-)(\d+)(-[a-z]+)$/i);
+  if (match && queryIdInput) {
+    const nextNum = parseInt(match[2], 10) + 1;
+    queryIdInput.value = `${match[1]}${nextNum}${match[3]}`;
+    const btnLabel = document.getElementById("btn-query-id-label");
+    if (btnLabel) btnLabel.textContent = `${queryIdInput.value}.csv`;
+  }
+
+  // Clear current cart for next question
+  state.selectedItems.clear();
+  updateDrawer();
+  renderResults(state.rawResults);
+}
+
+// --- Render Gói Đề Thi UI ---
+function renderBatchManagerUI() {
+  const batchListEl = document.getElementById("batch-query-list");
+  const batchCountEl = document.getElementById("batch-count");
+  if (batchCountEl) batchCountEl.textContent = state.batchQueries.size;
+
+  if (!batchListEl) return;
+
+  if (state.batchQueries.size === 0) {
+    batchListEl.innerHTML = `<span class="batch-empty-hint">Chưa lưu câu nào vào gói. Bấm '➕ Lưu Gói' sau khi chọn ảnh.</span>`;
+    return;
+  }
+
+  batchListEl.innerHTML = "";
+  state.batchQueries.forEach((qData, qid) => {
+    const itemDiv = document.createElement("div");
+    itemDiv.className = "batch-query-item";
+    itemDiv.innerHTML = `
+      <div class="batch-query-info">
+        <span class="batch-query-name">📄 ${qid}.csv</span>
+        <span class="batch-query-meta">${qData.count} dòng • ${qData.mode.toUpperCase()}</span>
+      </div>
+      <button class="batch-remove-item-btn" onclick="removeBatchQuery('${qid}')" title="Xóa câu này khỏi gói">✕</button>
+    `;
+    batchListEl.appendChild(itemDiv);
+  });
+}
+
+window.removeBatchQuery = function(qid) {
+  state.batchQueries.delete(qid);
+  renderBatchManagerUI();
+};
+
+function clearAllBatchQueries() {
+  if (state.batchQueries.size === 0) return;
+  if (confirm("Bạn có chắc muốn xóa toàn bộ các câu trong gói đề thi hiện tại?")) {
+    state.batchQueries.clear();
+    renderBatchManagerUI();
+  }
+}
+
+// --- ĐÓNG GÓI SUBMISSION.ZIP (CHUẨN 100% BTC SƠ TUYỂN AIC) ---
+// Quy tắc BTC: File .zip BẮT BUỘC chứa thư mục con 'submission/' bên trong.
+async function packageSubmissionZip() {
+  if (typeof JSZip === "undefined") {
+    alert("⚠️ Lỗi: Không thể nạp thư viện JSZip. Vui lòng kiểm tra kết nối internet hoặc thử lại.");
+    return;
+  }
+
+  // Nếu trong batch chưa có câu nào nhưng giỏ đang có ảnh, tự động thêm giỏ vào batch
+  if (state.batchQueries.size === 0) {
+    if (state.selectedItems.size > 0) {
+      addCurrentCartToBatch();
+    } else {
+      alert("⚠️ Gói nộp bài đang trống! Hãy chọn ảnh và bấm '➕ Lưu Gói' cho từng câu hỏi trước khi đóng gói .zip.");
+      return;
+    }
+  }
+
+  const zip = new JSZip();
+  // BẮT BUỘC TẠO THƯ MỤC 'submission' THEO QUY CHẾ BTC
+  const submissionFolder = zip.folder("submission");
+
+  let totalFiles = 0;
+  state.batchQueries.forEach((qData, qid) => {
+    const filename = qid.endsWith(".csv") ? qid : `${qid}.csv`;
+    submissionFolder.file(filename, qData.csvString);
+    totalFiles++;
+  });
+
+  try {
+    const zipBlob = await zip.generateAsync({
+      type: "blob",
+      compression: "DEFLATE",
+      compressionOptions: { level: 9 },
+    });
+
+    const url = URL.createObjectURL(zipBlob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    const teamName = "team_submission";
+    link.setAttribute("download", `${teamName}_${Date.now()}.zip`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    alert(`🎉 ĐÓNG GÓI THÀNH CÔNG!\n\nĐã xuất file .zip chứa thư mục 'submission/' với ${totalFiles} file CSV chuẩn quy chế BTC sơ tuyển AIC 2026.\nBạn có thể nộp trực tiếp file zip này lên hệ thống chấm thi.`);
+  } catch (err) {
+    console.error("Lỗi đóng gói zip:", err);
+    alert("❌ Đã xảy ra lỗi khi tạo file zip: " + err.message);
+  }
 }
 
 // Lightbox Modal — phát video tương tác ngay trong khung ảnh

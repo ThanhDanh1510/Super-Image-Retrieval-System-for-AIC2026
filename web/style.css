@@ -670,12 +670,79 @@ body {
   align-items: center;
 }
 
+.selected-badge {
+  background: var(--spider-red);
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 12px;
+}
+
+.query-config-box {
+  margin-top: 6px;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--card-border);
+  border-radius: 6px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.query-config-label {
+  font-size: 0.75rem;
+  color: var(--text-sub);
+  font-weight: 600;
+}
+
+.query-input-group {
+  display: flex;
+  gap: 6px;
+}
+
+.spider-query-id-input {
+  flex: 1;
+  background: rgba(10, 14, 23, 0.95);
+  border: 1px solid var(--spider-blue);
+  color: #00e5ff;
+  font-family: var(--font-code);
+  font-weight: 700;
+  font-size: 0.8rem;
+  padding: 5px 8px;
+  border-radius: 4px;
+  outline: none;
+}
+
+.spider-query-id-input:focus {
+  box-shadow: 0 0 8px var(--spider-blue-glow);
+}
+
+.spider-batch-add-btn {
+  background: rgba(0, 229, 255, 0.15);
+  border: 1px solid var(--spider-blue);
+  color: var(--spider-blue);
+  font-weight: 700;
+  font-size: 0.75rem;
+  padding: 5px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s;
+}
+
+.spider-batch-add-btn:hover {
+  background: var(--spider-blue);
+  color: #000;
+  box-shadow: 0 0 10px var(--spider-blue-glow);
+}
+
 .sidebar-header {
   padding: 14px 16px;
   border-bottom: 1px solid var(--card-border);
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 
 .sidebar-header h3 {
@@ -692,6 +759,9 @@ body {
   flex: 1;
   padding: 12px;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .selected-item {
@@ -712,22 +782,137 @@ body {
   border-radius: 4px;
 }
 
+/* Batch Package Manager Section */
+.batch-manager-box {
+  background: rgba(14, 20, 32, 0.9);
+  border: 1px solid rgba(0, 229, 255, 0.3);
+  border-radius: 8px;
+  padding: 10px;
+  margin-top: auto;
+}
+
+.batch-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.batch-title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #ff9800;
+}
+
+.batch-clear-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.85rem;
+  opacity: 0.7;
+}
+
+.batch-clear-btn:hover {
+  opacity: 1;
+}
+
+.batch-query-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.batch-empty-hint {
+  font-size: 0.7rem;
+  color: var(--text-sub);
+  font-style: italic;
+}
+
+.batch-query-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 152, 0, 0.3);
+  border-radius: 4px;
+  padding: 4px 8px;
+}
+
+.batch-query-info {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.batch-query-name {
+  font-family: var(--font-code);
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #fff;
+}
+
+.batch-query-meta {
+  font-size: 0.65rem;
+  color: var(--text-sub);
+}
+
+.batch-remove-item-btn {
+  background: none;
+  border: none;
+  color: var(--spider-red);
+  cursor: pointer;
+  font-weight: 800;
+  font-size: 0.75rem;
+}
+
 .sidebar-footer {
-  padding: 14px;
+  padding: 12px;
   border-top: 1px solid var(--card-border);
+}
+
+.export-actions-col {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .spider-export-btn {
   width: 100%;
-  background: linear-gradient(135deg, var(--spider-blue), #0088ff);
   border: none;
-  color: #000;
   font-weight: 800;
-  padding: 12px;
-  font-size: 0.95rem;
+  padding: 10px 12px;
+  font-size: 0.85rem;
   border-radius: 8px;
   cursor: pointer;
-  box-shadow: 0 0 15px var(--spider-blue-glow);
+  transition: all 0.2s;
+}
+
+.spider-export-btn.primary {
+  background: linear-gradient(135deg, #ff9800, #e65100);
+  color: #fff;
+  box-shadow: 0 0 12px rgba(255, 152, 0, 0.4);
+}
+
+.spider-export-btn.primary:hover {
+  background: linear-gradient(135deg, #ffa726, #f57c00);
+  box-shadow: 0 0 18px rgba(255, 152, 0, 0.7);
+  transform: translateY(-1px);
+}
+
+.spider-export-btn.secondary {
+  background: rgba(0, 229, 255, 0.12);
+  border: 1px solid var(--spider-blue);
+  color: var(--spider-blue);
+}
+
+.spider-export-btn.secondary:hover {
+  background: var(--spider-blue);
+  color: #000;
+  box-shadow: 0 0 12px var(--spider-blue-glow);
 }
 
 /* Lightbox Modal */
