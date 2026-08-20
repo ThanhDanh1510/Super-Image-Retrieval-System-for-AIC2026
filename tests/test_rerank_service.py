@@ -62,7 +62,7 @@ async def test_rerank_returns_fused_candidates(candidates, mock_rerankers):
     result = await rerank_service.rerank("query", candidates, use_visual_reranker=True)
 
     assert result == candidates
-    viranker.score.assert_called_once_with("query", candidates, None)
+    viranker.score.assert_called_once_with("query", candidates, None, None)
     jina.score.assert_called_once_with("query", candidates, "", None)
     fuse.assert_called_once_with([0.9, 0.4], [0.5, 0.8], candidates)
 
@@ -73,7 +73,7 @@ async def test_rerank_only_runs_text_when_visual_is_disabled(candidates, mock_re
     result = await rerank_service.rerank("query", candidates, use_visual_reranker=False)
 
     assert result == candidates
-    viranker.score.assert_called_once_with("query", candidates, None)
+    viranker.score.assert_called_once_with("query", candidates, None, None)
     jina.score.assert_not_called()
     fuse.assert_called_once_with([0.9, 0.4], None, candidates)
 
@@ -109,7 +109,7 @@ async def test_rerank_uses_enhanced_query_over_raw_query(candidates, mock_rerank
     viranker, jina, _ = mock_rerankers
     await rerank_service.rerank("câu hỏi tiếng Việt", candidates, enhanced_query="english query", use_visual_reranker=True)
 
-    viranker.score.assert_called_once_with("câu hỏi tiếng Việt", candidates, None)
+    viranker.score.assert_called_once_with("câu hỏi tiếng Việt", candidates, None, "english query")
     jina.score.assert_called_once_with("english query", candidates, "", None)
 
 

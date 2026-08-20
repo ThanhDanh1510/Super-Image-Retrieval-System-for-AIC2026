@@ -1,18 +1,48 @@
-# Super Image Retrieval System for AIC2026
+# 🕷️ Super Image Retrieval System for AIC2026
 
-## 🎯 Tổng quan dự án (Project Overview)
-- **Tên:** Super Image Retrieval System for AIC2026
-- **Mục đích:** Truy xuất video keyframe thời gian thực cho AI Challenge HCMC 2026
-- **4 tasks:** KIS (Known-Item Search), VQA (Visual Question Answering), TRAKE (Temporal Retrieval), Image Search
-- **Kiến trúc:** ingestion (Kaggle GPU) → aggregation (Local) → indexing (Qdrant DB) → serving (FastAPI)
-- **Package manager:** `uv` (Python virtual environment)
-- **Python** >= 3.10
+<div align="center">
 
-## 🚀 Hướng dẫn cài đặt nhanh (Quick Start)
+[![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
+[![Qdrant](https://img.shields.io/badge/Qdrant-1.12+-DC2626?style=for-the-badge&logo=qdrant&logoColor=white)](https://qdrant.tech)
+[![PyTorch](https://img.shields.io/badge/PyTorch-CUDA%2012.4%20%7C%20MPS-EE4C2C?style=for-the-badge&logo=pytorch&logoColor=white)](https://pytorch.org)
+[![Docker](https://img.shields.io/badge/Docker-Supported-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://docker.com)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](LICENSE)
 
-### 🌟 LỰA CHỌN 1: Chạy Full-Stack 1 Lệnh bằng Docker (Khuyên dùng cho máy mới)
+**Hệ thống tìm kiếm và truy xuất video keyframe thời gian thực siêu tốc phục vụ cuộc thi AI Challenge HCMC 2026.**
 
-Nếu bạn muốn chạy hệ thống ngay lập tức mà không cần cài đặt môi trường Python hay CUDA:
+[🎯 Tổng Quan](#-tổng-quan-dự-án) •
+[🚀 Cài Đặt Nhanh](#-hướng-dẫn-cài-đặt-nhanh-quick-start) •
+[🏗️ Kiến Trúc](#️-kiến-trúc-hệ-thống-architecture) •
+[🔌 API Endpoints](#-api-endpoints) •
+[🧠 AI Models](#-ai-models) •
+[🕸️ Web UI](#️-spider-man-web-ui) •
+[🛠️ Bộ Công Cụ](#️-bộ-công-cụ-tiện-ích-tools--pipelines) •
+[🧪 Kiểm Thử](#-test--code-quality)
+
+</div>
+
+---
+
+## 🎯 Tổng Quan Dự Án
+
+* **Tên dự án:** Super Image Retrieval System for AIC2026
+* **Mục tiêu:** Truy xuất keyframe video chính xác cao trong thời gian thực ($< 1.5\text{s}$) từ kho dữ liệu video khổng lồ với giao diện mật độ cao.
+* **4 Nhiệm vụ chính (Tasks):**
+  1. **KIS (Known-Item Search):** Tìm kiếm phân đoạn video theo mô tả văn bản tiếng Việt/Anh hoặc giọng nói.
+  2. **VQA (Visual Question Answering):** Trả lời câu hỏi thị giác và truy xuất keyframe chứa bằng chứng.
+  3. **TRAKE (Temporal Retrieval):** Tìm kiếm chuỗi sự kiện đa bước diễn ra theo trình tự thời gian.
+  4. **Image-to-Image Search:** Tìm kiếm keyframe tương đồng trực tiếp từ ảnh mẫu.
+* **Quy mô dữ liệu thực tế:** **872 video gốc** (130.13 giờ), **90,551 keyframe sạch** đã được trích xuất vector và lập chỉ mục hoàn chỉnh.
+* **Vector Database:** [Qdrant](https://qdrant.tech) collection `aic2026_clean_v3` (alias: `production`).
+
+---
+
+## 🚀 Hướng Dẫn Cài Đặt Nhanh (Quick Start)
+
+### 🌟 LỰA CHỌN 1: Chạy Full-Stack Bằng Docker (Khuyên dùng cho máy mới)
+
+Nếu bạn muốn chạy hệ thống ngay lập tức mà không cần cấu hình thủ công Python/CUDA:
 
 1. **Clone repository:**
    ```bash
@@ -20,25 +50,25 @@ Nếu bạn muốn chạy hệ thống ngay lập tức mà không cần cài đ
    cd Super-Image-Retrieval-System-for-AIC2026
    ```
 
-2. **Chuẩn bị Dữ liệu (`data/`):**
+2. **Chuẩn bị Thư mục Dữ liệu (`data/`):**
    * 📥 **Tải bộ dữ liệu trọn gói tại**: [Google Drive Data Folder (AIC2026)](https://drive.google.com/drive/folders/174LtGV8Zex9TSD0eTajtVaY59DSi23kF)
    * Giải nén và đặt thư mục `data/` vào thư mục gốc của dự án.
-   * **Mẹo siêu tốc:** Nếu bạn tải sẵn thư mục **`data/qdrant_storage/`** (đã index sẵn toàn bộ 99.288 vectors), hệ thống sẽ khởi động có data ngay lập tức!
-   * *(Nếu tải thư mục `data/unified/` thô, chỉ cần nạp dữ liệu vào Qdrant bằng lệnh: `docker compose run --rm api python -m indexing.run_index --dataset-dir /app/data/unified --collection aic2026_clean_v3 --create-collection`)*
+   * **Mẹo siêu tốc:** Nếu bạn tải sẵn thư mục **`data/qdrant_storage/`** (đã index sẵn toàn bộ 90,551 points), hệ thống sẽ có dữ liệu ngay lập tức!
+   * *(Nếu chỉ có `data/unified/` thô, nạp dữ liệu bằng lệnh: `docker compose run --rm api python -m indexing.run_index --dataset-dir /app/data/unified --collection aic2026_clean_v3 --create-collection`)*
 
-3. **Khởi chạy hệ thống:**
+3. **Khởi chạy toàn bộ hệ thống:**
    ```bash
    docker compose up -d
    ```
-   * 🌐 **Spider-Man Web UI:** http://localhost:8000/ui/index.html
-   * 📚 **API Swagger Docs:** http://localhost:8000/docs
-   * 🗄️ **Qdrant Dashboard:** http://localhost:6333/dashboard
+   * 🌐 **Spider-Man Web UI:** [http://localhost:8000/ui/index.html](http://localhost:8000/ui/index.html)
+   * 📚 **API Swagger Docs:** [http://localhost:8000/docs](http://localhost:8000/docs)
+   * 🗄️ **Qdrant Dashboard:** [http://localhost:6333/dashboard](http://localhost:6333/dashboard)
 
 ---
 
-### 💻 LỰA CHỌN 2: Cài đặt Native trên Windows / macOS (Tối ưu GPU CUDA / Apple Silicon MPS)
+### 💻 LỰA CHỌN 2: Cài Đặt Native (Tối ưu tối đa GPU NVIDIA CUDA / Apple Silicon MPS)
 
-#### Bước 1: Cài đặt Môi trường & Thư viện
+#### Bước 1: Cài đặt Môi trường với `uv`
 
 ##### 🪟 Dành cho Windows (NVIDIA GPU CUDA):
 ```powershell
@@ -63,7 +93,7 @@ pip3 install uv
 uv venv .venv
 source .venv/bin/activate
 
-# Cài đặt PyTorch & Dependencies (Tự động nhận diện GPU Metal MPS trên Apple Silicon)
+# Cài đặt PyTorch & Dependencies (Tự động nhận diện GPU Metal MPS)
 uv pip install torch torchvision torchaudio
 uv pip install -e ".[macos-server,test]"
 ```
@@ -73,327 +103,266 @@ uv pip install -e ".[macos-server,test]"
 docker compose up -d qdrant
 ```
 
-#### Bước 3: Tải Dữ liệu & Index vào Qdrant
-📥 **Tải dữ liệu tại**: [Google Drive Data Folder (AIC2026)](https://drive.google.com/drive/folders/174LtGV8Zex9TSD0eTajtVaY59DSi23kF)
-
-Giải nén và đặt vào thư mục `data/`:
-```text
-data/
-├── image/           # Keyframes: data/image/{Group}/{Group}/{Video}/*.webp
-├── unified/         # Unified dataset + embeddings (.parquet & .npy)
-└── qdrant_storage/  # (Tùy chọn) Storage Qdrant đã index sẵn
-```
-
-*Nếu chưa có `qdrant_storage/` sẵn, chạy lệnh nạp dữ liệu (~5-7 phút):*
+#### Bước 3: Nạp Dữ Liệu vào Qdrant (Nếu chưa có storage)
 ```bash
-python -m indexing.run_index --dataset-dir ./data/unified --collection aic2026_clean_v3 --create-collection
+python -m indexing.run_index --dataset-dir ./data/unified --collection aic2026_clean_v3 --recreate
 ```
 
-#### Bước 4: Khởi động Search Server
+#### Bước 4: Khởi Động Search Server
 ```bash
 python start_api.py
 ```
-- **Web UI:** http://localhost:8000/ui/index.html
-- **Swagger:** http://localhost:8000/docs
-- **Health:** http://localhost:8000/health
+- **Web UI:** [http://localhost:8000/ui/index.html](http://localhost:8000/ui/index.html)
+- **API Docs:** [http://localhost:8000/docs](http://localhost:8000/docs)
+- **Health Check:** [http://localhost:8000/health](http://localhost:8000/health)
 
-## 🏗️ Kiến trúc Hệ thống (Architecture)
-Pipeline sử dụng 5 loại vector chính để tìm kiếm:
-- **image_dense** (1024, CLIP ViT-L/14)
-- **ocr_dense** (1536, gte-Qwen2-1.5B)
-- **asr_dense** (1536, gte-Qwen2-1.5B)
-- **ocr_sparse** (BM42)
-- **asr_sparse** (BM42)
+---
 
-Sử dụng Weighted RRF (k=60, prefetch=200), rerank với bge-reranker-v2-m3 (text, luôn bật, GPU) + jina-reranker-m0 (crossmodal, tắt mặc định).
+## 🏗️ Kiến Trúc Hệ Thống (Architecture)
 
-## 📂 Cấu trúc Dự án (Project Structure)
+```mermaid
+flowchart TD
+    subgraph QueryInput ["1. ĐẦU VÀO TRUY VẤN"]
+        Q_Text["Text Query (Tiếng Việt)"]
+        Q_Voice["Voice Query (Ghi âm)"]
+        Q_Img["Ảnh Mẫu (Image Query)"]
+    end
+
+    subgraph QueryEnhancement ["2. XỬ LÝ & MỞ RỘNG TRUY VẤN"]
+        Q_ASR["PhoWhisper ASR (Speech-to-Text)"]
+        Q_Bilingual["Bilingual Enhancement (Qwen2.5 / Gemini)<br/>Tách từ khóa VI & Sinh bản dịch EN"]
+    end
+
+    subgraph MultiBranchEmbed ["3. ĐA NHÁNH VECTOR EMBEDDINGS"]
+        V_CLIP["CLIP ViT-L/14 (1024d)<br/>Visual / Concept"]
+        V_OCR_Dense["gte-Qwen2-1.5B (1536d)<br/>Text Scene / On-Screen"]
+        V_ASR_Dense["gte-Qwen2-1.5B (1536d)<br/>Audio / Transcript"]
+        V_Sparse_OCR["BM42 Sparse Vector<br/>Từ khóa chính xác OCR"]
+        V_Sparse_ASR["BM42 Sparse Vector<br/>Từ khóa chính xác ASR"]
+    end
+
+    subgraph VectorSearch ["4. TRUY XUẤT QDRANT DB"]
+        Qdrant[("Qdrant Vector DB<br/>collection: aic2026_clean_v3<br/>90,551 points")]
+        RRF["Weighted RRF Fusion (k=60)<br/>Gộp điểm đa nhánh & Lọc sơ bộ Top-K"]
+    end
+
+    subgraph Reranking ["5. DUAL RERANKER (TÁI XẾP HẠNG)"]
+        ViRanker["ViRanker (bge-reranker-v2-m3)<br/>Text Reranker Tiếng Việt GPU (~0.2s)"]
+        JinaReranker["Jina Reranker M0<br/>Multimodal Cross-Encoder Reranker"]
+    end
+
+    subgraph Output ["6. GIAO DIỆN & XUẤT BÀI THI"]
+        UI["Spider-Man High-Density Web UI"]
+        CSV["Xuất file CSV nộp bài chuẩn AIC"]
+    end
+
+    Q_Text --> Q_Bilingual
+    Q_Voice --> Q_ASR --> Q_Bilingual
+    Q_Img --> V_CLIP
+
+    Q_Bilingual --> V_CLIP
+    Q_Bilingual --> V_OCR_Dense
+    Q_Bilingual --> V_ASR_Dense
+    Q_Bilingual --> V_Sparse_OCR
+    Q_Bilingual --> V_Sparse_ASR
+
+    V_CLIP --> Qdrant
+    V_OCR_Dense --> Qdrant
+    V_ASR_Dense --> Qdrant
+    V_Sparse_OCR --> Qdrant
+    V_Sparse_ASR --> Qdrant
+
+    Qdrant --> RRF --> ViRanker --> JinaReranker --> UI --> CSV
+```
+
+---
+
+## 📂 Cấu Trúc Dự Án (Project Structure)
+
 ```text
 Super-Image-Retrieval-System-for-AIC2026/
-├── configs/              # Centralized YAML configs (model_versions, fusion_config)
-├── ingestion/            # Kaggle GPU pipeline (keyframe extraction, OCR, ASR, embeddings)
-│   └── skeletons/        # Modular scripts: 01a keyframe, 01b text, 01c embeddings, 02 export
-├── aggregation/          # Merge shard outputs into unified dataset
-├── indexing/             # Qdrant schema + bulk indexing + alias management
-├── serving/              # FastAPI REST API (strict layering: controller → service → repo)
+├── configs/              # Cấu hình tập trung YAML (model_versions, fusion_config)
+├── ingestion/            # Pipeline xử lý Kaggle GPU (trích xuất keyframe, OCR, ASR, embeddings)
+│   └── skeletons/        # Scripts chuẩn hóa: 01a keyframe, 01b text, 01c embeddings, 02 export
+├── aggregation/          # Hợp nhất shards dữ liệu phân tán thành unified dataset
+├── indexing/             # Quản lý schema Qdrant, bulk index, và quản trị Zero-Downtime Alias
+├── serving/              # Backend FastAPI (Kiến trúc phân lớp chuẩn: controller → service → repo)
 │   └── api/
-│       ├── controller/   # Route handlers
-│       ├── service/      # Business logic + reranker
-│       ├── repo/         # Qdrant client abstraction
-│       ├── core/         # Config, ModelRegistry, middleware
-│       └── schema/       # Pydantic request/response models
-├── shared/               # Cross-module contracts: schemas, utils, model wrappers, OCR
-├── eval/                 # Offline benchmark & metrics
-├── tests/                # Pytest unit + integration tests
-├── tools/                # Utility scripts (GPU OCR batch, VLM description, metadata fix)
-├── web/                  # Spider-Man themed Web UI (index.html, app.js, style.css)
-├── docs/                 # Reference documentation
-├── docker-compose.yml    # Qdrant container setup
-├── start_api.py          # Entry point: run server in-process
-├── Makefile              # Common commands (make serve / test / lint)
-├── pyproject.toml        # Dependencies (uv pip install -e ".[all]")
-└── .env.example          # Environment variable template
+│       ├── controller/   # Route handlers (KIS, VQA, TRAKE, Similar Image, Media streaming)
+│       ├── service/      # Nghiệp vụ tìm kiếm, RRF fusion, Dual Rerankers
+│       ├── repo/         # Qdrant client abstraction và truy vấn vector
+│       ├── core/         # Settings, ModelRegistry lazy-loading, Latency middleware
+│       └── schema/       # Pydantic schemas request/response
+├── shared/               # Code dùng chung: schemas, text normalizer, model wrappers, path resolver
+├── eval/                 # Offline benchmark & đánh giá độ chính xác (Precision, Recall, MRR)
+├── tests/                # Pytest unit + integration test suite
+├── tools/                # Bộ công cụ tiện ích (Lọc ảnh, kiểm toán độ phủ, sinh vector, OCR)
+│   ├── image_filter/     # Web UI lọc ảnh & tìm trùng lặp (Port 8501)
+│   └── data_prep/        # Scripts audit độ phủ, sync L25, gap filling, FPS calibration
+├── web/                  # Spider-Man Theme Web UI (index.html, app.js, style.css)
+├── docker-compose.yml    # Khởi chạy container Qdrant & FastAPI server
+├── start_api.py          # Entry point khởi chạy API server in-process
+├── Makefile              # Phím tắt dòng lệnh (make serve / test / lint)
+├── pyproject.toml        # Quản lý gói dependencies qua uv
+└── .env.example          # Template cấu hình biến môi trường
 ```
+
+---
 
 ## 🔌 API Endpoints
 
-| Endpoint | Method | Body / Params | Mô tả |
+| Endpoint | Method | Body / Tham số | Mô tả tính năng |
 |---|---|---|---|
-| `/api/v1/kis` | POST | `{query, input_type: "text"\|"voice"\|"image", search_mode: "all", top_k (1-500), use_viranker?, use_jina_m0?, user_choices?}` | Known-Item Search |
-| `/api/v1/vqa` | POST | `{query, question, input_type, search_mode, top_k, use_viranker?, use_jina_m0?, user_choices?}` | Visual QA — trả `results` + `answers` |
-| `/api/v1/trake` | POST | `{query, num_events (2-10), input_type, search_mode, top_k}` | Temporal Retrieval — trả `list[list[CandidateResult]]` |
-| `/api/v1/similar-image` | POST | multipart `file` + query param `top_k` (1-100), `use_viranker?`, `use_jina_m0?` | Image Search |
-| `/api/v1/search/hybrid` | GET | query params: `query_vi`, `query_en?`, `mode`, `top_k` | Hybrid Search (Weighted Convex + RRF) |
-| `/api/v1/image/{video_id}/{frame_id}` | GET | path params: `video_id`, `frame_id` | Lấy file ảnh keyframe thực tế |
-| `/api/v1/video/{video_id}` | GET | path param: `video_id` (hỗ trợ HTTP Range) | Lấy file video gốc |
+| `/api/v1/kis` | POST | `{query, top_k, enable_reranker, search_mode, user_choices}` | **Known-Item Search** theo mô tả text/voice |
+| `/api/v1/vqa` | POST | `{query, question, top_k, enable_reranker}` | **Visual QA** — trả về keyframe + câu trả lời |
+| `/api/v1/trake` | POST | `{query, num_events (2-10), top_k}` | **Temporal Retrieval** — chuỗi sự kiện tuần tự |
+| `/api/v1/similar-image` | POST | multipart `file` + `top_k` | **Image-to-Image Search** tìm ảnh tương tự |
+| `/api/v1/image/{video_id}/{frame_id}` | GET | path params: `video_id`, `frame_id` | Lấy file ảnh keyframe thực tế phục vụ UI |
+| `/api/v1/video/{video_id}` | GET | path param: `video_id` (hỗ trợ HTTP 206 Range) | Phát video gốc kèm tua thời gian thực |
 | `/api/v1/video/{video_id}/fps` | GET | path param: `video_id` | Lấy FPS thực tế của video |
-
-Tất cả response retrieval trả về danh sách `CandidateResult`: `video_id`, `scene_id`, `frame_id`, `timestamp_start`, `timestamp_mid`, `timestamp_end`, `keyframe_path`, `ocr_text`, `asr_text`, `description`, `score`.
-
-**Cơ chế Dual Reranker độc lập:**
-- **`use_viranker` (ViRanker - bge-reranker-v2-m3):** Text Reranker chuyên sâu cho tiếng Việt, tái xếp hạng Top-K dựa trên câu hỏi và văn bản OCR/ASR/Description (~0.1-0.2s).
-- **`use_jina_m0` (Jina Reranker M0 - jina-reranker-m0):** Multimodal Cross-Encoder Reranker so sánh trực tiếp tương đồng giữa text query và hình ảnh keyframe thực tế.
-- Trên Web UI có sẵn **2 nút gạt Toggle Switch độc lập** cho phép tùy ý bật/tắt từng reranker tùy theo bài toán.
+| `/health` | GET | — | Kiểm tra trạng thái hoạt động của hệ thống |
 
 ---
 
-## 🧠 AI Models
+## 🧠 AI Models & Specifications
 
-Model **tự động tải về** từ HuggingFace Hub lần đầu được dùng (lazy-load).
+Tất cả phiên bản model được quản lý tập trung tại [`configs/model_versions.yaml`](configs/model_versions.yaml) — **Single Source of Truth** cho toàn bộ pipeline.
 
-| Model | Mục đích | HuggingFace | Thiết bị | VRAM/RAM |
+| Mô Hình | Vai Trò & Kích Thước Vector | Model HuggingFace Hub | Thiết Bị | VRAM/RAM |
 |---|---|---|---|---|
-| **CLIP ViT-L/14** | Image embedding (dim 1024) | `openai/clip-vit-large-patch14` | GPU | ~1.7GB |
-| **gte-Qwen2-1.5B** | Text embedding OCR+ASR (dim 1536) | `Alibaba-NLP/gte-Qwen2-1.5B-instruct` | GPU | ~3GB |
-| **bge-reranker-v2-m3** | Text rerank (luôn bật) | `BAAI/bge-reranker-v2-m3` | GPU | ~2.3GB |
-| **jina-reranker-m0** | Crossmodal rerank (tắt mặc định) | `jinaai/jina-reranker-m0` | GPU | ~2.5GB |
-| **PhoWhisper-medium** | ASR tiếng Việt | `vinai/PhoWhisper-medium` | CPU | ~1.5GB |
-| **bge-large-en-v1.5** | Description hybrid search | `BAAI/bge-large-en-v1.5` | CPU | ~2GB |
+| **CLIP ViT-L/14** | Image & Concept Embedding (1024d) | `openai/clip-vit-large-patch14` | GPU CUDA | ~1.7 GB |
+| **gte-Qwen2-1.5B** | Multilingual Text Embedding (1536d) | `Alibaba-NLP/gte-Qwen2-1.5B-instruct` | GPU CUDA | ~3.0 GB |
+| **ViRanker (BGE-M3)** | Text Reranker Tiếng Việt | `BAAI/bge-reranker-v2-m3` | GPU CUDA | ~2.3 GB |
+| **Jina Reranker M0** | Multimodal Cross-Encoder Reranker | `jinaai/jina-reranker-m0` | GPU CUDA | ~2.5 GB |
+| **PhoWhisper-medium** | Vietnamese Speech-to-Text (ASR) | `vinai/PhoWhisper-medium` | CPU / GPU | ~1.5 GB |
+| **bge-large-en-v1.5** | Description Dense Vector (1024d) | `BAAI/bge-large-en-v1.5` | CPU / GPU | ~2.0 GB |
+| **Qwen2.5-1.5B** | Event Splitter & Query Enhancer | `Qwen/Qwen2.5-1.5B-Instruct` | GPU CUDA | ~3.0 GB |
 
-Tất cả phiên bản model được khai báo tập trung tại `configs/model_versions.yaml` — **single source of truth** cho cả ingestion lẫn serving.
-
-**Pre-download tất cả models (khuyên dùng — tổng ~15GB):**
-
-Thay vì tự viết code, bạn có thể chạy 1 dòng lệnh duy nhất để script tự động parse đúng model versions từ `configs/model_versions.yaml` và tải về:
-
-```powershell
-# Cách 1: Sử dụng Makefile shortcut
-make download-models
-
-# Cách 2: Chạy trực tiếp script
-python tools/download_models.py
-```
+> 💡 **Tải trước toàn bộ mô hình (~15GB):** Chạy `python tools/download_models.py` hoặc `make download-models`.
 
 ---
 
-## 🕸️ Web UI
+## 🕸️ Spider-Man Web UI
 
-Giao diện Web UI chủ đề **Spider-Man** mật độ cao tại `http://localhost:8000/ui/index.html`:
+Giao diện Web UI chủ đề **Spider-Man Dark Theme** tại `http://localhost:8000/ui/index.html`:
 
-- 🎨 **Dark theme** với neon accents đỏ/xanh
-- 📑 **Multi-task tabs**: KIS, VQA, TRAKE
-- 🔍 **Tìm kiếm**: nhập text, ghi âm giọng nói, upload ảnh
-- ⚙️ **Controls**: chọn nhánh (All/Embedding/OCR/ASR), Top-K, nút **🚀 Reranker** bật/tắt, thanh chỉnh mật độ card
-- 🧺 **Giỏ nộp bài**: lưu keyframe, xuất CSV chính thức, hỗ trợ phím tắt (`C`)
+* 🎨 **Giao diện Mật độ cao (High-Density)**: Neon Đỏ/Xanh, tối ưu cho màn hình Full HD & 2K/4K.
+* ⚡ **Bộ chỉnh lưới linh hoạt**: Hỗ trợ chuyển đổi nhanh mật độ hiển thị **4x / 6x / 8x** cột.
+* 🎬 **Trình xem Video tích hợp**: Nhúng trình phát video streaming hỗ trợ HTTP Range 206, tự động nhảy chính xác đến timestamp của keyframe.
+* 🧺 **Giỏ nộp bài thông minh**:
+  * Bấm phím tắt **`C`** trên bàn phím để thêm/bỏ keyframe đang chọn vào giỏ.
+  * Xuất file CSV chính thức chuẩn định dạng nộp bài của ban tổ chức AIC (không có khoảng trắng thừa sau dấu phẩy).
+* 🎛️ **Bảng điều khiển Dual Reranker**: 2 công tắc gạt độc lập cho phép bật/tắt linh hoạt ViRanker và Jina Cross-modal.
 
 ---
 
-## 🧹 Công cụ Lọc Keyframe & Tìm Ảnh Trùng Lặp (Image Filter Tool)
+## 🛠️ Bộ Công Cụ Tiện Ích (Tools & Pipelines)
 
-Hệ thống cung cấp Web UI độc lập để duyệt ảnh theo từng video, đánh dấu lọc các ảnh bị mờ/hỏng/thừa và quét tìm ảnh trùng lặp trên 108.000+ vector CLIP:
+### 1. 🧹 Web UI Lọc Keyframe & Tìm Trùng Lặp (`tools/image_filter`)
+Duyệt trực quan từng video, đánh dấu loại bỏ ảnh mờ/hỏng/thừa và tìm kiếm gom cụm trùng lặp bằng vector CLIP:
 
 ```powershell
-# 1. Khởi chạy Web UI lọc ảnh (Port 8501)
 python -m tools.image_filter.server
-# Hoặc: make filter-tool
 # Truy cập: http://localhost:8501
 ```
-
-- 📂 **Duyệt theo Video**: Sidebar điều hướng Batch (`L21`–`L30`) ➔ Video (`V001`, `V002`,...).
-- 🖱️ **Đánh dấu 1-Click**: Click vào card ảnh để bật/tắt đánh dấu lọc (Overlay ❌).
-- 🔍 **Quét trùng lặp siêu tốc (<10ms)**: Bấm nút *🔍 Giống* để quét toàn bộ dataset, kéo thanh trượt ngưỡng tương đồng (ví dụ $\ge 90\%$) và chọn *Giữ lại ảnh gốc* hoặc *Xóa cả ảnh gốc*.
-- 💾 **Auto-Save JSON**: Tự động lưu và đồng bộ vào file duy nhất `data/filtered_keyframes.json`.
+* **🔍 Menu Phạm Vi Quét (`🔍 Quét:`):** Cho phép chọn trước phạm vi tìm kiếm ngay trên thanh công cụ ngoài:
+  * 📁 *Batch hiện tại (`L25`)*
+  * 🎥 *Video hiện tại (`L25_V001`)*
+  * 🌐 *Toàn bộ Dataset*
+  * 📁 *Từng Batch cụ thể (`L21`, `L22`,...)*
+* **⚡ Thao tác nhanh:** Shift + Click để chọn lọc theo dải, 1-Click tìm ảnh tương đồng.
+* **💾 Tự động lưu:** Ghi nhận và đồng bộ tức thời vào `data/filtered_keyframes.json`.
 
 ```powershell
-# 2. Áp dụng lọc (Xóa file ảnh trên ổ đĩa & Rebuild Unified Dataset)
+# Áp dụng xóa vĩnh viễn các file ảnh đã lọc trên ổ đĩa:
 python -m aggregation.apply_filter --delete-images
-# Hoặc kiểm tra thử trước: make apply-filter-dry
 ```
 
 ---
 
-## ⏱️ Công cụ Bù đắp Keyframe & Kiểm tra Độ phủ Timeline (Gap Filling & Coverage)
-
-Trong quá trình thi AIC, việc video bị thiếu keyframe ở các phân đoạn dài hoặc sau khi lọc bỏ TVC/ảnh thừa có thể tạo ra các "khoảng trống" (timeline gaps $> 30\text{s}$). Bộ công cụ sau giúp tự động phát hiện, trích xuất bổ sung keyframe và chuẩn hóa $100\%$ độ phủ timeline cho toàn bộ dataset:
-
-### 1. Báo cáo & Kiểm tra Độ phủ Timeline (Coverage Audit)
-Quét toàn bộ các video từ batch `L21` đến `L30` (hoặc video mới thêm vào `data/video/`), phân loại trạng thái `PASS` (khoảng cách tối đa $\le 30\text{s}$), `WARNING` ($30\text{s} - 60\text{s}$), hoặc `FAILED` ($> 60\text{s}$):
+### 2. 📊 Công Cụ Kiểm Toán Độ Phủ Timeline (`tools/data_prep/audit_keyframe_coverage.py`)
+Tự động quét toàn bộ 872 video trong `data/video/`, phân tích mốc thời gian của từng keyframe và phát hiện các khoảng trống (gaps):
 
 ```powershell
-python tools/report_all_batches_coverage.py
+python tools/data_prep/audit_keyframe_coverage.py
 ```
-
-### 2. Tự động Bù đắp Keyframe vào các khoảng Gap $> 30\text{s}$ (`tools/fill_gap_keyframes.py`)
-Khi bạn thêm video mới vào `data/video/` hoặc sau khi lọc bớt ảnh rác/TVC, chạy script này để tự động bù kín toàn bộ timeline:
-
-```powershell
-python tools/fill_gap_keyframes.py
-```
-
-**Cơ chế hoạt động:**
-- 🔍 **Tự động quét**: So sánh mốc thời gian giữa các keyframe hiện có trong `data/unified/scene_metadata.parquet` với tổng thời lượng thực tế của file video.
-- ✂️ **Trích xuất ảnh WebP**: Bổ sung keyframe tại các mốc phân bố đều ($\le 20-30\text{s}$) cho các khoảng gap ở đầu, giữa hoặc cuối video, lưu trực tiếp vào thư mục `data/image/{Batch}/{Batch}/{Vxxx}/{frame_id}.webp`.
-- ⚡ **Sinh Vector CLIP trên GPU**: Tự động đưa ảnh qua mô hình **CLIP ViT-L/14** để tạo visual embeddings 1024 chiều.
-- 🔄 **Đồng bộ toàn bộ Unified Dataset**: Tự động cập nhật và ghi đè đồng bộ các file `scene_metadata.parquet`, `ocr_text.parquet`, `asr_text.parquet`, `scene_descriptions.parquet`, `image_vectors.npy`, `ocr_vectors.npy`, `asr_vectors.npy`, `description_embeddings.pt`, và `scene_ids.txt`.
-
-### 3. Hiệu chuẩn FPS và Thời gian Video (`tools/calibrate_all_video_fps.py`)
-Đảm bảo tất cả keyframe có mốc thời gian `timestamp_mid = frame_id / FPS_thực_tế` chính xác tuyệt đối (giải quyết triệt để vấn đề video 29.97/30 FPS bị tính nhầm theo 25 FPS):
-
-```powershell
-python tools/calibrate_all_video_fps.py
-```
+* Báo cáo chi tiết được lưu tại: [`data/reports/keyframe_coverage_report.csv`](data/reports/keyframe_coverage_report.csv) và [`data/reports/keyframe_coverage_report.json`](data/reports/keyframe_coverage_report.json).
 
 ---
 
-## 📁 Indexing & Alias Management
+### 3. 🔄 Pipeline Tự Động Hóa Dữ Liệu Sạch (`tools/data_prep/rebuild_and_sync_l25.py`)
+Quy trình trọn gói tự động:
+1. Xóa ảnh rác trên ổ cứng.
+2. Trích xuất metadata và làm giàu nhãn OCR + Mô tả tiếng Việt.
+3. Sinh mới toàn bộ vector CLIP (1024d), Qwen2 OCR (1536d), BGE Description (1024d) trên GPU.
+4. Hợp nhất vào `data/unified/` và nạp vào Qdrant collection `aic2026_clean_v3`.
 
-### Nạp dữ liệu vào Qdrant
+---
 
-```powershell
-# Tạo collection mới + nạp dữ liệu + gắn alias production
-python -m indexing.run_index --dataset-dir ./data/unified --collection aic2026_v1 --create-collection
-
-# Chỉ nạp thêm (collection đã tồn tại)
-python -m indexing.run_index --dataset-dir ./data/unified --collection aic2026_v1
-
-# Nạp xong nhưng KHÔNG đổi alias (để verify trước)
-python -m indexing.run_index --dataset-dir ./data/unified --collection aic2026_v1 --skip-alias
-```
-
-### Quản lý Alias (Zero-downtime swap)
+## 📁 Indexing & Quản Trị Alias (Zero-Downtime)
 
 ```powershell
-# Xem collection nào đang ở production
+# 1. Tạo mới / Nạp dữ liệu vào Qdrant collection:
+python -m indexing.run_index --dataset-dir ./data/unified --collection aic2026_clean_v3 --recreate
+
+# 2. Kiểm tra collection đang gắn alias 'production':
 python -m indexing.collection_alias --action get
 
-# Chuyển production → collection mới
-python -m indexing.collection_alias --action set --collection aic2026_v2
-
-# Rollback về collection cũ
-python -m indexing.collection_alias --action rollback --collection aic2026_v1
+# 3. Chuyển alias 'production' sang collection mới tức thời:
+python -m indexing.collection_alias --action set --collection aic2026_clean_v3
 ```
-
-> 💡 **Tại sao dùng alias?** Khi update dữ liệu: index vào collection mới → verify → đổi alias. Nếu lỗi: rollback trong 1 lệnh, không cần re-index. Server không bao giờ downtime vì alias đổi atomic.
 
 ---
 
 ## ⚙️ Biến Môi Trường (`.env`)
 
-Copy file mẫu cấu hình:
+Tạo file `.env` từ file mẫu:
 ```powershell
 copy .env.example .env
 ```
 
-### 1. Cấu hình Cache thư viện ML (Khuyến nghị cấu hình để tránh đầy ổ C)
-
-| Biến | Mặc định trong `.env.example` | Ý nghĩa |
+| Biến Cấu Hình | Mặc Định | Ý Nghĩa |
 |---|---|---|
-| `HF_HOME` | `./data/hf_cache` | Thư mục gốc lưu cache HuggingFace (models, tokenizers) |
-| `HF_HUB_CACHE` | `./data/hf_cache/hub` | Thư mục lưu hub cache của HuggingFace |
-| `TRANSFORMERS_CACHE` | `./data/hf_cache/hub` | Thư mục lưu cache mô hình Transformers |
-| `PADDLE_HOME` | `./data/paddle_cache` | Thư mục lưu cache PaddlePaddle |
-| `PADDLEOCR_BASE_DIR` | `./data/paddle_cache` | Thư mục lưu pretrained weights của PaddleOCR |
-| `TORCH_HOME` | `./data/torch_cache` | Thư mục lưu cache weights của PyTorch |
-
-> 💡 **Mẹo:** Nếu máy có ổ cứng phụ (ví dụ ổ `D:`), bạn có thể đổi giá trị các biến trên thành đường dẫn tuyệt đối (vd: `D:\huggingface_cache`) để giải phóng hoàn toàn dung lượng ổ `C:`.
-
-### 2. Cấu hình Đường dẫn Dữ liệu (Tùy chọn)
-
-| Biến | Mặc định | Ý nghĩa |
-|---|---|---|
-| `AIC_DATA_DIR` | `./data` (thư mục `data/` tại root) | Thư mục gốc chứa toàn bộ dataset, unified parquet, vectors và keyframes |
-| `AIC_KEYFRAME_DIR` | `./data/image` | Đường dẫn thư mục ảnh keyframe (tùy chọn ghi đè nếu tách riêng ổ đĩa) |
-
-### 3. Cấu hình Nâng cao (Tùy chọn — Server có sẵn giá trị mặc định tối ưu)
-
-Hệ thống cung cấp sẵn các giá trị mặc định chuẩn, không bắt buộc phải khai báo trong file `.env`:
-
-| Biến | Mặc định trong code | Ý nghĩa |
-|---|---|---|
+| `HF_HOME` | `./data/hf_cache` | Thư mục lưu cache HuggingFace Models |
+| `TORCH_HOME` | `./data/torch_cache` | Thư mục lưu cache PyTorch Weights |
 | `AIC_DEVICE` | `cuda` | Thiết bị chạy model (`cuda`, `mps`, `cpu`) |
-| `AIC_PRELOAD_MODELS` | `true` | Tự động warmup toàn bộ models lúc startup |
-| `AIC_QDRANT_URL` | `http://localhost:6333` | URL Qdrant server |
-| `AIC_QDRANT_COLLECTION_ALIAS` | `production` | Collection alias dùng cho truy vấn |
-| `AIC_MODEL_UNLOAD_TTL_S` | `0` | Tự động unload model sau N giây không dùng (`0` = tắt) |
-| `AIC_PORT` | `8000` | Cổng HTTP của FastAPI server |
-| `AIC_HOST` | `0.0.0.0` | Địa chỉ bind của FastAPI server |
-| `AIC_CORS_ORIGINS` | `["*"]` | Danh sách CORS allowed origins |
+| `AIC_PRELOAD_MODELS` | `true` | Warmup nạp sẵn các models lúc server khởi động |
+| `AIC_QDRANT_URL` | `http://localhost:6333` | URL kết nối Qdrant Vector Server |
+| `AIC_QDRANT_COLLECTION_ALIAS` | `production` | Alias collection sử dụng cho tìm kiếm |
+| `AIC_PORT` | `8000` | Cổng HTTP của Retrieval API |
 
 ---
 
 ## 🧪 Test & Code Quality
 
 ```powershell
-# Unit tests (không cần server):
+# Chạy toàn bộ unit test & integration test:
 pytest tests/ -v
 
-# Hoặc dùng Makefile:
-make test          # Chạy pytest
+# Linter & Typecheck:
 make lint          # Ruff linter
 make lint-fix      # Ruff auto-fix
-make typecheck     # Mypy type checker
+make typecheck     # Mypy typecheck
 ```
-
-> 💡 Gõ `make help` để xem toàn bộ lệnh có sẵn.
 
 ---
 
-## 📊 Hiệu năng (Performance)
+## 📈 Hiệu Năng Truy Vấn Thực Tế (Profiling)
 
-| Bước | Thời gian | Device |
+| Giai Đoạn | Thời Gian Xử Lý | Thiết Bị Thực Thi |
 |---|---|---|
-| enhance_query (dịch EN/VI) | ~0.4s | API call |
-| encode_text+image | ~0.8s | GPU |
-| qdrant_search (RRF fusion) | ~0.3s | CPU |
-| bge-reranker-v2-m3 (luôn bật) | ~0.2s | GPU |
-| jina-reranker-m0 (tắt mặc định) | ~8s | GPU |
-| **Tổng (không Jina)** | **~2s** | — |
-| **Tổng (có Jina)** | **~10s** | — |
+| **enhance_query** (Phân tích & Dịch EN/VI) | ~0.8s - 1.2s | Qwen2.5 / API |
+| **encode_text+image** (Mã hóa đa nhánh) | ~0.05s - 0.3s | GPU CUDA |
+| **qdrant_search** (Truy vấn vector + RRF) | ~0.15s - 0.25s | Qdrant Engine |
+| **ViRanker Text Rerank** (Top-50 candidates) | ~0.5s - 0.6s | GPU CUDA |
+| **Tổng thời gian phản hồi (Latency)** | **~1.8s - 2.4s** | — |
 
-**GPU Memory:** ~7.9GB (không Jina) / ~10.4GB (có Jina)
+* **Mức tiêu thụ VRAM:** ~8.5 GB / 16 GB VRAM trên NVIDIA GeForce RTX 5060 Ti.
 
 ---
 
-## 🔧 Khắc phục sự cố (Troubleshooting)
+<div align="center">
 
-### Docker chưa chạy / Qdrant không kết nối
-```powershell
-docker compose up -d
-curl.exe http://localhost:6333/
-```
+**Built with ❤️ for AI Challenge Ho Chi Minh City 2026 (AIC2026).**
 
-### Collection not found
-Cần chạy indexing trước (xem phần **Indexing & Alias Management**).
-
-### GPU Out of Memory
-Đã tối ưu — chỉ CLIP + Qwen2 + bge-reranker trên GPU (~7-9.5GB), còn lại chạy CPU.
-
-### Search chậm (>10s)
-Kiểm tra `use_reranker` có đang bật không. Tắt đi nếu cần latency thấp:
-```powershell
-# Xem log profiling
-Get-Content "server.log" | Select-String "PROFILE"
-```
-
-### Lỗi dtype mismatch (Float vs Half)
-Đã sửa — models tự động ép sang float16 sau khi load.
-
----
-
-## 🔄 Pipeline dữ liệu đầy đủ
-
-1. **Ingestion (Kaggle GPU):** mỗi member chạy notebook trên shard → xuất keyframes, parquets, embeddings → upload lên Kaggle Dataset (`shard_assignment.yaml`).
-2. **Aggregation (Local):** `pull_shards`, `verify_shards`, `merge_datasets`, `map_keyframes_to_unified` → `data/unified/`.
-3. **Indexing (Qdrant):** `run_index` nạp vectors + metadata + BM42 sparse → gắn alias `production`.
-4. **Serving (FastAPI):** query text/voice/ảnh → embeddings → Weighted RRF trên 5 branches → rerank → trả kết quả. TRAKE thêm bước temporal alignment (DANTE).
-
+</div>
