@@ -139,8 +139,11 @@ def slice_and_save_vector_file(
 ) -> bool:
     """
     Cắt lát (slice) file vector (.npy hoặc .pt) theo danh sách index cần giữ và lưu lại.
-    Nếu output_path là None, ghi đè trực tiếp lên matrix_path.
+    Nếu output_path là None, ghi đè an toàn lên matrix_path bằng file tạm (tương thích Windows).
     """
+    import gc
+    import shutil
+
     if not matrix_path.exists():
         return False
 
@@ -149,16 +152,32 @@ def slice_and_save_vector_file(
 
     try:
         if matrix_path.suffix == ".npy":
-            mat = np.load(matrix_path, mmap_mode="r")
+            mat = np.load(matrix_path)
             sliced = np.take(mat, indices, axis=0)
-            np.save(out_file, sliced)
+            del mat
+            gc.collect()
+
+            tmp_out = out_file.with_suffix(".tmp.npy")
+            np.save(tmp_out, sliced)
+            del sliced
+            gc.collect()
+
+            shutil.move(str(tmp_out), str(out_file))
             return True
         elif matrix_path.suffix == ".pt":
             mat = torch.load(matrix_path, map_location="cpu")
             if isinstance(mat, torch.Tensor):
                 idx_tensor = torch.from_numpy(indices)
                 sliced = mat[idx_tensor]
-                torch.save(sliced, out_file)
+                del mat
+                gc.collect()
+
+                tmp_out = out_file.with_suffix(".tmp.pt")
+                torch.save(sliced, tmp_out)
+                del sliced
+                gc.collect()
+
+                shutil.move(str(tmp_out), str(out_file))
                 return True
     except Exception as e:
         logger.error(f"Lỗi khi cắt vector matrix {matrix_path}: {e}")
