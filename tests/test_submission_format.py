@@ -12,14 +12,14 @@ import pytest
 
 
 def format_kis_csv(items: list[dict]) -> str:
-    """Format KIS: <video_name>, <frame_id> (Tối đa 100 dòng, KHÔNG HEADER)."""
+    """Format KIS: <video_name>,<frame_id> (Tối đa 100 dòng, KHÔNG HEADER, KHÔNG DẤU CÁCH THỪA)."""
     safe = items[:100]
-    lines = [f"{item['video_id']}, {item['frame_id']}" for item in safe]
+    lines = [f"{item['video_id']},{item['frame_id']}" for item in safe]
     return "\r\n".join(lines) + ("\r\n" if lines else "")
 
 
 def format_qa_csv(items: list[dict]) -> str:
-    """Format Q&A: <video_name>, <frame_id>, \"<answer>\" (Answer <= 100 ký tự, KHÔNG HEADER)."""
+    """Format Q&A: <video_name>,<frame_id>,\"<answer>\" (Answer <= 100 ký tự, KHÔNG HEADER, KHÔNG DẤU CÁCH THỪA)."""
     safe = items[:100]
     lines = []
     for item in safe:
@@ -30,12 +30,12 @@ def format_qa_csv(items: list[dict]) -> str:
         if len(ans) > 100:
             ans = ans[:100]
         escaped = ans.replace('"', '""')
-        lines.append(f'{item["video_id"]}, {item["frame_id"]}, "{escaped}"')
+        lines.append(f'{item["video_id"]},{item["frame_id"]},"{escaped}"')
     return "\r\n".join(lines) + ("\r\n" if lines else "")
 
 
 def format_trake_csv(items: list[dict]) -> str:
-    """Format TRAKE: <video_name>, <frame_1>, <frame_2>, ..., <frame_N> (KHÔNG HEADER)."""
+    """Format TRAKE: <video_name>,<frame_1>,<frame_2>,...,<frame_N> (KHÔNG HEADER, KHÔNG DẤU CÁCH THỪA)."""
     safe = items[:100]
     lines = []
     for item in safe:
@@ -51,8 +51,8 @@ def format_trake_csv(items: list[dict]) -> str:
             frames = [item["frame_id"]]
         else:
             continue
-        frame_str = ", ".join(str(f) for f in frames)
-        lines.append(f"{item['video_id']}, {frame_str}")
+        frame_str = ",".join(str(f) for f in frames)
+        lines.append(f"{item['video_id']},{frame_str}")
     return "\r\n".join(lines) + ("\r\n" if lines else "")
 
 
@@ -84,9 +84,9 @@ def test_kis_csv_has_no_header_and_valid_columns():
     assert len(lines) == 3
     # KHÔNG được có header 'video_id,frame_id'
     assert "video_id" not in lines[0].lower()
-    assert lines[0] == "L00_V000, 1234"
-    assert lines[1] == "L00_V055, 5555"
-    assert lines[2] == "L01_V028, 25300"
+    assert lines[0] == "L00_V000,1234"
+    assert lines[1] == "L00_V055,5555"
+    assert lines[2] == "L01_V028,25300"
 
 
 def test_kis_csv_limits_to_100_rows():
@@ -110,9 +110,9 @@ def test_qa_csv_escapes_quotes_and_truncates():
     assert len(lines) == 4
     # No header
     assert "video_id" not in lines[0].lower()
-    assert lines[0] == 'L01_V028, 3450, "5"'
-    assert lines[1] == 'L02_V011, 1200, "Năm người, gồm nam và nữ"'
-    assert lines[2] == 'L03_V005, 2800, "Anh ấy nói ""Xin chào"""'
+    assert lines[0] == 'L01_V028,3450,"5"'
+    assert lines[1] == 'L02_V011,1200,"Năm người, gồm nam và nữ"'
+    assert lines[2] == 'L03_V005,2800,"Anh ấy nói ""Xin chào"""'
     # Truncated to 100 chars
     reader = csv.reader(io.StringIO(csv_str), skipinitialspace=True)
     rows = list(reader)
@@ -129,17 +129,17 @@ def test_trake_csv_formats_multiple_event_frames():
     lines = [l.strip() for l in csv_str.strip().splitlines()]
     
     assert len(lines) == 3
-    assert lines[0] == "L10_V001, 1200, 1850, 2100, 2450"
-    assert lines[1] == "L10_V001, 1180, 1820, 2080, 2420"
-    assert lines[2] == "L11_V003, 5100, 5700, 6200, 6800"
+    assert lines[0] == "L10_V001,1200,1850,2100,2450"
+    assert lines[1] == "L10_V001,1180,1820,2080,2420"
+    assert lines[2] == "L11_V003,5100,5700,6200,6800"
 
 
 def test_submission_zip_contains_submission_folder():
     query_files = {
-        "query-1-kis": "L00_V000, 1234\r\nL00_V055, 5555\r\n",
-        "query-2-kis": "L01_V028, 25300\r\n",
-        "query-3-qa": 'L01_V028, 3450, "5"\r\n',
-        "query-4-trake": "L10_V001, 1200, 1850, 2100, 2450\r\n",
+        "query-1-kis": "L00_V000,1234\r\nL00_V055,5555\r\n",
+        "query-2-kis": "L01_V028,25300\r\n",
+        "query-3-qa": 'L01_V028,3450,"5"\r\n',
+        "query-4-trake": "L10_V001,1200,1850,2100,2450\r\n",
     }
     zip_bytes = package_submission_zip(query_files)
     
@@ -169,9 +169,9 @@ def test_qa_csv_individual_vs_bulk_and_empty_frames():
     lines = [l.strip() for l in csv_str.strip().splitlines()]
     
     assert len(lines) == 3
-    assert lines[0] == 'L01_V028, 3450, "Màu xanh dương"'
-    assert lines[1] == 'L01_V028, 3600, "Màu đỏ"'
-    assert lines[2] == 'L02_V011, 1200, ""'
+    assert lines[0] == 'L01_V028,3450,"Màu xanh dương"'
+    assert lines[1] == 'L01_V028,3600,"Màu đỏ"'
+    assert lines[2] == 'L02_V011,1200,""'
 
 
 def test_trake_chain_cart_items_format_multiple_events():
@@ -192,5 +192,5 @@ def test_trake_chain_cart_items_format_multiple_events():
     csv_str = format_trake_csv(items)
     lines = [l.strip() for l in csv_str.strip().splitlines()]
     assert len(lines) == 2
-    assert lines[0] == "L10_V001, 1200, 1850, 2100, 2450"
-    assert lines[1] == "L11_V003, 5100, 5700, 6200, 6800"
+    assert lines[0] == "L10_V001,1200,1850,2100,2450"
+    assert lines[1] == "L11_V003,5100,5700,6200,6800"

@@ -914,27 +914,27 @@ function buildCSVContent(mode, items) {
       if (ans.length > 100) ans = ans.substring(0, 100);
       // Double quote escaping for RFC 4180 / BTC rule
       const escapedAns = ans.replace(/"/g, '""');
-      lines.push(`${cand.video_id}, ${cand.frame_id}, "${escapedAns}"`);
+      lines.push(`${cand.video_id},${cand.frame_id},"${escapedAns}"`);
     });
   } else if (mode === "trake") {
     safeItems.forEach((cand) => {
       if (!cand || !cand.video_id) return;
       if (cand.type === "trake_chain" && Array.isArray(cand.frame_ids) && cand.frame_ids.length > 0) {
-        lines.push(`${cand.video_id}, ${cand.frame_ids.join(", ")}`);
+        lines.push(`${cand.video_id},${cand.frame_ids.join(",")}`);
       } else if (cand.events && Array.isArray(cand.events) && cand.events.length > 0) {
         const frames = cand.events.map((e) => e.frame_id || cand.frame_id);
-        lines.push(`${cand.video_id}, ${frames.join(", ")}`);
+        lines.push(`${cand.video_id},${frames.join(",")}`);
       } else if (cand.event_frames && Array.isArray(cand.event_frames) && cand.event_frames.length > 0) {
-        lines.push(`${cand.video_id}, ${cand.event_frames.join(", ")}`);
+        lines.push(`${cand.video_id},${cand.event_frames.join(",")}`);
       } else if (cand.frame_id != null && cand.frame_id !== "") {
-        lines.push(`${cand.video_id}, ${cand.frame_id}`);
+        lines.push(`${cand.video_id},${cand.frame_id}`);
       }
     });
   } else {
     // KIS Format
     safeItems.forEach((cand) => {
       if (!cand || !cand.video_id || cand.frame_id == null || cand.frame_id === "") return;
-      lines.push(`${cand.video_id}, ${cand.frame_id}`);
+      lines.push(`${cand.video_id},${cand.frame_id}`);
     });
   }
 
@@ -1198,7 +1198,82 @@ function updateVideoInfoLabel() {
   videoInfoLabelEl.textContent = `${currentVideoId},${currentVideoFrame()}`;
 }
 
-// --- Bulletproof Vietnamese Diacritics & Unicode Normalized Highlighter ---
+// --- Bilingual Concept Dictionary (Vi ⟷ En) for Cross-Lingual Semantic Highlighting ---
+const BILINGUAL_CONCEPTS = [
+  // Màu sắc (Colors)
+  { vi: ["đỏ", "màu đỏ"], en: ["red", "reds", "crimson", "scarlet"] },
+  { vi: ["xanh", "xanh dương", "xanh nước biển", "màu xanh dương", "xanh da trời"], en: ["blue", "blues", "navy", "cyan", "azure"] },
+  { vi: ["xanh lá", "xanh lục", "màu xanh lá", "xanh lá cây"], en: ["green", "greens", "lime", "emerald"] },
+  { vi: ["vàng", "màu vàng"], en: ["yellow", "yellows", "gold", "golden", "amber"] },
+  { vi: ["trắng", "màu trắng"], en: ["white", "whites", "ivory"] },
+  { vi: ["đen", "màu đen"], en: ["black", "blacks", "dark"] },
+  { vi: ["cam", "màu cam"], en: ["orange", "oranges"] },
+  { vi: ["hồng", "màu hồng"], en: ["pink", "pinks", "rose"] },
+  { vi: ["tím", "màu tím"], en: ["purple", "purples", "violet"] },
+  { vi: ["xám", "màu xám", "ghi", "màu ghi"], en: ["grey", "gray", "greys", "grays", "silver"] },
+  { vi: ["nâu", "màu nâu"], en: ["brown", "browns"] },
+
+  // Con người (People)
+  { vi: ["người đàn ông", "đàn ông", "nam giới", "con trai", "nam"], en: ["man", "men", "male", "guy", "guys", "boy", "boys"] },
+  { vi: ["người phụ nữ", "phụ nữ", "nữ giới", "cô gái", "cô", "bà", "nữ"], en: ["woman", "women", "female", "lady", "ladies", "girl", "girls"] },
+  { vi: ["con người", "người", "mọi người", "nhóm người"], en: ["person", "people", "human", "crowd", "individuals"] },
+  { vi: ["trẻ em", "em bé", "trẻ con", "đứa trẻ", "học sinh"], en: ["child", "children", "kid", "kids", "baby", "babies", "student", "students"] },
+  { vi: ["công an", "cảnh sát"], en: ["police", "policeman", "officer", "cops"] },
+  { vi: ["bác sĩ", "y tá"], en: ["doctor", "doctors", "nurse", "nurses", "medical"] },
+
+  // Phương tiện (Vehicles)
+  { vi: ["xe", "xe cộ", "phương tiện"], en: ["vehicle", "vehicles", "transport"] },
+  { vi: ["xe máy", "xe gắn máy", "xe môtô", "mô tô"], en: ["motorcycle", "motorcycles", "motorbike", "motorbikes", "bike", "bikes", "scooter", "scooters"] },
+  { vi: ["ô tô", "xe hơi", "xe con", "xe bốn bánh"], en: ["car", "cars", "automobile", "automobiles", "sedan", "suv"] },
+  { vi: ["xe đạp"], en: ["bicycle", "bicycles", "bike", "bikes", "cycling"] },
+  { vi: ["xe buýt", "xe bus"], en: ["bus", "buses"] },
+  { vi: ["xe tải"], en: ["truck", "trucks", "lorry"] },
+  { vi: ["máy bay"], en: ["airplane", "aeroplane", "plane", "planes", "aircraft"] },
+  { vi: ["tàu hỏa", "xe lửa", "tàu"], en: ["train", "trains", "railway"] },
+  { vi: ["thuyền", "tàu thủy", "cano"], en: ["boat", "boats", "ship", "ships"] },
+
+  // Động vật (Animals)
+  { vi: ["mèo", "con mèo", "mèo con"], en: ["cat", "cats", "kitten", "kittens", "feline"] },
+  { vi: ["chó", "con chó", "chó con"], en: ["dog", "dogs", "puppy", "puppies", "canine"] },
+  { vi: ["chim", "con chim"], en: ["bird", "birds"] },
+  { vi: ["cá", "con cá"], en: ["fish", "fishes"] },
+  { vi: ["ngựa", "con ngựa"], en: ["horse", "horses"] },
+  { vi: ["bò", "con bò"], en: ["cow", "cows", "cattle"] },
+
+  // Bối cảnh, Kiến trúc & Đồ vật (Objects & Scenes)
+  { vi: ["cây", "cây cối", "cây xanh"], en: ["tree", "trees", "plant", "plants"] },
+  { vi: ["hoa", "bông hoa"], en: ["flower", "flowers", "blossom"] },
+  { vi: ["nhà", "ngôi nhà", "tòa nhà", "căn nhà"], en: ["house", "houses", "building", "buildings", "home"] },
+  { vi: ["phòng", "trong phòng"], en: ["room", "rooms", "indoor", "indoors"] },
+  { vi: ["đường", "con đường", "đường phố", "phố"], en: ["road", "roads", "street", "streets", "avenue", "pathway"] },
+  { vi: ["sông", "biển", "hồ", "nước"], en: ["water", "river", "rivers", "sea", "ocean", "lake"] },
+  { vi: ["bầu trời", "trời"], en: ["sky", "skies", "cloud", "clouds"] },
+  { vi: ["núi", "ngọn núi"], en: ["mountain", "mountains", "hill", "hills"] },
+  { vi: ["bàn", "cái bàn"], en: ["table", "tables", "desk"] },
+  { vi: ["ghế", "cái ghế"], en: ["chair", "chairs", "seat", "seats"] },
+  { vi: ["cửa", "cửa sổ", "cửa ra vào"], en: ["door", "doors", "window", "windows"] },
+  { vi: ["mũ", "nón", "mũ bảo hiểm"], en: ["hat", "hats", "cap", "caps", "helmet", "helmets"] },
+  { vi: ["áo", "áo sơ mi", "áo thun", "áo khoác"], en: ["shirt", "shirts", "jacket", "jackets", "coat", "clothes", "clothing", "dress"] },
+  { vi: ["quần", "quần dài", "quần jean"], en: ["pants", "trousers", "jeans", "shorts"] },
+
+  // Hành động (Actions)
+  { vi: ["lái xe", "đi xe", "chạy xe"], en: ["drive", "driving", "driver", "drives", "drove", "ride", "riding", "rider", "rides", "rode"] },
+  { vi: ["đi bộ", "bước đi"], en: ["walk", "walking", "walks", "walked"] },
+  { vi: ["chạy", "chạy bộ"], en: ["run", "running", "runs", "ran", "runner"] },
+  { vi: ["mặc", "đội", "đeo"], en: ["wear", "wearing", "wears", "wore", "dressed"] },
+  { vi: ["ngồi"], en: ["sit", "sitting", "sits", "sat"] },
+  { vi: ["đứng"], en: ["stand", "standing", "stands", "stood"] },
+  { vi: ["cầm", "nắm", "mang"], en: ["hold", "holding", "holds", "held", "carry", "carrying"] },
+  { vi: ["nói chuyện", "thảo luận"], en: ["talk", "talking", "speak", "speaking", "chatting"] },
+  { vi: ["ăn", "uống"], en: ["eat", "eating", "drink", "drinking"] },
+];
+
+const STOP_WORDS = new Set([
+  "la", "va", "co", "cua", "o", "trong", "mot", "cac", "nhung", "cho", "voi", "duoc", "de", "thi", "ma", "ra", "vao",
+  "là", "và", "có", "của", "ở", "trong", "một", "các", "những", "cho", "với", "được", "để", "thì", "mà", "ra", "vào",
+  "the", "is", "are", "was", "were", "in", "on", "at", "to", "for", "of", "and", "a", "an", "with", "by", "as", "from"
+]);
+
 function removeVietnameseDiacritics(str) {
   if (!str) return "";
   const normalized = str.normalize("NFC").toLowerCase();
@@ -1218,7 +1293,7 @@ function removeVietnameseDiacritics(str) {
   return res;
 }
 
-function buildVietnameseRegexPattern(term) {
+function buildVietnameseCharRegex(term) {
   const charMap = {
     'a': '[aàáảãạăằắẳẵặâầấẩẫậAÀÁẢÃẠĂẰẮẲẴẶÂẦẤẨẪẬ]',
     'd': '[dđDĐ]',
@@ -1243,6 +1318,70 @@ function buildVietnameseRegexPattern(term) {
   return pat;
 }
 
+// --- Tạo danh sách regex pattern thông minh hỗ trợ Stemming, Số nhiều & Song ngữ ---
+function extractSearchPatterns(query) {
+  if (!query || typeof query !== "string" || !query.trim()) return [];
+  const normQuery = query.normalize("NFC").trim().toLowerCase();
+  const rawTerms = normQuery.split(/\s+/).filter(t => t.length >= 2);
+
+  const matchedEnTerms = new Set();
+  const matchedViTerms = new Set();
+
+  // 1. Nguyên câu / cụm từ gốc
+  if (normQuery.length >= 3) {
+    matchedViTerms.add(normQuery);
+  }
+
+  // 2. Tra cứu từ điển Song ngữ 2 chiều (Vi <-> En)
+  rawTerms.forEach(term => {
+    const unaccent = removeVietnameseDiacritics(term);
+    if (STOP_WORDS.has(unaccent) || STOP_WORDS.has(term)) return;
+
+    // Tìm trong BILINGUAL_CONCEPTS
+    BILINGUAL_CONCEPTS.forEach(concept => {
+      const matchVi = concept.vi.some(v => v === term || v === normQuery || normQuery.includes(v));
+      const matchEn = concept.en.some(e => e === term || normQuery.includes(e));
+
+      if (matchVi || matchEn) {
+        concept.en.forEach(e => matchedEnTerms.add(e));
+        concept.vi.forEach(v => matchedViTerms.add(v));
+      }
+    });
+
+    if (/^[a-zA-Z]+$/.test(term)) {
+      matchedEnTerms.add(term);
+    } else {
+      matchedViTerms.add(term);
+    }
+  });
+
+  const patterns = [];
+
+  // 3. Xây dựng pattern cho Tiếng Anh có Stemming & Suffix (cat -> cat, cats; walk -> walking, walks, walked)
+  matchedEnTerms.forEach(enTerm => {
+    if (enTerm.length < 2 || STOP_WORDS.has(enTerm.toLowerCase())) return;
+    const escaped = enTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // Hỗ trợ số nhiều regular (s/es) và chia thì (ing/ed/er/ers)
+    // Nhưng bắt buộc chặn ranh giới từ để không match nhầm vào từ không liên quan
+    if (enTerm.length >= 3) {
+      patterns.push(`\\b${escaped}(?:s|es|ed|ing|er|ers)?(?=[^a-zA-Z0-9]|$)`);
+    } else {
+      patterns.push(`\\b${escaped}\\b`);
+    }
+  });
+
+  // 4. Xây dựng pattern cho Tiếng Việt với ranh giới từ Unicode
+  matchedViTerms.forEach(viTerm => {
+    if (viTerm.length < 2) return;
+    const unaccent = removeVietnameseDiacritics(viTerm);
+    if (STOP_WORDS.has(unaccent) || STOP_WORDS.has(viTerm)) return;
+    const charPat = buildVietnameseCharRegex(viTerm);
+    patterns.push(`(?<=^|[\\s.,!?;:\\-()"'“/])(?:${charPat})(?=[\\s.,!?;:\\-()"'”/]|$|(?=[^a-zA-Z0-9]))`);
+  });
+
+  return Array.from(new Set(patterns));
+}
+
 function highlightMatchedText(fullText, query) {
   if (!fullText || fullText === "None" || fullText === "-") return fullText || "None";
   if (!query || typeof query !== "string" || !query.trim()) return escapeHtml(fullText);
@@ -1257,21 +1396,18 @@ function highlightMatchedText(fullText, query) {
   }
 
   const normalizedText = fullText.normalize("NFC");
-  const rawTerms = query
-    .normalize("NFC")
-    .trim()
-    .split(/\s+/)
-    .filter((t) => t.length >= 2);
-
-  // Sắp xếp các cụm từ dài trước, từ ngắn sau để regex match tham lam chính xác
-  const uniqueTerms = Array.from(new Set([query.normalize("NFC").trim(), ...rawTerms])).sort((a, b) => b.length - a.length);
-
-  const patterns = uniqueTerms.map(buildVietnameseRegexPattern).filter(Boolean);
+  const patterns = extractSearchPatterns(query);
   if (patterns.length === 0) return escapeHtml(normalizedText);
 
-  const regex = new RegExp(`(${patterns.join("|")})`, "gi");
+  // Sắp xếp các pattern dài trước để regex match tham lam chính xác
+  patterns.sort((a, b) => b.length - a.length);
 
-  return escapeHtml(normalizedText).replace(regex, (match) => `<mark class="highlight-match">${match}</mark>`);
+  try {
+    const regex = new RegExp(`(${patterns.join("|")})`, "gi");
+    return escapeHtml(normalizedText).replace(regex, (match) => `<mark class="highlight-match">${match}</mark>`);
+  } catch (err) {
+    return escapeHtml(normalizedText);
+  }
 }
 
 function showLightbox(cand, imgUrl) {
