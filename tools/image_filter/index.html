@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Roboto+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=2026.8.2">
 </head>
 <body>
   <!-- Header / Top Navigation -->
@@ -84,6 +84,16 @@
         </div>
 
         <div class="video-stats-and-filters">
+          <!-- Main Similarity Search Scope Switcher -->
+          <div class="scope-switcher" title="Chọn phạm vi tìm kiếm ảnh tương tự khi bấm nút 'Giống'">
+            <span class="scope-label">🔍 Quét:</span>
+            <select id="main-sim-scope-select" class="scope-select-main">
+              <option value="batch" selected>📁 Batch hiện tại</option>
+              <option value="video">🎥 Video hiện tại</option>
+              <option value="all">🌐 Toàn bộ Dataset</option>
+            </select>
+          </div>
+
           <!-- Grid Density Switcher -->
           <div class="density-switcher" title="Chỉnh số cột hiển thị lưới ảnh">
             <span class="density-label">Lưới:</span>
@@ -128,7 +138,7 @@
           <span class="modal-icon">🔍</span>
           <div>
             <h3>Tìm & Lọc Ảnh Trùng Lặp (Duplicate Search)</h3>
-            <p>Quét 108K+ vector CLIP toàn bộ dataset để tìm các ảnh giống ảnh mẫu</p>
+            <p>Quét vector CLIP theo phạm vi đã chọn để gom cụm và lọc ảnh trùng</p>
           </div>
         </div>
         <button class="modal-close" id="btn-close-similar-modal">✕</button>
@@ -181,7 +191,7 @@
           </div>
 
           <div class="results-summary">
-            <span>Tìm thấy: <strong id="sim-found-count">0</strong> ảnh tương đồng</span>
+            <span>Tìm thấy: <strong id="sim-found-count">0</strong> ảnh (<span id="sim-scope-badge" style="color: var(--electric-cyan); font-weight: 700;">L25</span>)</span>
             <span>Đã chọn để lọc: <strong class="text-danger" id="sim-selected-count">0</strong> ảnh</span>
           </div>
 
@@ -215,6 +225,6 @@
   <!-- Toast Notification Container -->
   <div class="toast-container" id="toast-container"></div>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=2026.8.3"></script>
 </body>
 </html>

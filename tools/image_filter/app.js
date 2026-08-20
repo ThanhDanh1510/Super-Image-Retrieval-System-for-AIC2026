@@ -63,6 +63,8 @@ const elements = {
   thresholdDisplay: document.getElementById("threshold-display"),
   simZoomSlider: document.getElementById("sim-zoom-slider"),
   zoomDisplay: document.getElementById("zoom-display"),
+  mainSimScopeSelect: document.getElementById("main-sim-scope-select"),
+  simScopeBadge: document.getElementById("sim-scope-badge"),
   similarResultsGrid: document.getElementById("similar-results-grid"),
   simFoundCount: document.getElementById("sim-found-count"),
   simSelectedCount: document.getElementById("sim-selected-count"),
@@ -96,9 +98,30 @@ async function fetchBatches() {
     appState.totalFilteredCount = data.total_filtered || 0;
     updateGlobalStats();
     renderBatchList();
+    populateScopeDropdown();
   } catch (err) {
     showToast("Lỗi khi tải danh sách batch: " + err.message, "danger");
   }
+}
+
+function populateScopeDropdown(preserveSelection = true) {
+  if (!elements.mainSimScopeSelect) return;
+  const currentBatch = appState.currentBatch || "L25";
+  const currentVideo = appState.currentVideoId || "V001";
+  
+  const targetVal = preserveSelection ? (elements.mainSimScopeSelect.value || "batch") : "batch";
+
+  const optionsHtml = `
+    <option value="batch">📁 Batch hiện tại (${currentBatch})</option>
+    <option value="video">🎥 Video hiện tại (${currentBatch}_${currentVideo})</option>
+    <option value="all">🌐 Toàn bộ Dataset (Tất cả Batch)</option>
+    <optgroup label="── Chọn Batch cụ thể ──">
+      ${(appState.batches || []).map((b) => `<option value="batch:${b.batch}">📁 Chỉ trong ${b.batch}</option>`).join("")}
+    </optgroup>
+  `;
+
+  elements.mainSimScopeSelect.innerHTML = optionsHtml;
+  elements.mainSimScopeSelect.value = targetVal;
 }
 
 async function fetchVideos(batch) {
@@ -114,7 +137,7 @@ async function fetchVideos(batch) {
 
 async function fetchImages(batch, videoId) {
   try {
-    elements.keyframeGrid.innerHTML = '<div class="loading-spinner">Đang tải ảnh keyframe...</div>';
+    elements.keyframeGrid.innerHTML = '<div class="loading-spinner" style="grid-column: 1 / -1; height: 300px;">Đang tải ảnh keyframe...</div>';
     elements.keyframeGrid.style.display = "grid";
     elements.emptyState.style.display = "none";
     
@@ -136,7 +159,7 @@ async function postFilterUpdate(action, items, reason = "manual") {
       body: JSON.stringify({ action, items, reason }),
     });
     const data = await res.json();
-    appState.totalFilteredCount = data.total_filtered;
+    appState.totalFilteredCount = (data.total_filtered_count !== undefined ? data.total_filtered_count : data.total_filtered) ?? 0;
     updateGlobalStats();
     return data;
   } catch (err) {
@@ -145,7 +168,7 @@ async function postFilterUpdate(action, items, reason = "manual") {
   }
 }
 
-async function fetchSimilarImages(sceneId, batch, videoId, frameId, minSim = 0.70) {
+async function fetchSimilarImages(sceneId, batch, videoId, frameId, minSim = 0.70, targetBatch = null, targetVideo = null) {
   try {
     const res = await fetch("/api/similar", {
       method: "POST",
@@ -155,6 +178,8 @@ async function fetchSimilarImages(sceneId, batch, videoId, frameId, minSim = 0.7
         batch: batch,
         video_id: videoId,
         frame_id: frameId,
+        target_batch: targetBatch,
+        target_video: targetVideo,
         top_k: 1000,
         min_similarity: minSim,
       }),
@@ -176,8 +201,13 @@ async function fetchSimilarImages(sceneId, batch, videoId, frameId, minSim = 0.7
 // =============================================================================
 
 function updateGlobalStats() {
-  elements.statFilteredCount.textContent = appState.totalFilteredCount.toLocaleString();
-  elements.btnExportCount.textContent = appState.totalFilteredCount.toLocaleString();
+  const count = Number(appState.totalFilteredCount || 0);
+  if (elements.statFilteredCount) {
+    elements.statFilteredCount.textContent = count.toLocaleString();
+  }
+  if (elements.btnExportCount) {
+    elements.btnExportCount.textContent = count.toLocaleString();
+  }
 }
 
 function renderBatchList() {
@@ -277,6 +307,8 @@ function selectVideo(batch, videoId) {
   elements.currentBatchBadge.textContent = batch;
   elements.currentVideoHeading.textContent = `${batch}_${videoId}`;
   elements.statCurrentVideo.textContent = `${batch}_${videoId}`;
+
+  populateScopeDropdown(true);
 
   fetchImages(batch, videoId);
 }
@@ -489,11 +521,55 @@ async function openSimilarModal(img) {
   
   const cols = elements.simZoomSlider ? elements.simZoomSlider.value : "4";
   elements.similarResultsGrid.className = `similar-grid cols-${cols}`;
-  elements.similarResultsGrid.innerHTML = '<div class="loading-spinner">Đang quét vector cosine similarity...</div>';
   elements.similarModal.classList.add("open");
 
+  // Re-populate dropdown with current video/batch options
+  populateScopeDropdown(true);
+
+  await executeSimilarSearch();
+}
+
+async function executeSimilarSearch() {
+  const img = appState.activeRefImage;
+  if (!img) return;
+
+  elements.similarResultsGrid.innerHTML = '<div class="loading-spinner">Đang quét vector cosine similarity...</div>';
+
+  let targetBatch = null;
+  let targetVideo = null;
+  let scopeLabel = "Toàn bộ dataset";
+
+  const scopeVal = elements.mainSimScopeSelect ? elements.mainSimScopeSelect.value : "batch";
+
+  if (scopeVal === "video") {
+    targetBatch = appState.currentBatch;
+    targetVideo = appState.currentVideoId;
+    scopeLabel = `Video ${appState.currentBatch}_${appState.currentVideoId}`;
+  } else if (scopeVal === "batch" || scopeVal === "current") {
+    targetBatch = appState.currentBatch;
+    scopeLabel = `Batch ${appState.currentBatch}`;
+  } else if (scopeVal.startsWith("batch:")) {
+    targetBatch = scopeVal.replace("batch:", "");
+    scopeLabel = `Batch ${targetBatch}`;
+  } else if (scopeVal === "all") {
+    targetBatch = null;
+    scopeLabel = "Toàn bộ dataset";
+  }
+
+  if (elements.simScopeBadge) {
+    elements.simScopeBadge.textContent = scopeLabel;
+  }
+
   const minSim = parseFloat(elements.simThresholdSlider.value) / 100.0;
-  const res = await fetchSimilarImages(img.scene_id, appState.currentBatch, appState.currentVideoId, img.frame_id, 0.70);
+  const res = await fetchSimilarImages(
+    img.scene_id,
+    appState.currentBatch,
+    appState.currentVideoId,
+    img.frame_id,
+    0.70,
+    targetBatch,
+    targetVideo
+  );
 
   if (res && res.results) {
     appState.similarResults = res.results;

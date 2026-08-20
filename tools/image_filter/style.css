@@ -494,6 +494,50 @@ body {
   gap: 14px;
 }
 
+/* Scope Switcher */
+.scope-switcher {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(0, 210, 255, 0.05);
+  border: 1px solid rgba(0, 210, 255, 0.35);
+  border-radius: var(--radius-md);
+  padding: 3px 8px;
+  box-shadow: 0 0 10px rgba(0, 210, 255, 0.1);
+}
+
+.scope-label {
+  font-size: 11px;
+  color: var(--electric-cyan);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.scope-select-main {
+  font-family: 'Outfit', sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  background: #0e121d;
+  color: #fff;
+  border: 1px solid rgba(0, 210, 255, 0.3);
+  border-radius: 4px;
+  padding: 4px 8px;
+  cursor: pointer;
+  outline: none;
+  transition: var(--transition);
+}
+
+.scope-select-main:hover,
+.scope-select-main:focus {
+  border-color: var(--electric-cyan);
+  box-shadow: 0 0 10px var(--electric-cyan-glow);
+}
+
+.scope-select-main option {
+  background: #0f121d;
+  color: #fff;
+}
+
 /* Density Switcher */
 .density-switcher {
   display: flex;

@@ -192,6 +192,8 @@ class SimilarSearchRequest(BaseModel):
     batch: str | None = None
     video_id: str | None = None
     frame_id: int | None = None
+    target_batch: str | None = None  # None / "all" = toàn bộ dataset, hoặc "L25", "L21",...
+    target_video: str | None = None  # None = toàn bộ video trong batch, hoặc "V001", "L25_V001",...
     top_k: int = 1000
     min_similarity: float = 0.70
 
@@ -321,6 +323,7 @@ def search_similar_keyframes(req: SimilarSearchRequest):
     """
     Tìm kiếm ảnh tương đồng (Duplicate / Near-duplicate Search)
     sử dụng in-memory cosine similarity trên image_vectors.npy (< 5ms).
+    Hỗ trợ lọc theo từng Batch/Folder lớn hoặc toàn bộ dataset.
     """
     if state.image_vectors is None or not state.scene_ids:
         raise HTTPException(status_code=500, detail="Vector embeddings chưa được load sẵn sàng")
@@ -339,12 +342,19 @@ def search_similar_keyframes(req: SimilarSearchRequest):
 
     scores = state.image_vectors @ query_vec
 
+    # Xử lý lọc theo folder / batch và video
+    target_batch = (req.target_batch or "").strip()
+    if target_batch.lower() in ("all", "tat_ca", "*"):
+        target_batch = ""
+
+    target_video = (req.target_video or "").strip()
+
     # Lấy tất cả vector đạt ngưỡng tối thiểu
     match_mask = scores >= req.min_similarity
     match_indices = np.where(match_mask)[0]
 
     # Sắp xếp giảm dần theo điểm tương đồng
-    sorted_order = np.argsort(scores[match_indices])[::-1][: req.top_k]
+    sorted_order = np.argsort(scores[match_indices])[::-1]
     top_indices = match_indices[sorted_order]
 
     results = []
@@ -358,6 +368,16 @@ def search_similar_keyframes(req: SimilarSearchRequest):
         batch = parts[0] if len(parts) >= 1 else ""
         sub_vid = parts[1] if len(parts) >= 2 else ""
 
+        # Lọc theo target_batch nếu có chỉ định (ví dụ: chỉ tìm trong L25)
+        if target_batch and batch != target_batch:
+            continue
+
+        # Lọc theo target_video nếu có chỉ định (ví dụ: chỉ tìm trong V001 hoặc L25_V001)
+        if target_video:
+            clean_tv = target_video.replace(f"{batch}_", "")
+            if sub_vid != clean_tv and f"{batch}_{sub_vid}" != target_video:
+                continue
+
         meta_row = None
         if state.metadata_df is not None:
             matches = state.metadata_df[state.metadata_df["scene_id"] == target_sid]
@@ -369,27 +389,31 @@ def search_similar_keyframes(req: SimilarSearchRequest):
         key = f"{batch}/{sub_vid}/{fname}"
         is_filtered = key in state.filtered_items
 
-        nested = IMAGE_DIR / batch / batch / sub_vid / fname
-        rel_p = f"{batch}/{batch}/{sub_vid}/{fname}" if nested.exists() else f"{batch}/{sub_vid}/{fname}"
+        nested_b = IMAGE_DIR / batch / batch
+        rel_image_path = f"{batch}/{batch}/{sub_vid}/{fname}" if nested_b.exists() else f"{batch}/{sub_vid}/{fname}"
 
         results.append({
-            "scene_id": target_sid,
-            "batch": batch,
-            "video_id": sub_vid,
-            "full_video_id": f"{batch}_{sub_vid}",
-            "frame_id": frame_id,
-            "filename": fname,
-            "keyframe_path": key,
-            "rel_path": rel_p,
-            "image_url": f"/api/image-file/{rel_p}",
-            "similarity": round(sim, 4),
-            "similarity_percent": round(sim * 100, 1),
-            "is_query_image": (target_sid == scene_id),
-            "is_filtered": is_filtered,
+            "scene_id": str(target_sid),
+            "batch": str(batch),
+            "video_id": str(sub_vid),
+            "frame_id": int(frame_id),
+            "filename": str(fname),
+            "keyframe_path": str(key),
+            "image_url": f"/api/image-file/{rel_image_path}",
+            "similarity": float(round(sim, 4)),
+            "similarity_percent": int(round(sim * 100)),
+            "is_filtered": bool(is_filtered),
+            "is_query_image": bool(idx == query_idx),
         })
+
+        if len(results) >= req.top_k:
+            break
 
     return {
         "query_scene_id": scene_id,
+        "target_batch": target_batch or "all",
+        "threshold": req.min_similarity,
+        "total_matches": len(results),
         "total_found": len(results),
         "results": results,
     }
@@ -442,6 +466,7 @@ def update_filter_list(req: FilterToggleRequest):
         "action": req.action,
         "modified_count": modified_count,
         "total_filtered": len(state.filtered_items),
+        "total_filtered_count": len(state.filtered_items),
     }
 
 
