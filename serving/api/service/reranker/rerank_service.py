@@ -84,7 +84,7 @@ async def rerank(
         if use_viranker and use_jina_m0:
             _t_inference_start = time.perf_counter()
             text_task = asyncio.to_thread(
-                viranker.score, viranker_query, rerank_candidates, viranker_bundle
+                viranker.score, viranker_query, rerank_candidates, viranker_bundle, enhanced_query
             )
             visual_task = asyncio.to_thread(
                 jina_reranker_m0.score,
@@ -107,7 +107,7 @@ async def rerank(
         elif use_viranker:
             _t_inference_start = time.perf_counter()
             text_scores = await asyncio.to_thread(
-                viranker.score, viranker_query, rerank_candidates, viranker_bundle
+                viranker.score, viranker_query, rerank_candidates, viranker_bundle, enhanced_query
             )
             _t_inference_end = time.perf_counter()
             logger.info(

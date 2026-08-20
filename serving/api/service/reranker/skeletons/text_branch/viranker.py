@@ -17,14 +17,17 @@ def score(
     query: str,
     candidates: list[CandidateResult],
     model_bundle: Optional[dict[str, Any]] = None,
+    enhanced_query: Optional[str] = None,
 ) -> list[float]:
     """
     Tính điểm tương đồng ngữ nghĩa giữa query và description + ocr_text + asr_text của từng candidate.
+    Hỗ trợ query song ngữ (Bilingual Query) và cross-lingual keyword boost.
 
     Args:
         query: Query text tiếng Anh hoặc tiếng Việt đã chuẩn hóa.
         candidates: Danh sách CandidateResult cần rerank.
         model_bundle: Dict chứa model, tokenizer, device (từ ModelRegistry).
+        enhanced_query: Query đã dịch/enhance (ví dụ 'Cat' khi query là 'mèo').
 
     Returns:
         List[float]: Danh sách điểm số (cùng kích thước và thứ tự với candidates).
@@ -59,15 +62,18 @@ def score(
         tokenizer = model_bundle["tokenizer"]
         device = model_bundle.get("device", "cpu")
 
-        # Chuẩn bị query đa dạng hoa/thường cho cross-encoder
-        words = query.strip().split()
-        if len(words) <= 6:
-            query_for_model = f"{query} {query.title()}"
+        clean_q = query.strip()
+        clean_enh = (enhanced_query or "").strip()
+
+        # Xây dựng query song ngữ (Bilingual Query) cho cross-encoder
+        if clean_enh and clean_enh.lower() != clean_q.lower():
+            query_for_model = f"{clean_q} | {clean_enh}"
+        elif len(clean_q.split()) <= 6:
+            query_for_model = f"{clean_q} {clean_q.title()}"
         else:
-            query_for_model = query
+            query_for_model = clean_q
 
         # Chuẩn bị cặp (query, doc_text) bao gồm OCR + Description + ASR
-        # Ưu tiên OCR ở đầu để không bị cắt xén (truncate) bởi văn bản mô tả dài
         pairs = []
         for c in candidates:
             desc_text = getattr(c, "description", "") or ""
@@ -100,14 +106,24 @@ def score(
         if isinstance(scores, float):
             scores = [scores]
 
-        q_lower = query.lower().strip()
+        # Tập từ khóa đa ngôn ngữ để kiểm tra keyword boost
+        keywords = set()
+        for q_src in [clean_q, clean_enh]:
+            if q_src:
+                for w in q_src.lower().split():
+                    if len(w) >= 3 and w not in ("the", "and", "for", "with", "của", "cho", "với", "trong", "một", "các", "những"):
+                        keywords.add(w)
+
         final_scores = []
         for i, s in enumerate(scores):
             sc = float(s)
             c = candidates[i]
             ocr = (getattr(c, "ocr_text", "") or "").lower()
             desc = (getattr(c, "description", "") or "").lower()
-            if q_lower and (q_lower in ocr or q_lower in desc):
+            asr = (getattr(c, "asr_text", "") or "").lower()
+            combined_doc = f"{ocr} {desc} {asr}"
+
+            if keywords and any(kw in combined_doc for kw in keywords):
                 sc = min(sc + 0.35, 1.0)
             final_scores.append(sc)
 

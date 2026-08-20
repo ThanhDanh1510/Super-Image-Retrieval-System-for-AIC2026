@@ -280,9 +280,9 @@ async def _enhance_query(raw_query: str) -> tuple[str, str]:
         if translated_en and _is_valid_translation(translated_en, cleaned_query):
             en_clean = sanitize_search_query(translated_en)
             if en_clean.lower() != unaccented.lower():
-                en_query = f"{en_clean} {title_cased}"
-            else:
                 en_query = en_clean
+            else:
+                en_query = f"{title_cased} {unaccented}"
         else:
             en_query = f"{title_cased} {unaccented}"
     else:
