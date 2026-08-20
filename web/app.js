@@ -216,7 +216,7 @@ function setupControls() {
 
 let isVideoInteractMode = false;
 
-// --- Keyboard Shortcuts (Lightbox Navigation, Video Backspace Control & Copy on Hover) ---
+// --- Keyboard Shortcuts (Lightbox Navigation, Video Space Control & Copy on Hover) ---
 function setupKeyboardShortcuts() {
   document.addEventListener("keydown", (e) => {
     const modal = document.getElementById("lightbox-modal");
@@ -230,10 +230,17 @@ function setupKeyboardShortcuts() {
         return;
       }
 
-      // Phím Backspace: Toggle Play/Pause video và kích hoạt Chế độ Tương Tác Video
-      if (e.key === "Backspace") {
+      // Phím Space: Toggle Play/Pause video và kích hoạt Chế độ Tương Tác Video (Ngăn chặn triệt để cuộn trang & kích hoạt nút)
+      if (e.code === "Space" || e.key === " " || e.key === "Spacebar") {
         if (["INPUT", "TEXTAREA"].includes(document.activeElement.tagName)) return;
         e.preventDefault();
+        e.stopPropagation();
+
+        // Blur bất kỳ nút bấm nào đang được focus để tránh re-activation
+        if (document.activeElement && typeof document.activeElement.blur === "function") {
+          document.activeElement.blur();
+        }
+
         isVideoInteractMode = true;
         if (modalVideoEl.paused) {
           modalVideoEl.play().catch(() => {});
@@ -245,7 +252,7 @@ function setupKeyboardShortcuts() {
         return;
       }
 
-      // Khi đã bấm Backspace (isVideoInteractMode === true): Left/Right Arrow tua 3 giây
+      // Khi đã bấm Space (isVideoInteractMode === true): Left/Right Arrow tua 3 giây
       if (isVideoInteractMode) {
         if (e.key === "ArrowLeft" || e.code === "KeyA") {
           if (["INPUT", "TEXTAREA"].includes(document.activeElement.tagName)) return;
@@ -264,7 +271,7 @@ function setupKeyboardShortcuts() {
           return;
         }
       } else {
-        // Khi chưa bấm Backspace: Left/Right Arrow dùng để chuyển qua lại giữa các ảnh kết quả
+        // Khi chưa bấm Space: Left/Right Arrow dùng để chuyển qua lại giữa các ảnh kết quả
         if (e.key === "ArrowLeft" || e.code === "KeyA") {
           if (["INPUT", "TEXTAREA"].includes(document.activeElement.tagName)) return;
           e.preventDefault();
@@ -579,7 +586,7 @@ function toggleSelectTrakeChain(chain, chainKey, btn) {
       type: "trake_chain",
       video_id: chain[0].video_id,
       frame_ids: chain.map((c) => c.frame_id),
-      chain_events: chain,
+      chain_events: chain.map((c) => ({ ...c })), // Deep copy để việc sửa đổi giỏ nộp bài không làm đổi kết quả tìm kiếm gốc
       score: chain.reduce((sum, c) => sum + c.score, 0) / chain.length,
     });
     if (btn) {
@@ -712,10 +719,10 @@ function updateDrawer() {
       div.className = "trake-cart-item";
       let thumbsHtml = "";
       cand.chain_events.forEach((ev, idx) => {
-        const imgUrl = `${API_BASE}/api/v1/image/${ev.video_id}/${ev.frame_id}`;
+        const imgUrl = ev.custom_thumb || `${API_BASE}/api/v1/image/${ev.video_id}/${ev.frame_id}`;
         thumbsHtml += `
           <div class="trake-cart-thumb" title="${ev.video_id} f${ev.frame_id}">
-            <img src="${imgUrl}" alt="f${ev.frame_id}" onerror="this.style.display='none'" />
+            <img src="${imgUrl}" alt="f${ev.frame_id}" onerror="this.src='/static/placeholder.webp'" />
             <span>f${ev.frame_id}</span>
           </div>
         `;
@@ -739,10 +746,10 @@ function updateDrawer() {
     // 2. Khung hình đơn lẻ (KIS / VQA)
     const div = document.createElement("div");
     div.className = "selected-item";
-    const imgUrl = `${API_BASE}/api/v1/image/${cand.video_id}/${cand.frame_id}`;
+    const imgUrl = cand.custom_thumb || `${API_BASE}/api/v1/image/${cand.video_id}/${cand.frame_id}`;
     
     div.innerHTML = `
-      <img src="${imgUrl}" alt="${cand.scene_id}" onerror="this.style.display='none'" />
+      <img src="${imgUrl}" alt="${cand.scene_id || cand.video_id}" onerror="this.src='/static/placeholder.webp'" />
       <div style="flex:1; min-width: 0;">
         <div style="font-weight:bold; font-size:0.85rem;">${cand.video_id}</div>
         <div style="font-size:0.75rem; color:var(--spider-blue); font-family:var(--font-code); font-weight:600;">f${cand.frame_id}</div>
@@ -1486,9 +1493,11 @@ if (modalEl) {
     const frameId = currentVideoFrame();
     const ts = modalVideoEl.currentTime;
     const base = currentLightboxCand || {};
+    const snap = captureCurrentVideoThumbnail();
     const newCand = {
       video_id: currentVideoId,
       frame_id: frameId,
+      custom_thumb: snap,
       scene_id: base.scene_id || "",
       timestamp_start: ts,
       timestamp_end: ts,
@@ -1511,7 +1520,22 @@ if (modalEl) {
   });
 }
 
-// --- Căn chỉnh & Thay thế Frame trong giỏ cho Video đang xem ---
+// --- Chụp ảnh snapshot hiện tại từ thẻ video để hiển thị thumbnail tức thì ---
+function captureCurrentVideoThumbnail() {
+  if (!modalVideoEl || !modalVideoEl.videoWidth || !modalVideoEl.videoHeight) return null;
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = modalVideoEl.videoWidth;
+    canvas.height = modalVideoEl.videoHeight;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(modalVideoEl, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL("image/jpeg", 0.85);
+  } catch (err) {
+    return null;
+  }
+}
+
+// --- Căn chỉnh & Thay thế Frame trong giỏ cho Video đang xem (Giữ nguyên kết quả tìm kiếm gốc) ---
 function handleReplaceFrameInCart() {
   if (!currentVideoId) return;
   const currentFrame = currentVideoFrame();
@@ -1548,12 +1572,16 @@ function handleReplaceFrameInCart() {
     // KIS / VQA single item
     const oldFrame = cartCand.frame_id;
     cartCand.frame_id = currentFrame;
+    const snap = captureCurrentVideoThumbnail();
+    if (snap) {
+      cartCand.custom_thumb = snap;
+    }
     // Cập nhật lại key trong Map
     state.selectedItems.delete(cartKey);
     const newKey = `${cartCand.video_id}_${currentFrame}`;
     state.selectedItems.set(newKey, cartCand);
     updateDrawer();
-    renderResults(state.rawResults);
+    // Giữ nguyên kết quả tìm kiếm gốc state.rawResults
     showToast(`🔄 Đã thay thế frame ${currentVideoId}: f${oldFrame} ➔ f${currentFrame}!`);
     replaceMenu.style.display = "none";
   }
@@ -1567,10 +1595,14 @@ window.applyFrameReplacement = function(cartKey, eventIdx, newFrameId) {
   item.frame_ids[eventIdx] = newFrameId;
   if (item.chain_events && item.chain_events[eventIdx]) {
     item.chain_events[eventIdx].frame_id = newFrameId;
+    const snap = captureCurrentVideoThumbnail();
+    if (snap) {
+      item.chain_events[eventIdx].custom_thumb = snap;
+    }
   }
 
   updateDrawer();
-  renderResults(state.rawResults);
+  // Chỉ cập nhật giỏ nộp bài, hoàn toàn KHÔNG đụng tới kết quả tìm kiếm gốc
   const repMenu = document.getElementById("video-replace-menu");
   if (repMenu) repMenu.style.display = "none";
   showToast(`🔄 Đã thay thế Event ${eventIdx + 1} (${item.video_id}): f${oldFid} ➔ f${newFrameId}!`);
