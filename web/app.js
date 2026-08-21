@@ -7,6 +7,7 @@ const API_BASE = "http://localhost:8000";
 // App State
 const state = {
   mode: "kis", // kis, vqa, trake
+  targetExportMode: "kis", // kis, vqa, trake (linh hoạt chuyển đổi)
   searchMode: "all", // all, embedding, ocr, asr
   query: "",
   topK: 50,
@@ -41,6 +42,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupDrawer();
   setupVoice();
   setupKeyboardShortcuts();
+  setupCsvEditor();
   updateUIForMode();
 });
 
@@ -51,6 +53,7 @@ function setupTabs() {
       document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
       state.mode = btn.dataset.mode;
+      state.targetExportMode = state.mode;
       updateUIForMode();
       updateDrawer();
     });
@@ -74,6 +77,11 @@ function updateUIForMode() {
     if (numEventsGroup) numEventsGroup.style.display = "none";
     if (vqaBulkBox) vqaBulkBox.style.display = "none";
   }
+
+  // Cập nhật radio button định dạng xuất
+  const radio = document.querySelector(`input[name="target-export-mode"][value="${state.targetExportMode || state.mode}"]`);
+  if (radio) radio.checked = true;
+
   updateQueryIdInputForMode();
 }
 
@@ -218,82 +226,118 @@ let isVideoInteractMode = false;
 
 // --- Keyboard Shortcuts (Lightbox Navigation, Video Space Control & Copy on Hover) ---
 function setupKeyboardShortcuts() {
-  document.addEventListener("keydown", (e) => {
-    const modal = document.getElementById("lightbox-modal");
-    const isModalOpen = modal && modal.style.display !== "none";
+  function isTypingInTextField() {
+    const el = document.activeElement;
+    if (!el) return false;
+    const tag = el.tagName;
+    if (tag === "TEXTAREA") return true;
+    if (tag === "INPUT") {
+      const type = (el.type || "").toLowerCase();
+      return ["text", "search", "password", "email", "url", "number", "tel"].includes(type) || !type;
+    }
+    return el.isContentEditable === true;
+  }
 
-    if (isModalOpen) {
-      // Escape: Đóng modal
-      if (e.key === "Escape") {
-        modal.style.display = "none";
-        closeLightboxVideo();
-        return;
+  // Bắt sự kiện ở Capture Phase trên Window để chặn 100% trước bất kỳ native control hay shadow DOM nào
+  window.addEventListener(
+    "keydown",
+    (e) => {
+      // Phím Space: Vô hiệu hóa triệt để hành vi cuộn trang mặc định trên toàn trang khi không gõ text
+      if (e.code === "Space" || e.key === " " || e.key === "Spacebar" || e.keyCode === 32 || e.which === 32) {
+        if (!isTypingInTextField()) {
+          e.preventDefault();
+          e.stopPropagation();
+          e.stopImmediatePropagation();
+
+          const modal = document.getElementById("lightbox-modal");
+          const isModalOpen = modal && modal.style.display !== "none";
+          if (isModalOpen && modalVideoEl && modalVideoEl.src) {
+            if (modalVideoEl.paused) {
+              modalVideoEl.play().catch(() => {});
+              showToast("▶️ Video đang phát (← / → tua 3s, A / D đổi ảnh)");
+            } else {
+              modalVideoEl.pause();
+              showToast("⏸️ Video tạm dừng (← / → tua 3s, A / D đổi ảnh)");
+            }
+          }
+          return false;
+        }
       }
 
-      // Phím Space: Toggle Play/Pause video và kích hoạt Chế độ Tương Tác Video (Ngăn chặn triệt để cuộn trang & kích hoạt nút)
-      if (e.code === "Space" || e.key === " " || e.key === "Spacebar") {
-        if (["INPUT", "TEXTAREA"].includes(document.activeElement.tagName)) return;
+      const modal = document.getElementById("lightbox-modal");
+      const isModalOpen = modal && modal.style.display !== "none";
+
+      if (isModalOpen) {
+        // Escape: Đóng modal
+        if (e.key === "Escape") {
+          modal.style.display = "none";
+          closeLightboxVideo();
+          return;
+        }
+
+        if (!isTypingInTextField()) {
+          // Phím A / D hoặc [ / ]: Chuyển qua lại giữa các ảnh kết quả
+          if (e.key === "a" || e.key === "A" || e.key === "[" || e.code === "KeyA") {
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            showLightboxAt(state.currentLightboxIndex - 1);
+            return false;
+          }
+          if (e.key === "d" || e.key === "D" || e.key === "]" || e.code === "KeyD") {
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            showLightboxAt(state.currentLightboxIndex + 1);
+            return false;
+          }
+
+          // Hai phím Mũi tên ← / →: Tua chính xác 3 giây trong video hiện tại
+          if (e.key === "ArrowLeft" || e.code === "ArrowLeft") {
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            modalVideoEl.currentTime = Math.max(0, modalVideoEl.currentTime - 3);
+            updateVideoInfoLabel();
+            showToast(`⏪ Tua lùi 3s (f${currentVideoFrame()})`);
+            return false;
+          }
+          if (e.key === "ArrowRight" || e.code === "ArrowRight") {
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            modalVideoEl.currentTime = Math.min(modalVideoEl.duration || 999999, modalVideoEl.currentTime + 3);
+            updateVideoInfoLabel();
+            showToast(`⏩ Tua tiến 3s (f${currentVideoFrame()})`);
+            return false;
+          }
+        }
+      }
+
+      if ((e.key === "c" || e.key === "C") && state.hoveredCand) {
+        if (isTypingInTextField()) return;
         e.preventDefault();
-        e.stopPropagation();
-
-        // Blur bất kỳ nút bấm nào đang được focus để tránh re-activation
-        if (document.activeElement && typeof document.activeElement.blur === "function") {
-          document.activeElement.blur();
-        }
-
-        isVideoInteractMode = true;
-        if (modalVideoEl.paused) {
-          modalVideoEl.play().catch(() => {});
-          showToast("▶️ Video đang phát (Phím ←/→ tua 3s)");
-        } else {
-          modalVideoEl.pause();
-          showToast("⏸️ Video tạm dừng (Phím ←/→ tua 3s)");
-        }
-        return;
+        copyToClipboard(state.hoveredCand);
       }
+    },
+    true
+  );
 
-      // Khi đã bấm Space (isVideoInteractMode === true): Left/Right Arrow tua 3 giây
-      if (isVideoInteractMode) {
-        if (e.key === "ArrowLeft" || e.code === "KeyA") {
-          if (["INPUT", "TEXTAREA"].includes(document.activeElement.tagName)) return;
+  // Chặn thêm ở keyup capture để đề phòng browser kích hoạt scroll ở keyup
+  window.addEventListener(
+    "keyup",
+    (e) => {
+      if (e.code === "Space" || e.key === " " || e.key === "Spacebar" || e.keyCode === 32 || e.which === 32) {
+        if (!isTypingInTextField()) {
           e.preventDefault();
-          modalVideoEl.currentTime = Math.max(0, modalVideoEl.currentTime - 3);
-          updateVideoInfoLabel();
-          showToast(`⏪ Tua lùi 3s (f${currentVideoFrame()})`);
-          return;
-        }
-        if (e.key === "ArrowRight" || e.code === "KeyD") {
-          if (["INPUT", "TEXTAREA"].includes(document.activeElement.tagName)) return;
-          e.preventDefault();
-          modalVideoEl.currentTime = Math.min(modalVideoEl.duration || 999999, modalVideoEl.currentTime + 3);
-          updateVideoInfoLabel();
-          showToast(`⏩ Tua tiến 3s (f${currentVideoFrame()})`);
-          return;
-        }
-      } else {
-        // Khi chưa bấm Space: Left/Right Arrow dùng để chuyển qua lại giữa các ảnh kết quả
-        if (e.key === "ArrowLeft" || e.code === "KeyA") {
-          if (["INPUT", "TEXTAREA"].includes(document.activeElement.tagName)) return;
-          e.preventDefault();
-          showLightboxAt(state.currentLightboxIndex - 1);
-          return;
-        }
-        if (e.key === "ArrowRight" || e.code === "KeyD") {
-          if (["INPUT", "TEXTAREA"].includes(document.activeElement.tagName)) return;
-          e.preventDefault();
-          showLightboxAt(state.currentLightboxIndex + 1);
-          return;
+          e.stopPropagation();
+          e.stopImmediatePropagation();
+          return false;
         }
       }
-    }
-
-    if ((e.key === "c" || e.key === "C") && state.hoveredCand) {
-      // Don't trigger if user is actively typing in a text field
-      if (["INPUT", "TEXTAREA"].includes(document.activeElement.tagName)) return;
-      e.preventDefault();
-      copyToClipboard(state.hoveredCand);
-    }
-  });
+    },
+    true
+  );
 }
 
 // --- Copy Helper & Toast Notification ---
@@ -520,7 +564,7 @@ function renderTrakeChain(chain, chainIdx) {
         </div>
         <div class="trake-event-info">
           <span class="frame-label">f${candidate.frame_id}</span>
-          <span class="video-label">${candidate.video_id}</span>
+          <button class="add-event-kis-btn" data-key="${itemKey}" title="Thêm riêng frame này vào giỏ KIS">➕ KIS</button>
         </div>
       </div>
     `;
@@ -554,7 +598,7 @@ function renderTrakeChain(chain, chainIdx) {
     });
   }
 
-  // Event listeners cho từng event trong chain (Lightbox & Hover)
+  // Event listeners cho từng event trong chain (Lightbox, Hover & KIS Add)
   chainContainer.querySelectorAll(".trake-event").forEach((eventEl) => {
     const key = eventEl.dataset.key;
     const candidate = chain.find((c) => `${c.video_id}_${c.frame_id}` === key);
@@ -564,6 +608,31 @@ function renderTrakeChain(chain, chainIdx) {
 
     // Lightbox on click
     eventEl.querySelector("img").addEventListener("click", () => showLightbox(candidate, imgUrl));
+
+    // Nút thêm riêng frame này vào KIS
+    const addKisBtn = eventEl.querySelector(".add-event-kis-btn");
+    if (addKisBtn) {
+      addKisBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const singleKey = `${candidate.video_id}_${candidate.frame_id}`;
+        if (state.selectedItems.has(singleKey)) {
+          state.selectedItems.delete(singleKey);
+          addKisBtn.textContent = "➕ KIS";
+          addKisBtn.style.background = "";
+          addKisBtn.style.color = "";
+        } else {
+          state.selectedItems.set(singleKey, {
+            ...candidate,
+            type: "single_frame"
+          });
+          addKisBtn.textContent = "✓ KIS";
+          addKisBtn.style.background = "var(--spider-blue)";
+          addKisBtn.style.color = "#000";
+          showToast(`➕ Đã thêm riêng frame ${candidate.video_id} f${candidate.frame_id} vào giỏ!`);
+        }
+        updateDrawer();
+      });
+    }
 
     // Hover tracking
     eventEl.addEventListener("mouseenter", () => { state.hoveredCand = candidate; });
@@ -753,7 +822,7 @@ function updateDrawer() {
       <div style="flex:1; min-width: 0;">
         <div style="font-weight:bold; font-size:0.85rem;">${cand.video_id}</div>
         <div style="font-size:0.75rem; color:var(--spider-blue); font-family:var(--font-code); font-weight:600;">f${cand.frame_id}</div>
-        ${state.mode === "vqa" ? `
+        ${(state.targetExportMode === "vqa" || state.mode === "vqa") ? `
           <div class="vqa-item-box">
             <input type="text" class="vqa-ans-input" data-key="${key}" placeholder="Đáp án riêng cho frame này..." value="${cand.user_answer != null ? cand.user_answer : (cand.answer || '')}" maxlength="100" />
           </div>
@@ -771,7 +840,9 @@ function updateDrawer() {
       const k = e.target.dataset.key;
       const item = state.selectedItems.get(k);
       if (item) {
-        item.user_answer = e.target.value;
+        let val = e.target.value;
+        if (typeof val.normalize === "function") val = val.normalize("NFC");
+        item.user_answer = val;
       }
     });
   });
@@ -808,6 +879,17 @@ function setupDrawer() {
     toggleBtn.onclick = toggleSidebar;
   }
 
+  // Target Export Mode Radios Listener (Chuyển đổi linh hoạt KIS / Q&A / TRAKE)
+  document.querySelectorAll('input[name="target-export-mode"]').forEach((radio) => {
+    radio.addEventListener("change", (e) => {
+      state.targetExportMode = e.target.value;
+      updateQueryIdInputForTargetMode();
+      updateDrawer();
+      const modeName = state.targetExportMode === "trake" ? "TRAKE" : (state.targetExportMode === "vqa" ? "Q&A" : "KIS");
+      showToast(`🎯 Định dạng xuất nộp: ${modeName}`);
+    });
+  });
+
   // VQA Bulk Answer Apply
   const vqaApplyAllBtn = document.getElementById("vqa-apply-all-btn");
   if (vqaApplyAllBtn) {
@@ -823,6 +905,15 @@ function setupDrawer() {
       if (!val) val = getDefaultQueryId();
       if (btnQueryIdLabel) {
         btnQueryIdLabel.textContent = `${val}.csv`;
+      }
+      // Tự động sync radio button nếu người dùng gõ đuôi -kis, -qa, -trake
+      const match = val.match(/-(kis|qa|trake)$/i);
+      if (match) {
+        const target = match[1].toLowerCase() === "qa" ? "vqa" : match[1].toLowerCase();
+        state.targetExportMode = target;
+        const radio = document.querySelector(`input[name="target-export-mode"][value="${target}"]`);
+        if (radio) radio.checked = true;
+        updateDrawer();
       }
     });
   }
@@ -852,7 +943,9 @@ function setupDrawer() {
 // --- Áp dụng 1 câu trả lời chung cho toàn bộ ảnh trong giỏ VQA ---
 function applyVqaAnswerToAll() {
   const bulkInput = document.getElementById("vqa-bulk-answer-input");
-  const val = (bulkInput ? bulkInput.value.trim() : "").substring(0, 100);
+  let val = (bulkInput ? bulkInput.value.trim() : "");
+  if (typeof val.normalize === "function") val = val.normalize("NFC");
+  val = val.substring(0, 100);
   if (!val) {
     alert("⚠️ Vui lòng nhập nội dung đáp án chung trước khi bấm 'Áp dụng tất cả'!");
     return;
@@ -864,24 +957,32 @@ function applyVqaAnswerToAll() {
 
   state.selectedItems.forEach((cand) => {
     cand.user_answer = val;
+    if (cand.type === "trake_chain" && Array.isArray(cand.chain_events)) {
+      cand.chain_events.forEach(ev => ev.user_answer = val);
+    }
   });
   updateDrawer();
 }
 
 // --- Query ID Utilities ---
 function getDefaultQueryId() {
-  const suffix = state.mode === "vqa" ? "qa" : state.mode;
+  const targetMode = state.targetExportMode || state.mode || "kis";
+  const suffix = targetMode === "vqa" ? "qa" : targetMode;
   return `query-${state.batchQueries.size + 1}-${suffix}`;
 }
 
 function updateQueryIdInputForMode() {
+  updateQueryIdInputForTargetMode();
+}
+
+function updateQueryIdInputForTargetMode() {
   const queryIdInput = document.getElementById("query-id-input");
   const btnQueryIdLabel = document.getElementById("btn-query-id-label");
+  const targetMode = state.targetExportMode || state.mode || "kis";
+  const suffix = targetMode === "vqa" ? "qa" : targetMode;
   if (queryIdInput) {
     const currentVal = queryIdInput.value.trim();
-    const suffix = state.mode === "vqa" ? "qa" : state.mode;
-    // Replace trailing suffix or set default
-    const match = currentVal.match(/^(query-\d+)-(kis|qa|trake)$/);
+    const match = currentVal.match(/^(query-\d+)-(kis|qa|trake)$/i);
     if (match) {
       queryIdInput.value = `${match[1]}-${suffix}`;
     } else if (!currentVal || currentVal.startsWith("query-")) {
@@ -893,52 +994,80 @@ function updateQueryIdInputForMode() {
   }
 }
 
-// --- CSV Generator per 100% BTC Official Specification ---
+// --- CSV Generator per 100% BTC Official Specification with Smart Cross-Mode Conversion & Auto NFC ---
 // Quy chuẩn sotuyenaic.oj.io.vn/rules/:
-// 1. Encoding: UTF-8, Delimiter: dấu phẩy (,)
+// 1. Encoding: UTF-8 (BẮT BUỘC CHUẨN UNICODE NFC PRECOMPOSED), Delimiter: dấu phẩy (,)
 // 2. TUYỆT ĐỐI KHÔNG CÓ DÒNG HEADER (Bắt đầu trực tiếp bằng dữ liệu)
 // 3. Tối đa 100 dòng cho mỗi file CSV
 // 4. KIS: <video_name>, <frame_id>
 // 5. Q&A: <video_name>, <frame_id>, "<answer>" (tối đa 100 ký tự)
 // 6. TRAKE: <video_name>, <frame_1>, <frame_2>, ..., <frame_N>
-// Lưu ý: Chỉ xuất những dòng có keyframe hợp lệ; answer trống thì để ""
 function buildCSVContent(mode, items) {
-  const safeItems = Array.from(items).slice(0, 100);
+  const exportMode = state.targetExportMode || mode || "kis";
+  const safeItems = Array.from(items);
   let lines = [];
 
-  if (mode === "vqa") {
-    safeItems.forEach((cand) => {
-      // Chỉ xuất khi có keyframe hợp lệ
-      if (!cand || !cand.video_id || cand.frame_id == null || cand.frame_id === "") return;
-      let ans = (cand.user_answer != null ? cand.user_answer : (cand.answer || "")).trim();
-      if (ans.length > 100) ans = ans.substring(0, 100);
-      // Double quote escaping for RFC 4180 / BTC rule
-      const escapedAns = ans.replace(/"/g, '""');
-      lines.push(`${cand.video_id},${cand.frame_id},"${escapedAns}"`);
-    });
-  } else if (mode === "trake") {
+  if (exportMode === "vqa") {
     safeItems.forEach((cand) => {
       if (!cand || !cand.video_id) return;
-      if (cand.type === "trake_chain" && Array.isArray(cand.frame_ids) && cand.frame_ids.length > 0) {
+      if (cand.type === "trake_chain" && Array.isArray(cand.chain_events)) {
+        cand.chain_events.forEach((ev) => {
+          let ans = (ev.user_answer != null ? ev.user_answer : (ev.answer || "")).trim();
+          if (typeof ans.normalize === "function") ans = ans.normalize("NFC");
+          if (ans.length > 100) ans = ans.substring(0, 100);
+          const escapedAns = ans.replace(/"/g, '""');
+          lines.push(`${cand.video_id},${ev.frame_id},"${escapedAns}"`);
+        });
+      } else if (cand.frame_id != null && cand.frame_id !== "") {
+        let ans = (cand.user_answer != null ? cand.user_answer : (cand.answer || "")).trim();
+        if (typeof ans.normalize === "function") ans = ans.normalize("NFC");
+        if (ans.length > 100) ans = ans.substring(0, 100);
+        const escapedAns = ans.replace(/"/g, '""');
+        lines.push(`${cand.video_id},${cand.frame_id},"${escapedAns}"`);
+      }
+    });
+  } else if (exportMode === "trake") {
+    // 1. Chuỗi TRAKE đã có
+    const trakeChains = safeItems.filter((c) => c && c.type === "trake_chain");
+    trakeChains.forEach((cand) => {
+      if (Array.isArray(cand.frame_ids) && cand.frame_ids.length > 0) {
         lines.push(`${cand.video_id},${cand.frame_ids.join(",")}`);
-      } else if (cand.events && Array.isArray(cand.events) && cand.events.length > 0) {
-        const frames = cand.events.map((e) => e.frame_id || cand.frame_id);
-        lines.push(`${cand.video_id},${frames.join(",")}`);
-      } else if (cand.event_frames && Array.isArray(cand.event_frames) && cand.event_frames.length > 0) {
-        lines.push(`${cand.video_id},${cand.event_frames.join(",")}`);
+      }
+    });
+
+    // 2. Các frame đơn lẻ: Tự động gom nhóm theo video_id và sắp xếp tăng dần theo thời gian/frame_id
+    const singleFrames = safeItems.filter((c) => c && c.type !== "trake_chain" && c.video_id && c.frame_id != null);
+    if (singleFrames.length > 0) {
+      const byVideo = new Map();
+      singleFrames.forEach((cand) => {
+        if (!byVideo.has(cand.video_id)) byVideo.set(cand.video_id, []);
+        byVideo.get(cand.video_id).push(cand);
+      });
+
+      byVideo.forEach((cands, vid) => {
+        const sorted = cands.sort((a, b) => (Number(a.timestamp_mid) || Number(a.frame_id)) - (Number(b.timestamp_mid) || Number(b.frame_id)));
+        const uniqueFrames = Array.from(new Set(sorted.map((c) => Number(c.frame_id))));
+        lines.push(`${vid},${uniqueFrames.join(",")}`);
+      });
+    }
+  } else {
+    // KIS Format: Xuất 1 frame/dòng (tự động bung chuỗi TRAKE nếu có)
+    safeItems.forEach((cand) => {
+      if (!cand || !cand.video_id) return;
+      if (cand.type === "trake_chain" && Array.isArray(cand.frame_ids)) {
+        cand.frame_ids.forEach((fid) => {
+          lines.push(`${cand.video_id},${fid}`);
+        });
       } else if (cand.frame_id != null && cand.frame_id !== "") {
         lines.push(`${cand.video_id},${cand.frame_id}`);
       }
     });
-  } else {
-    // KIS Format
-    safeItems.forEach((cand) => {
-      if (!cand || !cand.video_id || cand.frame_id == null || cand.frame_id === "") return;
-      lines.push(`${cand.video_id},${cand.frame_id}`);
-    });
   }
 
-  return lines.join("\r\n") + (lines.length > 0 ? "\r\n" : "");
+  lines = lines.slice(0, 100);
+  let res = lines.join("\r\n") + (lines.length > 0 ? "\r\n" : "");
+  if (typeof res.normalize === "function") res = res.normalize("NFC");
+  return res;
 }
 
 // --- Xuất lẻ 1 file CSV cho câu hỏi hiện tại ---
@@ -950,10 +1079,10 @@ function exportSingleCSV() {
 
   const queryIdInput = document.getElementById("query-id-input");
   let queryId = (queryIdInput ? queryIdInput.value.trim() : "") || getDefaultQueryId();
-  // Strip .csv if user accidentally typed it
   queryId = queryId.replace(/\.csv$/i, "");
 
-  const csvContent = buildCSVContent(state.mode, state.selectedItems.values());
+  const exportMode = state.targetExportMode || state.mode || "kis";
+  const csvContent = buildCSVContent(exportMode, state.selectedItems.values());
   const blob = new Blob(["\uFEFF" + csvContent], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -976,12 +1105,13 @@ function addCurrentCartToBatch() {
   let queryId = (queryIdInput ? queryIdInput.value.trim() : "") || getDefaultQueryId();
   queryId = queryId.replace(/\.csv$/i, "");
 
+  const exportMode = state.targetExportMode || state.mode || "kis";
   const itemsArr = Array.from(state.selectedItems.values());
-  const csvContent = buildCSVContent(state.mode, itemsArr);
+  const csvContent = buildCSVContent(exportMode, itemsArr);
 
   state.batchQueries.set(queryId, {
     queryId: queryId,
-    mode: state.mode,
+    mode: exportMode,
     count: itemsArr.length,
     csvString: csvContent,
     items: Array.from(state.selectedItems.entries()),
@@ -1032,6 +1162,7 @@ function renderBatchManagerUI() {
         <span class="batch-query-meta">${qData.count} dòng • ${qData.mode.toUpperCase()}${qData.queryText ? ` • "${qData.queryText.substring(0, 15)}..."` : ''}</span>
       </div>
       <div class="batch-item-actions">
+        <button class="batch-edit-btn" onclick="openDirectCSVEditor('${qid}')" title="Xem & sửa trực tiếp text CSV của file này">✏️ Sửa CSV</button>
         <button class="batch-load-btn" onclick="loadBatchQueryToCart('${qid}')" title="Nạp lại câu này và kết quả tìm kiếm gốc">👁️ Nạp lại</button>
         <button class="batch-remove-item-btn" onclick="removeBatchQuery('${qid}')" title="Xóa câu này khỏi gói">✕</button>
       </div>
@@ -1142,28 +1273,29 @@ async function packageSubmissionZip() {
   let totalFiles = 0;
   state.batchQueries.forEach((qData, qid) => {
     const filename = qid.endsWith(".csv") ? qid : `${qid}.csv`;
-    submissionFolder.file(filename, qData.csvString);
+    let csv = qData.csvString || "";
+    if (typeof csv.normalize === "function") csv = csv.normalize("NFC");
+    submissionFolder.file(filename, csv);
     totalFiles++;
   });
 
   try {
-    const zipBlob = await zip.generateAsync({
+    const content = await zip.generateAsync({
       type: "blob",
       compression: "DEFLATE",
       compressionOptions: { level: 9 },
     });
 
-    const url = URL.createObjectURL(zipBlob);
+    const url = URL.createObjectURL(content);
     const link = document.createElement("a");
     link.setAttribute("href", url);
-    const teamName = "team_submission";
-    link.setAttribute("download", `${teamName}_${Date.now()}.zip`);
+    link.setAttribute("download", "submission.zip");
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
 
-    alert(`🎉 ĐÓNG GÓI THÀNH CÔNG!\n\nĐã xuất file .zip chứa thư mục 'submission/' với ${totalFiles} file CSV chuẩn quy chế BTC sơ tuyển AIC 2026.\nBạn có thể nộp trực tiếp file zip này lên hệ thống chấm thi.`);
+    showToast(`🎉 Đã đóng gói thành công 'submission.zip' (${totalFiles} files CSV chuẩn NFC BTC)!`);
   } catch (err) {
     console.error("Lỗi đóng gói zip:", err);
     alert("❌ Đã xảy ra lỗi khi tạo file zip: " + err.message);
@@ -1176,6 +1308,146 @@ window.applyVqaAnswerToAll = applyVqaAnswerToAll;
 window.exportSingleCSV = exportSingleCSV;
 window.packageSubmissionZip = packageSubmissionZip;
 window.clearAllBatchQueries = clearAllBatchQueries;
+
+// --- TRÌNH CHỈNH SỬA CSV TRỰC TIẾP TRÊN WEB UI ---
+let currentEditingCsvQid = null;
+
+function setupCsvEditor() {
+  const openBtn = document.getElementById("open-csv-editor-btn");
+  const modal = document.getElementById("csv-editor-modal");
+  const closeBtn = document.getElementById("close-csv-editor-btn");
+  const copyBtn = document.getElementById("csv-editor-copy-btn");
+  const downloadBtn = document.getElementById("csv-editor-download-btn");
+  const saveBtn = document.getElementById("csv-editor-save-btn");
+  const textarea = document.getElementById("csv-editor-textarea");
+  const badge = document.getElementById("csv-editor-badge");
+
+  if (openBtn) {
+    openBtn.onclick = () => openDirectCSVEditor();
+  }
+
+  if (closeBtn && modal) {
+    closeBtn.onclick = () => {
+      modal.style.display = "none";
+      document.body.style.overflow = "";
+    };
+  }
+
+  if (textarea && badge) {
+    textarea.addEventListener("input", () => {
+      const lines = textarea.value.split("\n").map(l => l.trim()).filter(l => l.length > 0);
+      const isOver = lines.length > 100;
+      badge.textContent = `${lines.length} dòng ${isOver ? '⚠️ (Quá 100 dòng!)' : '(Chuẩn BTC)'}`;
+      badge.style.color = isOver ? "var(--spider-red)" : "#ffd700";
+      badge.style.borderColor = isOver ? "var(--spider-red)" : "var(--spider-yellow)";
+    });
+  }
+
+  if (copyBtn && textarea) {
+    copyBtn.onclick = () => {
+      let val = textarea.value;
+      if (typeof val.normalize === "function") val = val.normalize("NFC");
+      navigator.clipboard.writeText(val).then(() => {
+        showToast("📋 Đã copy toàn bộ nội dung CSV (chuẩn NFC) vào clipboard!");
+      });
+    };
+  }
+
+  if (downloadBtn && textarea) {
+    downloadBtn.onclick = () => {
+      const queryIdInput = document.getElementById("query-id-input");
+      let qid = currentEditingCsvQid || (queryIdInput ? queryIdInput.value.trim() : "") || getDefaultQueryId();
+      qid = qid.replace(/\.csv$/i, "");
+      let val = textarea.value;
+      if (typeof val.normalize === "function") val = val.normalize("NFC");
+      const blob = new Blob(["\uFEFF" + val], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.setAttribute("href", url);
+      link.setAttribute("download", `${qid}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      showToast(`📥 Đã tải file ${qid}.csv (chuẩn NFC) thành công!`);
+    };
+  }
+
+  if (saveBtn && textarea) {
+    saveBtn.onclick = () => {
+      let val = textarea.value.trim();
+      if (typeof val.normalize === "function") val = val.normalize("NFC");
+      const lines = val.split("\n").map(l => l.trim()).filter(l => l.length > 0);
+      if (currentEditingCsvQid && state.batchQueries.has(currentEditingCsvQid)) {
+        const item = state.batchQueries.get(currentEditingCsvQid);
+        item.csvString = val + (lines.length > 0 ? "\r\n" : "");
+        item.count = lines.length;
+        renderBatchManagerUI();
+        showToast(`💾 Đã cập nhật nội dung cho file '${currentEditingCsvQid}.csv'!`);
+      } else {
+        // Lưu từ giỏ hiện tại vào batch
+        const queryIdInput = document.getElementById("query-id-input");
+        let qid = (queryIdInput ? queryIdInput.value.trim() : "") || getDefaultQueryId();
+        qid = qid.replace(/\.csv$/i, "");
+        const exportMode = state.targetExportMode || state.mode || "kis";
+        state.batchQueries.set(qid, {
+          queryId: qid,
+          mode: exportMode,
+          count: lines.length,
+          csvString: val + (lines.length > 0 ? "\r\n" : ""),
+          items: Array.from(state.selectedItems.entries()),
+          queryText: state.lastQuery || (queryInput ? queryInput.value.trim() : ""),
+          searchMode: state.searchMode,
+          resultsCache: [...state.rawResults],
+          timestamp: new Date().toLocaleTimeString(),
+        });
+        renderBatchManagerUI();
+        showToast(`💾 Đã lưu câu '${qid}.csv' với nội dung vừa sửa vào gói nộp bài!`);
+      }
+      if (modal) {
+        modal.style.display = "none";
+        document.body.style.overflow = "";
+      }
+    };
+  }
+}
+
+window.openDirectCSVEditor = function(targetQid = null) {
+  const modal = document.getElementById("csv-editor-modal");
+  const title = document.getElementById("csv-editor-title");
+  const textarea = document.getElementById("csv-editor-textarea");
+  const badge = document.getElementById("csv-editor-badge");
+  if (!modal || !textarea) return;
+
+  currentEditingCsvQid = targetQid;
+  let content = "";
+  let displayTitle = "";
+
+  if (targetQid && state.batchQueries.has(targetQid)) {
+    const qData = state.batchQueries.get(targetQid);
+    content = qData.csvString || "";
+    displayTitle = `✏️ SỬA CSV: ${targetQid}.csv`;
+  } else {
+    const queryIdInput = document.getElementById("query-id-input");
+    const qid = (queryIdInput ? queryIdInput.value.trim() : "") || getDefaultQueryId();
+    displayTitle = `✏️ SỬA CSV: ${qid.replace(/\.csv$/i, "")}.csv`;
+    content = buildCSVContent(state.targetExportMode || state.mode, state.selectedItems.values());
+  }
+
+  if (title) title.textContent = displayTitle;
+  textarea.value = content;
+
+  const lines = content.split("\n").map(l => l.trim()).filter(l => l.length > 0);
+  const isOver = lines.length > 100;
+  if (badge) {
+    badge.textContent = `${lines.length} dòng ${isOver ? '⚠️ (Quá 100 dòng!)' : '(Chuẩn BTC)'}`;
+    badge.style.color = isOver ? "var(--spider-red)" : "#ffd700";
+    badge.style.borderColor = isOver ? "var(--spider-red)" : "var(--spider-yellow)";
+  }
+
+  document.body.style.overflow = "hidden";
+  modal.style.display = "flex";
+};
 
 // Lightbox Modal — phát video tương tác ngay trong khung ảnh
 let currentLightboxCand = null;
@@ -1318,29 +1590,57 @@ function buildVietnameseCharRegex(term) {
   return pat;
 }
 
-// --- Tạo danh sách regex pattern thông minh hỗ trợ Stemming, Số nhiều & Song ngữ ---
+// --- Tạo regex pattern tiếng Việt chuẩn xác từng từ & chuẩn dấu ---
+function buildVietnameseWordRegex(term) {
+  const norm = term.normalize("NFC").trim();
+  const unaccent = removeVietnameseDiacritics(norm);
+
+  // Nếu từ có dấu (ví dụ: Khánh, Hòa, học, xe) -> Khớp chính xác đúng từ có dấu đó
+  if (norm !== unaccent) {
+    let escaped = norm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // Hỗ trợ cả 2 kiểu đặt dấu thanh tiếng Việt (hòa <-> hoà, thủy <-> thuỷ)
+    escaped = escaped
+      .replace(/([oôơ])([aăâáàảãạắằẳẵặấầẩẫậ])/gi, '($1$2|$2$1)')
+      .replace(/([uư])([yýỳỷỹỵ])/gi, '($1$2|$2$1)');
+    return escaped;
+  } else {
+    // Nếu từ không dấu -> hỗ trợ linh hoạt cả có dấu lẫn không dấu
+    return buildVietnameseCharRegex(norm);
+  }
+}
+
+// --- Tạo danh sách regex pattern thông minh hỗ trợ Stemming, Số nhiều, Dấu câu & Song ngữ ---
 function extractSearchPatterns(query) {
   if (!query || typeof query !== "string" || !query.trim()) return [];
-  const normQuery = query.normalize("NFC").trim().toLowerCase();
-  const rawTerms = normQuery.split(/\s+/).filter(t => t.length >= 2);
+  
+  // 1. Tự động làm sạch các dấu câu dính liền từ
+  const cleanQuery = query
+    .normalize("NFC")
+    .replace(/[.,?!:;()"'“”/…—\-_+*&^%$#@!~`\[\]{}\\\/]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
 
+  if (!cleanQuery) return [];
+
+  const rawTerms = cleanQuery.split(/\s+/).filter(t => t.length >= 2);
   const matchedEnTerms = new Set();
   const matchedViTerms = new Set();
 
-  // 1. Nguyên câu / cụm từ gốc
-  if (normQuery.length >= 3) {
-    matchedViTerms.add(normQuery);
+  // Nguyên cụm từ gốc sạch
+  if (cleanQuery.length >= 3) {
+    matchedViTerms.add(cleanQuery);
   }
 
-  // 2. Tra cứu từ điển Song ngữ 2 chiều (Vi <-> En)
+  // 2. Tra cứu từ điển Song ngữ 2 chiều (Vi <-> En) & từ đơn
   rawTerms.forEach(term => {
     const unaccent = removeVietnameseDiacritics(term);
     if (STOP_WORDS.has(unaccent) || STOP_WORDS.has(term)) return;
 
     // Tìm trong BILINGUAL_CONCEPTS
     BILINGUAL_CONCEPTS.forEach(concept => {
-      const matchVi = concept.vi.some(v => v === term || v === normQuery || normQuery.includes(v));
-      const matchEn = concept.en.some(e => e === term || normQuery.includes(e));
+      const matchVi = concept.vi.some(v => v === term || v === cleanQuery || cleanQuery.includes(v));
+      const matchEn = concept.en.some(e => e === term || cleanQuery.includes(e));
 
       if (matchVi || matchEn) {
         concept.en.forEach(e => matchedEnTerms.add(e));
@@ -1357,26 +1657,24 @@ function extractSearchPatterns(query) {
 
   const patterns = [];
 
-  // 3. Xây dựng pattern cho Tiếng Anh có Stemming & Suffix (cat -> cat, cats; walk -> walking, walks, walked)
+  // 3. Pattern Tiếng Anh có Stemming & Suffix (ranh giới từ Unicode)
   matchedEnTerms.forEach(enTerm => {
     if (enTerm.length < 2 || STOP_WORDS.has(enTerm.toLowerCase())) return;
     const escaped = enTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    // Hỗ trợ số nhiều regular (s/es) và chia thì (ing/ed/er/ers)
-    // Nhưng bắt buộc chặn ranh giới từ để không match nhầm vào từ không liên quan
     if (enTerm.length >= 3) {
-      patterns.push(`\\b${escaped}(?:s|es|ed|ing|er|ers)?(?=[^a-zA-Z0-9]|$)`);
+      patterns.push(`(?<=^|[^\\p{L}\\p{N}])(?:${escaped}(?:s|es|ed|ing|er|ers)?)(?=[^\\p{L}\\p{N}]|$)`);
     } else {
-      patterns.push(`\\b${escaped}\\b`);
+      patterns.push(`(?<=^|[^\\p{L}\\p{N}])${escaped}(?=[^\\p{L}\\p{N}]|$)`);
     }
   });
 
-  // 4. Xây dựng pattern cho Tiếng Việt với ranh giới từ Unicode
+  // 4. Pattern Tiếng Việt với ranh giới từ Unicode & bảo toàn thanh dấu
   matchedViTerms.forEach(viTerm => {
     if (viTerm.length < 2) return;
     const unaccent = removeVietnameseDiacritics(viTerm);
     if (STOP_WORDS.has(unaccent) || STOP_WORDS.has(viTerm)) return;
-    const charPat = buildVietnameseCharRegex(viTerm);
-    patterns.push(`(?<=^|[\\s.,!?;:\\-()"'“/])(?:${charPat})(?=[\\s.,!?;:\\-()"'”/]|$|(?=[^a-zA-Z0-9]))`);
+    const charPat = buildVietnameseWordRegex(viTerm);
+    patterns.push(`(?<=^|[^\\p{L}\\p{N}])(?:${charPat})(?=[^\\p{L}\\p{N}]|$)`);
   });
 
   return Array.from(new Set(patterns));
@@ -1403,10 +1701,15 @@ function highlightMatchedText(fullText, query) {
   patterns.sort((a, b) => b.length - a.length);
 
   try {
-    const regex = new RegExp(`(${patterns.join("|")})`, "gi");
+    const regex = new RegExp(`(${patterns.join("|")})`, "giu");
     return escapeHtml(normalizedText).replace(regex, (match) => `<mark class="highlight-match">${match}</mark>`);
   } catch (err) {
-    return escapeHtml(normalizedText);
+    try {
+      const regex = new RegExp(`(${patterns.join("|")})`, "gi");
+      return escapeHtml(normalizedText).replace(regex, (match) => `<mark class="highlight-match">${match}</mark>`);
+    } catch (e2) {
+      return escapeHtml(normalizedText);
+    }
   }
 }
 
@@ -1441,6 +1744,7 @@ function showLightbox(cand, imgUrl) {
 
   loadLightboxVideo(cand, imgUrl);
 
+  document.body.style.overflow = "hidden";
   modal.style.display = "flex";
 }
 
@@ -1528,6 +1832,7 @@ async function loadLightboxVideo(cand, imgUrl) {
 }
 
 function closeLightboxVideo() {
+  document.body.style.overflow = "";
   modalVideoEl.pause();
   modalVideoEl.removeAttribute("src");
   modalVideoEl.load();
@@ -1573,6 +1878,20 @@ if (modalEl) {
   modalVideoEl.addEventListener("seeked", updateVideoInfoLabel);
   modalVideoEl.addEventListener("pause", updateVideoInfoLabel);
   modalVideoEl.addEventListener("play", updateVideoInfoLabel);
+
+  // Chặn triệt để double-seek và scroll từ trình phát native khi focus nằm trên video
+  modalVideoEl.addEventListener("keydown", (e) => {
+    if (["ArrowLeft", "ArrowRight", "Space", " "].includes(e.key) || e.code === "Space") {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  });
+  modalVideoEl.addEventListener("keyup", (e) => {
+    if (["Space", " "].includes(e.key) || e.code === "Space") {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  });
 
   // Về Frame Chính: quay lại đúng thời điểm frame gốc đã tìm được
   document.getElementById("video-goto-main-btn").addEventListener("click", (e) => {

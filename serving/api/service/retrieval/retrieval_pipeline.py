@@ -381,12 +381,13 @@ async def _run_trake(
             while len(sub_events) < n_events:
                 sub_events.append(request.query)
 
+        sub_event_top_k = max(request.top_k * 3, 150)
         tasks = [
             text_query.process(
                 query_input=text_query.TextQueryInput(
                     raw_query=ev_text,
                     task_type=TaskType.KIS,
-                    top_k=request.top_k,
+                    top_k=sub_event_top_k,
                 ),
                 qdrant_client=qdrant_client,
                 text_embedder=text_embedder,
@@ -400,12 +401,13 @@ async def _run_trake(
         # Thu thập top video_ids để enrich
         candidate_vids: set[str] = set()
         for cand_list in event_candidates_list:
-            for c in cand_list[:20]:
+            for c in cand_list[:50]:
                 candidate_vids.add(c.video_id)
 
+        max_enrich_vids = max(request.top_k * 2, 60)
         enrich_tasks = [
             qdrant_repo.get_keyframes_by_video_id(qdrant_client, v_id)
-            for v_id in list(candidate_vids)[:15]
+            for v_id in list(candidate_vids)[:max_enrich_vids]
         ]
         enriched_results = await asyncio.gather(*enrich_tasks)
         for video_kfs in enriched_results:
@@ -418,16 +420,22 @@ async def _run_trake(
 
         aligned_chains = temporal_aligner.align(
             event_candidates=event_candidates_list,
-            max_results=request.top_k,
+            max_results=request.top_k * 2,
         )
         results = aligned_chains
 
-    if not results:
-        # Fallback grouping by video_id
-        candidates = base_res.candidates
+    if not results or len(results) < request.top_k:
+        # Fallback grouping by video_id to ensure top-K is fully populated
+        all_pool: list[CandidateResult] = []
+        if 'event_candidates_list' in locals() and event_candidates_list:
+            for c_list in event_candidates_list:
+                all_pool.extend(c_list)
+        else:
+            all_pool.extend(base_res.candidates)
+
         n = request.num_events
         by_video: dict[str, list[CandidateResult]] = {}
-        for cand in candidates:
+        for cand in all_pool:
             by_video.setdefault(cand.video_id, []).append(cand)
 
         for v_id, v_cands in by_video.items():
@@ -440,7 +448,7 @@ async def _run_trake(
                     uniq_v_cands.append(c)
 
             if len(uniq_v_cands) >= n:
-                for i in range(0, len(uniq_v_cands) - n + 1):
+                for i in range(0, min(len(uniq_v_cands) - n + 1, 5)):
                     results.append(uniq_v_cands[i : i + n])
 
     # Final Guard: Enforce strict single video & monotonic timestamps

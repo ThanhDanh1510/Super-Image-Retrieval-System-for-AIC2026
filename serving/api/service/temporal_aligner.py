@@ -132,14 +132,20 @@ def align(
                     DP[i, t] = S[i, t] + running_max - lambda_penalty * t
                     parent[i, t] = best_tau
 
-        # Backtrack from the best terminal keyframe in the last event row
-        best_t_end = int(np.argmax(DP[num_events - 1]))
-        best_score = float(DP[num_events - 1, best_t_end])
+        # Backtrack from candidate terminal keyframes in the last event row
+        top_t_ends = np.argsort(DP[num_events - 1])[::-1]
+        chains_from_this_video = 0
+        seen_frame_sets = set()
 
-        valid_chain_found = False
-        if best_score > -np.inf:
+        for best_t_end in top_t_ends[:10]:
+            if chains_from_this_video >= 3:
+                break
+            best_dp_score = float(DP[num_events - 1, best_t_end])
+            if best_dp_score <= -np.inf:
+                continue
+
             chain_indices = [0] * num_events
-            curr_t = best_t_end
+            curr_t = int(best_t_end)
             valid = True
             for i in range(num_events - 1, -1, -1):
                 chain_indices[i] = curr_t
@@ -152,11 +158,23 @@ def align(
             if valid:
                 chain_candidates = [unique_kfs[k_idx] for k_idx in chain_indices]
                 ts_list = [round(c.timestamp_mid, 2) for c in chain_candidates]
-                if len(set(ts_list)) == num_events and ts_list == sorted(ts_list):
-                    valid_chains.append((best_score, chain_candidates))
-                    valid_chain_found = True
+                frame_tuple = tuple(c.frame_id for c in chain_candidates)
+                if len(set(ts_list)) == num_events and ts_list == sorted(ts_list) and frame_tuple not in seen_frame_sets:
+                    seen_frame_sets.add(frame_tuple)
+                    # Chấm điểm đồng thuận đa sự kiện (All-Event Consensus Scoring):
+                    event_scores = [float(S[i, chain_indices[i]]) for i in range(num_events)]
+                    matched_count = sum(1 for sc in event_scores if sc > 0.01)
+                    avg_sim = sum(event_scores) / float(num_events)
+                    consensus_ratio = float(matched_count) / float(num_events)
+                    span_penalty = lambda_penalty * float(chain_indices[-1] - chain_indices[0])
 
-        if not valid_chain_found:
+                    # Phạt mạnh các chuỗi chỉ có 1 sự kiện khớp và các sự kiện khác bằng 0
+                    chain_score = (avg_sim * (consensus_ratio ** 2)) - span_penalty
+
+                    valid_chains.append((chain_score, chain_candidates))
+                    chains_from_this_video += 1
+
+        if chains_from_this_video == 0:
             # Fallback for video with T >= num_events: select N keyframes with strictly increasing timestamps
             indices = [int(round(i * (T - 1) / (num_events - 1))) for i in range(num_events)]
             for i in range(1, num_events):

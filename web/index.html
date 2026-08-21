@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;900&family=Roboto+Mono:wght@500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/ui/style.css?v=2026.8" />
+  <link rel="stylesheet" href="/ui/style.css?v=2026.13" />
   <!-- JSZip for 100% compliant client-side submission packaging -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 </head>
@@ -157,6 +157,24 @@
             <button id="add-to-batch-btn" class="spider-batch-add-btn" title="Lưu câu này vào gói đề thi">➕ Lưu Gói</button>
           </div>
         </div>
+        <!-- Target Export Mode Selector (Chuyển đổi linh hoạt KIS / Q&A / TRAKE) -->
+        <div class="target-format-box">
+          <label class="query-config-label">🎯 Định dạng xuất nộp:</label>
+          <div class="target-format-radios">
+            <label class="format-radio-item" title="Xuất 1 frame/dòng (video,frame)">
+              <input type="radio" name="target-export-mode" value="kis" checked />
+              <span>KIS</span>
+            </label>
+            <label class="format-radio-item" title="Xuất frame kèm đáp án (video,frame,answer)">
+              <input type="radio" name="target-export-mode" value="vqa" />
+              <span>Q&A</span>
+            </label>
+            <label class="format-radio-item" title="Xuất chuỗi events cùng video (video,f1,f2,...,fN)">
+              <input type="radio" name="target-export-mode" value="trake" />
+              <span>TRAKE</span>
+            </label>
+          </div>
+        </div>
         <!-- VQA Global / Batch Answer Input (chỉ hiện khi ở tab VQA) -->
         <div id="vqa-bulk-box" class="vqa-bulk-box" style="display: none;">
           <label for="vqa-bulk-answer-input" class="query-config-label">📝 Đáp án chung cho cả gói (tùy chọn):</label>
@@ -187,6 +205,9 @@
 
       <div class="sidebar-footer">
         <div class="export-actions-col">
+          <button id="open-csv-editor-btn" class="spider-export-btn edit-btn" title="Mở trình xem & sửa nội dung CSV trực tiếp trên Web UI">
+            ✏️ Xem & Sửa CSV Trực Tiếp
+          </button>
           <button id="export-csv-btn" class="spider-export-btn secondary">
             📥 Xuất Lẻ CSV (<span id="btn-query-id-label">query-1-kis.csv</span>)
           </button>
@@ -197,6 +218,30 @@
       </div>
     </aside>
 
+  </div>
+
+  <!-- Direct In-App CSV Editor Modal -->
+  <div id="csv-editor-modal" class="lightbox-modal csv-editor-modal" style="display: none;">
+    <div class="csv-editor-content">
+      <div class="csv-editor-header">
+        <div class="csv-editor-title-group">
+          <h3 id="csv-editor-title">✏️ TRÌNH SỬA FILE CSV</h3>
+          <span id="csv-editor-badge" class="csv-editor-badge">0 dòng (Chuẩn BTC)</span>
+        </div>
+        <div class="csv-editor-actions">
+          <button id="csv-editor-copy-btn" class="icon-action-btn" title="Copy toàn bộ nội dung CSV vào clipboard">📋 Copy CSV</button>
+          <button id="csv-editor-download-btn" class="icon-action-btn secondary" title="Tải file CSV này về máy">📥 Tải CSV</button>
+          <button id="csv-editor-save-btn" class="icon-action-btn primary" title="Lưu các chỉnh sửa này vào Gói Nộp Bài">💾 Lưu Thay Đổi</button>
+          <button id="close-csv-editor-btn" class="close-btn" title="Đóng trình sửa CSV">✕</button>
+        </div>
+      </div>
+      <div class="csv-editor-body">
+        <div class="csv-editor-tip">
+          💡 <strong>Quy chuẩn BTC:</strong> Không có dòng header, Delimiter dấu phẩy <code>,</code>, tối đa 100 dòng. Bạn có thể sửa trực tiếp ở đây!
+        </div>
+        <textarea id="csv-editor-textarea" class="csv-editor-textarea" spellcheck="false" placeholder="Nội dung CSV..."></textarea>
+      </div>
+    </div>
   </div>
 
   <!-- Image Lightbox Modal (video phát trực tiếp ngay trong khung ảnh kèm nút Next/Prev) -->
@@ -247,6 +292,6 @@
     </div>
   </div>
 
-  <script src="/ui/app.js?v=2026.8"></script>
+  <script src="/ui/app.js?v=2026.13"></script>
 </body>
 </html>

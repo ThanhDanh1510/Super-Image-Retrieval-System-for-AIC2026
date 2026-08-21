@@ -90,8 +90,14 @@ async def process(
 
     sub_events: list[str] | None = None
     if query_input.task_type == TaskType.TRAKE:
-        sub_events = _split_events(en_query)
-        logger.info(f"TRAKE: tách được {len(sub_events)} sub-events từ query.")
+        try:
+            sub_events = _split_events(query_input.raw_query)
+        except Exception:
+            try:
+                sub_events = _split_events(vi_query)
+            except Exception:
+                sub_events = _split_events(en_query)
+        logger.info(f"TRAKE: tách được {len(sub_events)} sub-events từ query (giữ nguyên tiếng Việt gốc).")
 
     # Tối ưu hóa: Nếu chỉ tìm kiếm bằng OCR hoặc ASR, không cần chạy model Qwen2 để sinh embedding text
     # vì hệ thống sẽ sử dụng cơ chế so khớp từ khóa văn bản thuần túy (MatchText).

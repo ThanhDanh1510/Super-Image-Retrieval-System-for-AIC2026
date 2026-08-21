@@ -1,4 +1,5 @@
 import os
+import re
 import torch
 import pandas as pd
 from rank_bm25 import BM25Okapi
@@ -114,10 +115,14 @@ class HybridSearchEngine:
             r_desc = torch.zeros(num_items, device=self.device, dtype=torch.float32)
             r_desc[sorted_indices] = torch.arange(1, num_items + 1, device=self.device, dtype=torch.float32)
 
+        def clean_tokens(text: str) -> list[str]:
+            cleaned = re.sub(r'[.,?!:;()\"\'“”/…—\-_+*&^%$#@!~`\[\]{}\\\/]', ' ', text.lower())
+            return [t for t in cleaned.split() if len(t) > 0]
+
         # 2. Sparse OCR Stream (BM25Okapi)
         r_ocr = None
         if w_ocr > 0 or lam > 0:
-            tokens = query_vi.lower().split()
+            tokens = clean_tokens(query_vi)
             bm25_scores = self.bm25_ocr.get_scores(tokens)
             raw_ocr = torch.from_numpy(bm25_scores).to(self.device, dtype=torch.float32)
             norm_ocr = self._normalize(raw_ocr)
@@ -129,7 +134,7 @@ class HybridSearchEngine:
 
         # 3. Sparse ASR Stream (BM25Okapi)
         if w_asr > 0:
-            tokens = query_vi.lower().split()
+            tokens = clean_tokens(query_vi)
             bm25_scores = self.bm25_asr.get_scores(tokens)
             raw_asr = torch.from_numpy(bm25_scores).to(self.device, dtype=torch.float32)
             norm_asr = self._normalize(raw_asr)

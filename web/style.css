@@ -737,6 +737,74 @@ body {
   box-shadow: 0 0 10px var(--spider-blue-glow);
 }
 
+/* Target Export Format Selector */
+.target-format-box {
+  margin-top: 6px;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--card-border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.target-format-radios {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.format-radio-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--text-main);
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--card-border);
+  padding: 3px 8px;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+}
+
+.format-radio-item:hover {
+  border-color: var(--spider-blue);
+  background: rgba(0, 229, 255, 0.1);
+}
+
+.format-radio-item input[type="radio"] {
+  accent-color: var(--spider-blue);
+  cursor: pointer;
+}
+
+.format-radio-item input[type="radio"]:checked + span {
+  color: var(--spider-blue);
+  text-shadow: 0 0 6px var(--spider-blue-glow);
+}
+
+/* Add KIS Button on individual TRAKE Event */
+.add-event-kis-btn {
+  background: rgba(0, 229, 255, 0.12);
+  border: 1px solid var(--spider-blue);
+  color: #00e5ff;
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.add-event-kis-btn:hover {
+  background: var(--spider-blue);
+  color: #000;
+  box-shadow: 0 0 8px var(--spider-blue-glow);
+}
+
 /* VQA Bulk Answer Input Box */
 .vqa-bulk-box {
   margin-top: 4px;
@@ -1283,11 +1351,11 @@ body {
   font-size: 1.1rem;
   line-height: 1.7;
   font-family: var(--font-code);
-  color: var(--spider-yellow);
+  color: #e2e8f0;
   white-space: pre-wrap;
   word-break: break-word;
   padding-right: 8px;
-  background: rgba(8, 11, 17, 0.9);
+  background: rgba(8, 11, 17, 0.95);
   padding: 16px;
   border-radius: 8px;
   border: 1px solid var(--card-border);
@@ -1295,14 +1363,145 @@ body {
 
 /* Highlight Matched Query Keywords in OCR/ASR/Descriptions */
 mark.highlight-match {
-  background: rgba(255, 215, 0, 0.35);
-  color: #ffd700;
+  background: rgba(245, 158, 11, 0.35);
+  color: #fef08a;
   font-weight: 800;
-  padding: 1px 4px;
+  padding: 2px 6px;
   border-radius: 4px;
-  border-bottom: 2px solid #ffd700;
-  box-shadow: 0 0 10px rgba(255, 215, 0, 0.45);
-  text-shadow: 0 0 4px rgba(0, 0, 0, 0.8);
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.4);
+  border: 1px solid rgba(245, 158, 11, 0.5);
+  display: inline-block;
+}
+
+/* Direct CSV Editor Modal */
+.csv-editor-modal {
+  z-index: 500; /* Higher than Lightbox & Text Zoom */
+}
+
+.csv-editor-content {
+  background: var(--card-bg);
+  border: 2px solid var(--spider-yellow);
+  border-radius: 12px;
+  padding: 20px 24px;
+  max-width: 900px;
+  width: 90%;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 0 50px rgba(255, 215, 0, 0.25);
+  cursor: default;
+}
+
+.csv-editor-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--card-border);
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+}
+
+.csv-editor-title-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.csv-editor-title-group h3 {
+  color: var(--spider-yellow);
+  font-size: 1.15rem;
+  margin: 0;
+}
+
+.csv-editor-badge {
+  background: rgba(255, 215, 0, 0.15);
+  border: 1px solid var(--spider-yellow);
+  color: #ffd700;
+  font-family: var(--font-code);
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 6px;
+}
+
+.csv-editor-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.csv-editor-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+}
+
+.csv-editor-tip {
+  font-size: 0.8rem;
+  color: var(--text-sub);
+  background: rgba(0, 0, 0, 0.3);
+  padding: 6px 12px;
+  border-radius: 6px;
+  border-left: 3px solid var(--spider-yellow);
+}
+
+.csv-editor-textarea {
+  flex: 1;
+  min-height: 380px;
+  background: #090d16;
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  padding: 14px 16px;
+  color: #00e5ff;
+  font-family: var(--font-code);
+  font-size: 0.95rem;
+  line-height: 1.6;
+  resize: vertical;
+  outline: none;
+  white-space: pre;
+  overflow-wrap: normal;
+  overflow-x: auto;
+  transition: all 0.2s ease;
+}
+
+.csv-editor-textarea:focus {
+  border-color: var(--spider-yellow);
+  box-shadow: 0 0 16px rgba(255, 215, 0, 0.25);
+  background: #0d1320;
+}
+
+.spider-export-btn.edit-btn {
+  background: rgba(255, 215, 0, 0.12);
+  border: 1px solid #ffd700;
+  color: #ffd700;
+  font-size: 0.82rem;
+  padding: 7px 10px;
+  font-weight: 700;
+}
+
+.spider-export-btn.edit-btn:hover {
+  background: #ffd700;
+  color: #000;
+  box-shadow: 0 0 14px rgba(255, 215, 0, 0.4);
+}
+
+.batch-edit-btn {
+  background: rgba(255, 215, 0, 0.12);
+  border: 1px solid var(--spider-yellow);
+  color: var(--spider-yellow);
+  font-size: 0.72rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: all 0.2s;
+}
+
+.batch-edit-btn:hover {
+  background: var(--spider-yellow);
+  color: #000;
 }
 
 /* Video phát trực tiếp ngay trong khung ảnh của Lightbox Modal */
