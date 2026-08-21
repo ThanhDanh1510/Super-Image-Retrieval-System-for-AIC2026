@@ -332,9 +332,18 @@ def _split_events(query: str) -> list[str]:
     if len(matches) >= 2:
         return [m.strip(" .,;-") for m in matches if m.strip(" .,;-")]
 
-    # 1b. Newline split (có số dòng >= 2)
+    # 1c. Newline split (có số dòng >= 2)
     if "\n" in query:
-        lines = [line.strip(" .,;-•*") for line in query.split("\n") if line.strip(" .,;-•*")]
+        raw_lines = [line.strip(" .,;-•*") for line in query.split("\n") if line.strip(" .,;-•*")]
+        lines = []
+        for l in raw_lines:
+            cleaned = re.sub(
+                r"^(?:then|sau đó|tiếp theo|next|after that|followed by|và|and|rồi|bắt đầu bằng|bắt đầu với|bắt đầu|cuối cùng|finally)\s+",
+                "",
+                l,
+                flags=re.IGNORECASE,
+            ).strip(" .,;-•*")
+            lines.append(cleaned if cleaned else l)
         if len(lines) >= 2:
             return lines
 
