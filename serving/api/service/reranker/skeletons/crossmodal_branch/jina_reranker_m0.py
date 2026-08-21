@@ -66,28 +66,32 @@ def score(
     try:
         from pathlib import Path
         from PIL import Image
+        from concurrent.futures import ThreadPoolExecutor
 
         model = model_bundle["model"]
         data_dir = Path(keyframes_root_dir) if keyframes_root_dir else None
 
-        # Chuẩn bị ảnh và text pairs
-        sentence_pairs = []
-        for c in candidates:
+        def _load_single_img(cand: CandidateResult):
             img_path = resolve_keyframe_path(
-                video_id=c.video_id,
-                frame_id=c.frame_id,
-                keyframe_path=c.keyframe_path,
+                video_id=cand.video_id,
+                frame_id=cand.frame_id,
+                keyframe_path=cand.keyframe_path,
                 data_dir=data_dir,
             )
             if img_path and img_path.exists():
                 try:
                     img = Image.open(img_path).convert("RGB")
-                    img.thumbnail((512, 512))
-                    sentence_pairs.append([query, img])
+                    img.thumbnail((384, 384))
+                    return img
                 except Exception:
-                    sentence_pairs.append([query, None])
-            else:
-                sentence_pairs.append([query, None])
+                    return None
+            return None
+
+        # Đọc và resize song song 25 ảnh keyframe trên đa luồng CPU
+        with ThreadPoolExecutor(max_workers=min(8, len(candidates))) as executor:
+            loaded_imgs = list(executor.map(_load_single_img, candidates))
+
+        sentence_pairs = [[query, img] for img in loaded_imgs]
 
         # Batch compute score bằng Jina Reranker model
         if hasattr(model, "compute_score"):

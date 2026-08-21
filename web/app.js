@@ -215,9 +215,20 @@ function setupControls() {
   const jinaCheckbox = document.getElementById("use-jina-checkbox");
   if (jinaCheckbox) {
     jinaCheckbox.checked = state.useJinaM0;
-    jinaCheckbox.addEventListener("change", (e) => {
+    jinaCheckbox.addEventListener("change", async (e) => {
       state.useJinaM0 = e.target.checked;
       updateRerankerStatus();
+      if (state.useJinaM0) {
+        showToast("🚀 Đang nạp sẵn Jina Reranker M0 lên GPU trong background...");
+        try {
+          const resp = await fetch(`${API_BASE}/api/v1/models/warmup/jina`, { method: "POST" });
+          if (resp.ok) {
+            showToast("✅ Jina Reranker M0 đã sẵn sàng trên GPU!");
+          }
+        } catch (err) {
+          console.warn("Lỗi warmup Jina M0:", err);
+        }
+      }
     });
   }
 }

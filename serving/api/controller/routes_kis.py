@@ -303,3 +303,23 @@ async def search_hybrid(
     except Exception as err:
         logger.error(f"Error in hybrid search: {err}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(err))
+
+
+@router.post(
+    "/models/warmup/jina",
+    summary="Warmup ngầm Jina Reranker M0 lên GPU",
+)
+async def warmup_jina_model(
+    model_registry=Depends(get_model_registry),
+):
+    """
+    Nạp sẵn Jina Reranker M0 lên GPU trong background khi người dùng gạt toggle trên UI,
+    giúp lần tìm kiếm KIS/VQA đầu tiên không bị delay do load weights.
+    """
+    try:
+        await model_registry.aget_jina_m0()
+        return {"status": "ok", "message": "Jina Reranker M0 đã được nạp sẵn lên GPU"}
+    except Exception as e:
+        logger.error(f"Error warming up Jina M0: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
