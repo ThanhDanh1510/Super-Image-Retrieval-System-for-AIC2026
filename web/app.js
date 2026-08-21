@@ -227,8 +227,23 @@ let isVideoInteractMode = false;
 // --- Keyboard Shortcuts (Lightbox Navigation, Video Space Control & Copy on Hover) ---
 function setupKeyboardShortcuts() {
   function isTypingInTextField() {
+    const csvModal = document.getElementById("csv-editor-modal");
+    const isCsvModalOpen = csvModal && csvModal.style.display !== "none";
+    if (isCsvModalOpen) return true;
+
+    const modal = document.getElementById("lightbox-modal");
+    const isLightboxOpen = modal && modal.style.display !== "none";
+
     const el = document.activeElement;
     if (!el) return false;
+
+    // Khi Lightbox Modal đang mở, các input ở trang chính bên dưới modal không được coi là active
+    if (isLightboxOpen) {
+      if (el.id === "query-input" || el.id === "query-id-input" || el.id === "vqa-bulk-answer-input" || el.tagName === "BODY" || !modal.contains(el)) {
+        return false;
+      }
+    }
+
     const tag = el.tagName;
     if (tag === "TEXTAREA") return true;
     if (tag === "INPUT") {
@@ -243,7 +258,8 @@ function setupKeyboardShortcuts() {
     "keydown",
     (e) => {
       // Phím Space: Vô hiệu hóa triệt để hành vi cuộn trang mặc định trên toàn trang khi không gõ text
-      if (e.code === "Space" || e.key === " " || e.key === "Spacebar" || e.keyCode === 32 || e.which === 32) {
+      const isSpace = e.code === "Space" || e.key === " " || e.key === "Spacebar" || e.keyCode === 32 || e.which === 32;
+      if (isSpace) {
         if (!isTypingInTextField()) {
           e.preventDefault();
           e.stopPropagation();
@@ -251,7 +267,7 @@ function setupKeyboardShortcuts() {
 
           const modal = document.getElementById("lightbox-modal");
           const isModalOpen = modal && modal.style.display !== "none";
-          if (isModalOpen && modalVideoEl && modalVideoEl.src) {
+          if (isModalOpen && modalVideoEl) {
             if (modalVideoEl.paused) {
               modalVideoEl.play().catch(() => {});
               showToast("▶️ Video đang phát (← / → tua 3s, A / D đổi ảnh)");
@@ -276,15 +292,19 @@ function setupKeyboardShortcuts() {
         }
 
         if (!isTypingInTextField()) {
-          // Phím A / D hoặc [ / ]: Chuyển qua lại giữa các ảnh kết quả
-          if (e.key === "a" || e.key === "A" || e.key === "[" || e.code === "KeyA") {
+          // Phím A hoặc [ (kèm biến thể Unikey): Chuyển qua ảnh kết quả trước
+          const isKeyA = e.code === "KeyA" || e.key === "a" || e.key === "A" || e.key === "â" || e.key === "ă" || e.key === "á" || e.key === "à" || e.key === "[";
+          if (isKeyA) {
             e.preventDefault();
             e.stopPropagation();
             e.stopImmediatePropagation();
             showLightboxAt(state.currentLightboxIndex - 1);
             return false;
           }
-          if (e.key === "d" || e.key === "D" || e.key === "]" || e.code === "KeyD") {
+
+          // Phím D hoặc ] (kèm biến thể Unikey): Chuyển qua ảnh kết quả tiếp theo
+          const isKeyD = e.code === "KeyD" || e.key === "d" || e.key === "D" || e.key === "đ" || e.key === "Đ" || e.key === "]";
+          if (isKeyD) {
             e.preventDefault();
             e.stopPropagation();
             e.stopImmediatePropagation();
@@ -293,22 +313,26 @@ function setupKeyboardShortcuts() {
           }
 
           // Hai phím Mũi tên ← / →: Tua chính xác 3 giây trong video hiện tại
-          if (e.key === "ArrowLeft" || e.code === "ArrowLeft") {
+          if (e.key === "ArrowLeft" || e.code === "ArrowLeft" || e.keyCode === 37) {
             e.preventDefault();
             e.stopPropagation();
             e.stopImmediatePropagation();
-            modalVideoEl.currentTime = Math.max(0, modalVideoEl.currentTime - 3);
-            updateVideoInfoLabel();
-            showToast(`⏪ Tua lùi 3s (f${currentVideoFrame()})`);
+            if (modalVideoEl) {
+              modalVideoEl.currentTime = Math.max(0, modalVideoEl.currentTime - 3);
+              updateVideoInfoLabel();
+              showToast(`⏪ Tua lùi 3s (f${currentVideoFrame()})`);
+            }
             return false;
           }
-          if (e.key === "ArrowRight" || e.code === "ArrowRight") {
+          if (e.key === "ArrowRight" || e.code === "ArrowRight" || e.keyCode === 39) {
             e.preventDefault();
             e.stopPropagation();
             e.stopImmediatePropagation();
-            modalVideoEl.currentTime = Math.min(modalVideoEl.duration || 999999, modalVideoEl.currentTime + 3);
-            updateVideoInfoLabel();
-            showToast(`⏩ Tua tiến 3s (f${currentVideoFrame()})`);
+            if (modalVideoEl) {
+              modalVideoEl.currentTime = Math.min(modalVideoEl.duration || 999999, modalVideoEl.currentTime + 3);
+              updateVideoInfoLabel();
+              showToast(`⏩ Tua tiến 3s (f${currentVideoFrame()})`);
+            }
             return false;
           }
         }
@@ -1714,6 +1738,11 @@ function highlightMatchedText(fullText, query) {
 }
 
 function showLightbox(cand, imgUrl) {
+  if (document.activeElement && typeof document.activeElement.blur === "function") {
+    document.activeElement.blur();
+  }
+  window.focus();
+
   currentLightboxCand = cand;
   if (state.currentResultsList && state.currentResultsList.length > 0) {
     const foundIdx = state.currentResultsList.findIndex(
