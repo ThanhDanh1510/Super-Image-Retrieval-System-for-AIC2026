@@ -34,6 +34,202 @@ const selectedCount = document.getElementById("selected-count");
 const selectedList = document.getElementById("selected-list");
 const drawer = document.getElementById("submission-drawer");
 
+// --- Hover Video Scrubbing global cache & helpers ---
+const hoverFpsCache = new Map(); // video_id -> fps
+let hoverGlobalActiveWrapper = null;
+
+async function getHoverFpsCached(video_id) {
+  if (hoverFpsCache.has(video_id)) return hoverFpsCache.get(video_id);
+  try {
+    const resp = await fetch(`${API_BASE}/api/v1/video/${video_id}/fps`);
+    if (resp.ok) {
+      const data = await resp.json();
+      const fps = Number(data.fps) || 25.0;
+      hoverFpsCache.set(video_id, fps);
+      return fps;
+    }
+  } catch (_) {}
+  hoverFpsCache.set(video_id, 25.0);
+  return 25.0;
+}
+
+function hideAllHoverPreviews(exceptWrapper = null) {
+  document.querySelectorAll(".kf-img-wrapper.hover-preview-active, .trake-img-wrapper.hover-preview-active").forEach((el) => {
+    if (el === exceptWrapper) return;
+    el.classList.remove("hover-preview-active", "hover-preview-loading-active");
+    const v = el.querySelector(".hover-preview-video");
+    if (v) {
+      v.pause();
+      if (v._hoverTimeUpdate) {
+        v.removeEventListener("timeupdate", v._hoverTimeUpdate);
+        v._hoverTimeUpdate = null;
+      }
+      if (v._hoverErrorHandler) {
+        v.removeEventListener("error", v._hoverErrorHandler);
+        v._hoverErrorHandler = null;
+      }
+    }
+  });
+  hoverGlobalActiveWrapper = null;
+}
+
+function attachHoverPreview(wrapper, candidate) {
+  if (!wrapper || !candidate || !candidate.video_id || candidate.frame_id == null) return;
+  // Skip if already attached
+  if (wrapper.dataset.hoverBound === "1") return;
+  wrapper.dataset.hoverBound = "1";
+
+  // Create video element + bars
+  let videoEl = wrapper.querySelector(".hover-preview-video");
+  if (!videoEl) {
+    videoEl = document.createElement("video");
+    videoEl.className = "hover-preview-video";
+    videoEl.muted = true;
+    videoEl.loop = false;
+    videoEl.playsInline = true;
+    videoEl.preload = "none";
+    videoEl.setAttribute("playsinline", "");
+    videoEl.style.display = "none";
+    wrapper.appendChild(videoEl);
+  }
+  let barEl = wrapper.querySelector(".hover-preview-bar");
+  if (!barEl) {
+    barEl = document.createElement("div");
+    barEl.className = "hover-preview-bar";
+    barEl.textContent = "⏱️ Preview ±5s — rê chuột để tua";
+    wrapper.appendChild(barEl);
+  }
+  let loadingEl = wrapper.querySelector(".hover-preview-loading");
+  if (!loadingEl) {
+    loadingEl = document.createElement("div");
+    loadingEl.className = "hover-preview-loading";
+    loadingEl.innerHTML = "<span>⏳ Đang tải preview...</span>";
+    wrapper.appendChild(loadingEl);
+  }
+
+  let enterTimer = null;
+  let startT = 0, endT = 0, centerT = 0, fps = 25;
+  let isHovering = false;
+  let lastMoveSeek = 0;
+
+  const cleanupVideo = () => {
+    wrapper.classList.remove("hover-preview-active", "hover-preview-loading-active");
+    if (videoEl) {
+      videoEl.pause();
+      videoEl.style.display = "none";
+      if (videoEl._hoverTimeUpdate) {
+        videoEl.removeEventListener("timeupdate", videoEl._hoverTimeUpdate);
+        videoEl._hoverTimeUpdate = null;
+      }
+      if (videoEl._hoverErrorHandler) {
+        videoEl.removeEventListener("error", videoEl._hoverErrorHandler);
+        videoEl._hoverErrorHandler = null;
+      }
+    }
+    hoverGlobalActiveWrapper = null;
+  };
+
+  const startPreview = async () => {
+    if (!isHovering) return;
+    // On touch devices, skip
+    if (window.matchMedia && window.matchMedia("(hover: none) and (pointer: coarse)").matches) return;
+    hideAllHoverPreviews(wrapper);
+    hoverGlobalActiveWrapper = wrapper;
+    wrapper.classList.add("hover-preview-loading-active");
+    try {
+      fps = await getHoverFpsCached(candidate.video_id);
+      // center time from frame_id/fps (fallback timestamp_mid)
+      if (candidate.frame_id != null && fps > 0) {
+        centerT = candidate.frame_id / fps;
+      } else if (candidate.timestamp_mid != null) {
+        centerT = Number(candidate.timestamp_mid);
+        fps = 25; // keep fps for frame calc but center from timestamp
+      } else {
+        centerT = 0;
+      }
+      startT = Math.max(0, centerT - 5);
+      endT = centerT + 5;
+
+      const expectedSrc = `${API_BASE}/api/v1/video/${candidate.video_id}`;
+      const needLoad = !videoEl.src || !videoEl.src.includes(`/video/${candidate.video_id}`);
+      if (needLoad) {
+        videoEl.src = expectedSrc;
+        // wait for metadata (max 2.2s)
+        await new Promise((resolve) => {
+          let done = false;
+          const onLoaded = () => { if (done) return; done = true; videoEl.removeEventListener("loadedmetadata", onLoaded); videoEl.removeEventListener("error", onErr); resolve(); };
+          const onErr = () => { if (done) return; done = true; videoEl.removeEventListener("loadedmetadata", onLoaded); videoEl.removeEventListener("error", onErr); resolve(); };
+          videoEl.addEventListener("loadedmetadata", onLoaded);
+          videoEl.addEventListener("error", onErr);
+          setTimeout(() => { if (!done) { done = true; videoEl.removeEventListener("loadedmetadata", onLoaded); videoEl.removeEventListener("error", onErr); resolve(); } }, 2200);
+          try { videoEl.load(); } catch (_) { resolve(); }
+        });
+      }
+      if (!isHovering) { cleanupVideo(); return; }
+      if (videoEl.error && videoEl.error.code !== 0) {
+        cleanupVideo();
+        return;
+      }
+      if (videoEl.duration && isFinite(videoEl.duration) && videoEl.duration > 0) {
+        endT = Math.min(endT, videoEl.duration - 0.12);
+        if (endT <= startT + 0.5) {
+          startT = Math.max(0, endT - 10);
+        }
+        if (startT >= endT) { cleanupVideo(); return; }
+      }
+      videoEl.currentTime = startT;
+      // error handler for 404/no video
+      const errH = () => { cleanupVideo(); };
+      videoEl._hoverErrorHandler = errH;
+      videoEl.addEventListener("error", errH);
+
+      wrapper.classList.remove("hover-preview-loading-active");
+      wrapper.classList.add("hover-preview-active");
+      videoEl.style.display = "block";
+      barEl.textContent = `⏱️ Preview ±5s — ${candidate.video_id} f${candidate.frame_id}`;
+      try { await videoEl.play(); } catch (_) {}
+
+      const onTime = () => {
+        if (!isHovering) return;
+        // update bar with live frame
+        const curF = Math.round(videoEl.currentTime * fps);
+        const delta = (videoEl.currentTime - centerT).toFixed(1);
+        const sign = Number(delta) >= 0 ? "+" : "";
+        barEl.textContent = `⏱️ f${curF} (${sign}${delta}s) — rê chuột để tua`;
+        if (videoEl.currentTime >= endT - 0.15) {
+          videoEl.currentTime = startT;
+          videoEl.play().catch(() => {});
+        }
+      };
+      videoEl._hoverTimeUpdate = onTime;
+      videoEl.addEventListener("timeupdate", onTime);
+    } catch (_) {
+      cleanupVideo();
+    }
+  };
+
+  wrapper.addEventListener("mouseenter", () => {
+    isHovering = true;
+    if (enterTimer) clearTimeout(enterTimer);
+    enterTimer = setTimeout(startPreview, 260);
+  });
+  wrapper.addEventListener("mouseleave", () => {
+    isHovering = false;
+    if (enterTimer) { clearTimeout(enterTimer); enterTimer = null; }
+    cleanupVideo();
+  });
+  wrapper.addEventListener("mousemove", (e) => {
+    if (!wrapper.classList.contains("hover-preview-active") || !videoEl.duration) return;
+    const now = Date.now();
+    if (now - lastMoveSeek < 55) return; // throttle 55ms
+    lastMoveSeek = now;
+    const rect = wrapper.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const target = startT + ratio * (endT - startT);
+    try { videoEl.currentTime = target; } catch (_) {}
+  });
+}
+
 // Initialize Event Listeners
 document.addEventListener("DOMContentLoaded", () => {
   setupTabs();
@@ -43,6 +239,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupVoice();
   setupKeyboardShortcuts();
   setupCsvEditor();
+  setupInspector();
   updateUIForMode();
 });
 
@@ -672,6 +869,10 @@ function renderTrakeChain(chain, chainIdx) {
     // Hover tracking
     eventEl.addEventListener("mouseenter", () => { state.hoveredCand = candidate; });
     eventEl.addEventListener("mouseleave", () => { state.hoveredCand = null; });
+
+    // Hover Video Scrubbing for TRAKE event thumbnail
+    const trakeWrapper = eventEl.querySelector(".trake-img-wrapper");
+    if (trakeWrapper) attachHoverPreview(trakeWrapper, candidate);
   });
 
   resultsGrid.appendChild(chainContainer);
@@ -761,6 +962,10 @@ function renderSingleCard(candidate) {
     toggleSelect(itemKey, candidate, selectBtn);
   });
 
+  // Hover Video Scrubbing (±5s preview)
+  const kfWrapper = card.querySelector(".kf-img-wrapper");
+  if (kfWrapper) attachHoverPreview(kfWrapper, candidate);
+
   resultsGrid.appendChild(card);
 }
 
@@ -809,6 +1014,12 @@ function toggleSelect(itemKey, candidate, btn) {
 
 function updateDrawer() {
   selectedCount.textContent = state.selectedItems.size;
+  const floatingCountEl = document.getElementById("floating-count");
+  if (floatingCountEl) floatingCountEl.textContent = state.selectedItems.size;
+  const badgeEl = document.getElementById("selected-count-badge");
+  if (badgeEl) badgeEl.textContent = `${state.selectedItems.size} mục`;
+  const btnLabel = document.getElementById("btn-query-id-label");
+  // keep versioned label if needed
 
   if (state.selectedItems.size === 0) {
     selectedList.innerHTML = `<div class="empty-state">Chưa chọn bức ảnh nào. Click dấu (+) trên ảnh để chọn nộp.</div>`;
@@ -897,6 +1108,14 @@ function setupDrawer() {
   const sidebar = document.getElementById("submission-sidebar");
   const toggleBtn = document.getElementById("toggle-sidebar-btn");
   const arrowSpan = document.getElementById("basket-arrow");
+  const closeBtn = document.getElementById("close-sidebar-btn");
+  const floatingBtn = document.getElementById("floating-toggle-btn");
+  const floatingCount = document.getElementById("floating-count");
+
+  function setFloatingVisibility(isCollapsed) {
+    if (!floatingBtn) return;
+    floatingBtn.style.display = isCollapsed ? "flex" : "none";
+  }
 
   function toggleSidebar(e) {
     if (e) {
@@ -908,10 +1127,37 @@ function setupDrawer() {
     if (arrowSpan) {
       arrowSpan.textContent = isCollapsed ? "▸" : "▾";
     }
+    setFloatingVisibility(isCollapsed);
+    if (isCollapsed) {
+      showToast("📦 Đã thu gọn Giỏ Nộp Bài — bấm nút 🕸️ bên phải để mở lại");
+    }
   }
 
   if (toggleBtn) {
     toggleBtn.onclick = toggleSidebar;
+  }
+  if (closeBtn) {
+    closeBtn.onclick = (e) => {
+      if (e) { e.preventDefault(); e.stopPropagation(); }
+      if (!sidebar) return;
+      sidebar.classList.add("collapsed");
+      if (arrowSpan) arrowSpan.textContent = "▸";
+      setFloatingVisibility(true);
+      showToast("📦 Đã thu gọn Giỏ Nộp Bài");
+    };
+  }
+  if (floatingBtn) {
+    floatingBtn.onclick = (e) => {
+      if (e) { e.preventDefault(); e.stopPropagation(); }
+      if (!sidebar) return;
+      sidebar.classList.remove("collapsed");
+      if (arrowSpan) arrowSpan.textContent = "▾";
+      setFloatingVisibility(false);
+    };
+  }
+  // Sync floating count on init
+  if (floatingCount) {
+    floatingCount.textContent = state.selectedItems.size;
   }
 
   // Target Export Mode Radios Listener (Chuyển đổi linh hoạt KIS / Q&A / TRAKE)
@@ -1483,6 +1729,161 @@ window.openDirectCSVEditor = function(targetQid = null) {
   document.body.style.overflow = "hidden";
   modal.style.display = "flex";
 };
+
+// --- Inspector: Kiểm tra đáp án nhanh video_id,frame_id ---
+function parseInspectorInput(raw) {
+  if (!raw || typeof raw !== "string") return { ok: false, msg: "Vui lòng nhập giá trị!" };
+  const s = raw.trim();
+  if (!s) return { ok: false, msg: "Vui lòng nhập theo định dạng video_id,frame_id" };
+  // Support both comma and whitespace separator, allow spaces around comma
+  // Expected: video_id,frame_id  e.g. L22_V020,10428  or L21_V001, 120
+  const commaIdx = s.indexOf(",");
+  let video_id = "";
+  let framePart = "";
+  if (commaIdx !== -1) {
+    video_id = s.slice(0, commaIdx).trim();
+    framePart = s.slice(commaIdx + 1).trim();
+  } else {
+    // fallback: split by whitespace
+    const parts = s.split(/\s+/);
+    if (parts.length >= 2) {
+      video_id = parts[0].trim();
+      framePart = parts[1].trim();
+    }
+  }
+  if (!video_id || !framePart) {
+    return { ok: false, msg: `Định dạng không hợp lệ: "${s}". Cần dạng video_id,frame_id (VD: L22_V020,10428)` };
+  }
+  // framePart may contain extra trailing stuff, take leading digits
+  const frameMatch = framePart.match(/^(\d+)/);
+  if (!frameMatch) {
+    return { ok: false, msg: `frame_id phải là số nguyên ≥0 (nhận được "${framePart}")` };
+  }
+  const frame_id = parseInt(frameMatch[1], 10);
+  if (Number.isNaN(frame_id) || frame_id < 0) {
+    return { ok: false, msg: `frame_id không hợp lệ: ${framePart}` };
+  }
+  // Basic video_id validation: Lxx_Vyyy pattern but allow generic
+  if (!/^[A-Za-z0-9_\-]+$/.test(video_id)) {
+    return { ok: false, msg: `video_id không hợp lệ: "${video_id}"` };
+  }
+  return { ok: true, video_id, frame_id };
+}
+
+async function openInspectorVideo() {
+  const inp = document.getElementById("inspector-input");
+  const panel = document.getElementById("inspector-panel");
+  const btn = document.getElementById("inspector-open-btn");
+  const raw = inp ? inp.value : "";
+  const parsed = parseInspectorInput(raw);
+  if (!parsed.ok) {
+    if (panel) {
+      panel.classList.add("inspector-error");
+      setTimeout(() => panel.classList.remove("inspector-error"), 900);
+    }
+    showToast(`⚠️ ${parsed.msg}`);
+    statusBar.textContent = `⚠️ ${parsed.msg}`;
+    if (inp) inp.focus();
+    return;
+  }
+  const { video_id, frame_id } = parsed;
+  if (btn) { btn.disabled = true; btn.textContent = "⏳ Đang mở..."; }
+  statusBar.textContent = `🎬 Đang mở video ${video_id} tại frame ${frame_id}...`;
+  try {
+    // Thử lấy metadata đầy đủ từ backend (description/OCR/ASR) để hiển thị chi tiết trong lightbox
+    let candidate = null;
+    let fpsHint = 25.0;
+    try {
+      const metaResp = await fetch(`${API_BASE}/api/v1/frame/${video_id}/${frame_id}`);
+      if (metaResp.ok) {
+        const meta = await metaResp.json();
+        candidate = {
+          video_id: meta.video_id || video_id,
+          frame_id: Number(meta.frame_id ?? frame_id),
+          scene_id: meta.scene_id || `${video_id}_${String(frame_id).padStart(5, "0")}`,
+          timestamp_mid: Number(meta.timestamp_mid ?? (frame_id / (meta.fps || 25))),
+          timestamp_start: Number(meta.timestamp_start ?? 0),
+          timestamp_end: Number(meta.timestamp_end ?? 0),
+          keyframe_path: meta.keyframe_path || "",
+          ocr_text: meta.ocr_text || "",
+          asr_text: meta.asr_text || "",
+          description: meta.description || "",
+          score: 1.0,
+        };
+        if (meta.fps) {
+          fpsHint = Number(meta.fps);
+          hoverFpsCache.set(video_id, fpsHint);
+        } else if (meta.timestamp_mid) {
+          // estimate fps from ts if available
+        }
+        if (meta.exists_video === false) {
+          statusBar.textContent = `⚠️ Không tìm thấy file video ${video_id} trên server — vẫn thử mở ảnh/keyframe.`;
+        }
+        if (meta.exists_image === false && meta.exists_video === false) {
+          showToast(`⚠️ Cặp ${video_id},${frame_id} chưa có trên server (check đĩa cứng). Vẫn mở lightbox.`);
+        }
+      }
+    } catch (_) {
+      // ignore, fallback to synthetic
+    }
+    if (!candidate) {
+      // Fallback: synthetic candidate từ fps cache
+      let fps = fpsHint;
+      try { fps = await getHoverFpsCached(video_id); } catch (_) {}
+      const timestamp_mid = fps > 0 ? frame_id / fps : 0;
+      candidate = {
+        video_id: video_id,
+        frame_id: frame_id,
+        scene_id: `${video_id}_${String(frame_id).padStart(5, "0")}`,
+        timestamp_mid: timestamp_mid,
+        timestamp_start: Math.max(0, timestamp_mid - 0.5),
+        timestamp_end: timestamp_mid + 0.5,
+        keyframe_path: "",
+        ocr_text: "",
+        asr_text: "",
+        description: "",
+        score: 1.0,
+      };
+    }
+    const imgUrl = `${API_BASE}/api/v1/image/${video_id}/${frame_id}`;
+    showLightbox(candidate, imgUrl);
+    statusBar.textContent = `✅ Đã mở ${video_id},${frame_id} trong trình phát (Space ▶️/⏸️, ←/→ tua 3s)`;
+    showToast(`🎬 Đã mở ${video_id} f${frame_id} — Space ▶️/⏸️`);
+    if (panel) panel.classList.remove("inspector-error");
+  } catch (err) {
+    statusBar.textContent = `❌ Lỗi mở video: ${err.message}`;
+    showToast(`❌ ${err.message}`);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "▶️ MỞ VIDEO"; }
+  }
+}
+
+function setupInspector() {
+  const inp = document.getElementById("inspector-input");
+  const btn = document.getElementById("inspector-open-btn");
+  if (!inp || !btn) return;
+  btn.addEventListener("click", openInspectorVideo);
+  inp.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      openInspectorVideo();
+    }
+  });
+  // Paste helper: auto-trim and normalize
+  inp.addEventListener("paste", () => {
+    setTimeout(() => {
+      const v = inp.value.trim();
+      // auto-replace multiple spaces/comma weirdness but keep as is
+      if (v && !v.includes(",")) {
+        // maybe user pasted "L22_V020 10428"
+        const parts = v.split(/\s+/);
+        if (parts.length === 2 && /^\d+$/.test(parts[1])) {
+          inp.value = `${parts[0]},${parts[1]}`;
+        }
+      }
+    }, 0);
+  });
+}
 
 // Lightbox Modal — phát video tương tác ngay trong khung ảnh
 let currentLightboxCand = null;
