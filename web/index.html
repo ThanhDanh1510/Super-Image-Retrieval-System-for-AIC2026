@@ -3,11 +3,21 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>🕷️ SPIDER-RETRIEVAL AIC2026 | High-Density Search</title>
+  <title>Owlgorithms the King</title>
+  <!-- Anti-cache meta tags -->
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
+  
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" href="/ui/Spider-Man-Logo-PNG.png" />
+  
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;900&family=Roboto+Mono:wght@500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/ui/style.css" />
+  <link rel="stylesheet" href="/ui/style.css?v=2026.15" />
+  <!-- JSZip for 100% compliant client-side submission packaging -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 </head>
 <body>
 
@@ -18,7 +28,7 @@
         <span class="spider-icon">🕷️</span>
         <div class="logo-text">
           <h1>SPIDER-RETRIEVAL</h1>
-          <span class="sub-text">AIC2026 HIGH-DENSITY RETRIEVAL DASHBOARD</span>
+          <span class="sub-text">WITH GREAT POWER COMES GREAT RESPONSIBILITY</span>
         </div>
       </div>
     </div>
@@ -37,11 +47,13 @@
     </nav>
 
     <div class="header-right">
-      <span class="basket-badge">🕸️ Giỏ Nộp Bài: <strong id="selected-count">0</strong> mục</span>
+      <button id="toggle-sidebar-btn" class="basket-badge clickable-basket-btn" title="Đóng/Mở Giỏ Nộp Bài">
+        🕸️ Giỏ Nộp Bài: <strong id="selected-count">0</strong> mục <span id="basket-arrow">▾</span>
+      </button>
     </div>
   </header>
 
-  <!-- Split Screen Layout: Left Main Workspace + Right Permanent Sidebar -->
+  <!-- Split Screen Layout: Left Main Workspace + Right Collapsible Sidebar -->
   <div class="app-layout">
 
     <!-- Left Main Workspace -->
@@ -69,32 +81,41 @@
           </button>
         </div>
 
-        <!-- TRAKE Multi-Event Inputs (Hidden by default) -->
-        <div id="trake-events-container" class="trake-events-wrapper" style="display: none;">
-          <div class="trake-header">📌 Nhập Chuỗi Các Sự Kiện Theo Thứ Tự Thời Gian:</div>
-          <div id="trake-event-inputs">
-            <input type="text" class="trake-event-input" placeholder="Sự kiện 1: Người bước vào ô tô" />
-            <input type="text" class="trake-event-input" placeholder="Sự kiện 2: Ô tô chạy trên đường" />
-          </div>
-          <button id="add-event-btn" class="spider-secondary-btn">+ Thêm sự kiện</button>
-        </div>
-
         <!-- Search Controls Bar -->
         <div class="search-controls">
-          <!-- Search Mode Pills -->
-          <div class="search-mode-pills control-group search-branch-group">
-            <button class="mode-pill branch-btn active" data-mode="all" data-branch="all" title="Kết hợp cả 3 nhánh (Hybrid RRF)">⚡ All (Hybrid)</button>
-            <button class="mode-pill branch-btn" data-mode="description" data-branch="description" title="Chỉ tìm theo hình ảnh AI Caption BGE">🖼️ Description (AI Caption)</button>
-            <button class="mode-pill branch-btn" data-mode="ocr" data-branch="ocr" title="Chỉ tìm theo chữ xuất hiện trên màn hình">📝 OCR Text</button>
-            <button class="mode-pill branch-btn" data-mode="asr" data-branch="asr" title="Chỉ tìm theo lời thoại thuyết minh">🎙️ ASR Speech</button>
+          <!-- Branch Mode Selector Buttons -->
+          <div class="control-group search-branch-group">
+            <span class="ctrl-label">Nhánh tìm kiếm:</span>
+            <button class="branch-btn active" data-branch="all" title="Kết hợp cả 3 nhánh (Hybrid RRF)">🌟 Tất cả (Hybrid)</button>
+            <button class="branch-btn" data-branch="embedding" title="Chỉ tìm theo hình ảnh visual CLIP">🖼️ Embedding</button>
+            <button class="branch-btn" data-branch="ocr" title="Chỉ tìm theo chữ xuất hiện trên màn hình">🔤 OCR</button>
+            <button class="branch-btn" data-branch="asr" title="Chỉ tìm theo lời thoại thuyết minh">🎙️ ASR</button>
           </div>
 
           <div class="control-group">
             <label for="top-k-input">Top-K:</label>
-            <input type="number" id="top-k-input" min="1" max="500" value="30" class="number-input-field" />
+            <input type="number" id="top-k-input" min="50" max="500" step="50" value="50" class="number-input-field" />
           </div>
 
-          <div class="control-group">
+          <div class="control-group" id="num-events-group" style="display: none;">
+            <label for="num-events-input">Sự kiện:</label>
+            <input type="number" id="num-events-input" min="2" max="10" value="3" class="number-input-field" />
+          </div>
+
+          <div class="control-group reranker-switch-group">
+            <label class="spider-switch switch-viranker" title="ViRanker Text Cross-Encoder (bge-reranker-v2-m3 trên OCR/ASR/Caption - Độ trễ ~0.2s)">
+              <input type="checkbox" id="use-viranker-checkbox" checked />
+              <span class="slider"></span>
+              <span class="label-text">📝 ViRanker</span>
+            </label>
+            <label class="spider-switch switch-jina" title="Jina M0 Visual Cross-Encoder (jina-reranker-m0 trực tiếp trên pixel ảnh - Độ trễ ~1-2s)">
+              <input type="checkbox" id="use-jina-checkbox" />
+              <span class="slider"></span>
+              <span class="label-text">👁️ Jina M0</span>
+            </label>
+          </div>
+
+          <div class="control-group" id="density-group">
             <label for="density-slider">Mật độ card:</label>
             <input type="range" id="density-slider" min="140" max="320" step="10" value="180" />
             <span id="density-val" class="highlight-val">180px</span>
@@ -105,6 +126,22 @@
             <button id="remove-img-btn">✕</button>
           </div>
         </div>
+      </section>
+
+      <!-- Kiểm Tra Đáp Án Nhanh (video_id,frame_id) -->
+      <section class="inspector-panel spider-card" id="inspector-panel">
+        <div class="inspector-left">
+          <span class="inspector-icon">🎬</span>
+          <div class="inspector-title-group">
+            <span class="inspector-title">KIỂM TRA ĐÁP ÁN</span>
+            <span class="inspector-subtitle">Mở video tức thì để đối chiếu</span>
+          </div>
+        </div>
+        <div class="inspector-input-group">
+          <input type="text" id="inspector-input" placeholder="Nhập video_id,frame_id  ví dụ: L22_V020,10428" autocomplete="off" spellcheck="false" />
+          <button id="inspector-open-btn" class="spider-inspector-btn" title="Mở video tại frame này ngay trong Lightbox (Enter)">▶️ MỞ VIDEO</button>
+        </div>
+        <span class="inspector-hint">Định dạng: <code>video_id,frame_id</code> &nbsp;|&nbsp; Ví dụ: <code>L21_V001,120</code> &nbsp;hoặc&nbsp; <code>L22_V020,10428</code></span>
       </section>
 
       <!-- Search Status Bar -->
@@ -122,10 +159,54 @@
 
     </main>
 
-    <!-- Right Permanent Sidebar (Giỏ Nộp Bài) -->
-    <aside class="spider-sidebar">
+    <!-- Floating Toggle (hiện khi sidebar đang thu gọn) -->
+    <button id="floating-toggle-btn" class="floating-toggle-btn" style="display: none;" title="Mở Giỏ Nộp Bài (Giỏ đang ẩn)">
+      🕸️<span id="floating-count">0</span>
+    </button>
+
+    <!-- Right Collapsible Sidebar (Giỏ Nộp Bài) -->
+    <aside id="submission-sidebar" class="spider-sidebar">
       <div class="sidebar-header">
-        <h3>🕸️ GIỎ NỘP BÀI</h3>
+        <div class="sidebar-title-row">
+          <h3>🕸️ GIỎ NỘP BÀI</h3>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span id="selected-count-badge" class="selected-badge">0 mục</span>
+            <button id="close-sidebar-btn" class="close-sidebar-btn" title="Thu gọn giỏ nộp bài">✕</button>
+          </div>
+        </div>
+        <div class="query-config-box">
+          <label for="query-id-input" class="query-config-label">Mã câu hỏi BTC:</label>
+          <div class="query-input-group">
+            <input type="text" id="query-id-input" class="spider-query-id-input" placeholder="query-1-kis" value="query-1-kis" />
+            <button id="add-to-batch-btn" class="spider-batch-add-btn" title="Lưu câu này vào gói đề thi">➕ Lưu Gói</button>
+          </div>
+        </div>
+        <!-- Target Export Mode Selector (Chuyển đổi linh hoạt KIS / Q&A / TRAKE) -->
+        <div class="target-format-box">
+          <label class="query-config-label">🎯 Định dạng xuất nộp:</label>
+          <div class="target-format-radios">
+            <label class="format-radio-item" title="Xuất 1 frame/dòng (video,frame)">
+              <input type="radio" name="target-export-mode" value="kis" checked />
+              <span>KIS</span>
+            </label>
+            <label class="format-radio-item" title="Xuất frame kèm đáp án (video,frame,answer)">
+              <input type="radio" name="target-export-mode" value="vqa" />
+              <span>Q&A</span>
+            </label>
+            <label class="format-radio-item" title="Xuất chuỗi events cùng video (video,f1,f2,...,fN)">
+              <input type="radio" name="target-export-mode" value="trake" />
+              <span>TRAKE</span>
+            </label>
+          </div>
+        </div>
+        <!-- VQA Global / Batch Answer Input (chỉ hiện khi ở tab VQA) -->
+        <div id="vqa-bulk-box" class="vqa-bulk-box" style="display: none;">
+          <label for="vqa-bulk-answer-input" class="query-config-label">📝 Đáp án chung cho cả gói (tùy chọn):</label>
+          <div class="vqa-bulk-input-group">
+            <input type="text" id="vqa-bulk-answer-input" class="spider-vqa-bulk-input" placeholder="Gõ đáp án chung..." maxlength="100" />
+            <button id="vqa-apply-all-btn" class="spider-vqa-apply-btn" title="Điền đáp án này vào tất cả ảnh trong giỏ">⚡ Áp dụng tất cả</button>
+          </div>
+        </div>
         <span class="hotkey-tip">Tip: Rê chuột + phím C để copy nhanh</span>
       </div>
 
@@ -135,26 +216,88 @@
         </div>
       </div>
 
+      <!-- Pinned Gói Đề Thi Session Manager (Cố định, không bị scroll theo ảnh) -->
+      <div id="batch-manager-section" class="batch-manager-box">
+        <div class="batch-header">
+          <span class="batch-title">📦 Gói Nộp Bài Đợt Thi (<span id="batch-count">0</span> câu)</span>
+          <button id="clear-batch-btn" class="batch-clear-btn" title="Xóa toàn bộ gói đề">🗑️ Xóa hết</button>
+        </div>
+        <div id="batch-query-list" class="batch-query-list">
+          <span class="batch-empty-hint">Chưa lưu câu nào vào gói. Bấm '➕ Lưu Gói' sau khi chọn ảnh.</span>
+        </div>
+      </div>
+
       <div class="sidebar-footer">
-        <button id="export-csv-btn" class="spider-export-btn">
-          📥 XUẤT FILE CSV NỘP BTC
-        </button>
+        <div class="export-actions-col">
+          <button id="open-csv-editor-btn" class="spider-export-btn edit-btn" title="Mở trình xem & sửa nội dung CSV trực tiếp trên Web UI">
+            ✏️ Xem & Sửa CSV Trực Tiếp
+          </button>
+          <button id="export-csv-btn" class="spider-export-btn secondary">
+            📥 Xuất Lẻ CSV (<span id="btn-query-id-label">query-1-kis.csv</span>)
+          </button>
+          <button id="package-zip-btn" class="spider-export-btn primary">
+            📦 ĐÓNG GÓI SUBMISSION.ZIP (CHUẨN BTC)
+          </button>
+        </div>
       </div>
     </aside>
 
   </div>
 
-  <!-- Image Lightbox Modal -->
+  <!-- Direct In-App CSV Editor Modal -->
+  <div id="csv-editor-modal" class="lightbox-modal csv-editor-modal" style="display: none;">
+    <div class="csv-editor-content">
+      <div class="csv-editor-header">
+        <div class="csv-editor-title-group">
+          <h3 id="csv-editor-title">✏️ TRÌNH SỬA FILE CSV</h3>
+          <span id="csv-editor-badge" class="csv-editor-badge">0 dòng (Chuẩn BTC)</span>
+        </div>
+        <div class="csv-editor-actions">
+          <button id="csv-editor-copy-btn" class="icon-action-btn" title="Copy toàn bộ nội dung CSV vào clipboard">📋 Copy CSV</button>
+          <button id="csv-editor-download-btn" class="icon-action-btn secondary" title="Tải file CSV này về máy">📥 Tải CSV</button>
+          <button id="csv-editor-save-btn" class="icon-action-btn primary" title="Lưu các chỉnh sửa này vào Gói Nộp Bài">💾 Lưu Thay Đổi</button>
+          <button id="close-csv-editor-btn" class="close-btn" title="Đóng trình sửa CSV">✕</button>
+        </div>
+      </div>
+      <div class="csv-editor-body">
+        <div class="csv-editor-tip">
+          💡 <strong>Quy chuẩn BTC:</strong> Không có dòng header, Delimiter dấu phẩy <code>,</code>, tối đa 100 dòng. Bạn có thể sửa trực tiếp ở đây!
+        </div>
+        <textarea id="csv-editor-textarea" class="csv-editor-textarea" spellcheck="false" placeholder="Nội dung CSV..."></textarea>
+      </div>
+    </div>
+  </div>
+
+  <!-- Image Lightbox Modal (video phát trực tiếp ngay trong khung ảnh kèm nút Next/Prev) -->
   <div id="lightbox-modal" class="lightbox-modal" style="display: none;">
+    <button id="modal-prev-btn" class="lightbox-nav-btn prev-btn" title="Ảnh kết quả trước (Phím ← hoặc A)">◀</button>
+    <button id="modal-next-btn" class="lightbox-nav-btn next-btn" title="Ảnh kết quả tiếp theo (Phím → hoặc D)">▶</button>
     <div class="lightbox-content">
       <button id="close-modal-btn" class="close-modal-btn">✕</button>
       <div class="modal-img-container">
-        <img id="modal-img" src="" alt="Keyframe Fullview" />
+        <img id="modal-img" src="" alt="Keyframe Fullview" style="display: none;" />
+        <video id="modal-video" controls preload="metadata" style="display: none;"></video>
+      </div>
+      <div id="video-frame-bar" class="video-frame-bar" style="display: none;">
+        <span id="video-info-label" class="video-info-label">L22_V020,10428</span>
+        <div class="video-frame-actions">
+          <button id="video-goto-main-btn" class="video-seek-btn" title="Quay về đúng frame gốc đã tìm được">🎯 Về Frame Chính</button>
+          <button id="video-copy-frame-btn" class="video-seek-btn" title="Copy <video_id,frame_id> của khung hình hiện tại">📋 Copy Frame</button>
+          <button id="video-replace-frame-btn" class="video-seek-btn video-replace-btn" title="Thay thế frame đang dừng vào 1 trong các ảnh/events đã chọn trong giỏ">🔄 Thay Frame Trong Giỏ</button>
+          <button id="video-search-similar-btn" class="video-seek-btn" title="Tìm các keyframe tương đồng với ảnh/frame này">🔍 Tìm tương tự</button>
+          <button id="video-add-frame-btn" class="video-seek-btn video-add-btn" title="Thêm khung hình đang dừng vào Giỏ Nộp Bài">➕ Thêm vào giỏ</button>
+        </div>
+      </div>
+      <!-- Menu chọn event muốn thay thế frame -->
+      <div id="video-replace-menu" class="video-replace-menu" style="display: none;"></div>
+      <div id="video-error-msg" class="video-error-msg" style="display: none;">
+        ⚠️ Không tìm thấy file video trên server. Kiểm tra lại thư mục data/video.
       </div>
       <div class="modal-info">
         <h4 id="modal-title">L21_V001_S001</h4>
-        <div id="modal-ocr" class="scrollable-text-box" title="🔍 Nhấp để phóng to toàn văn bản OCR"><strong>OCR:</strong> -</div>
-        <div id="modal-asr" class="scrollable-text-box" title="🔍 Nhấp để phóng to toàn văn bản ASR"><strong>ASR:</strong> -</div>
+        <div id="modal-desc" class="scrollable-text-box modal-expanded-box" title="🔍 Nhấp để phóng to toàn văn bản Image Description"><strong>Image Description:</strong> -</div>
+        <div id="modal-ocr" class="scrollable-text-box modal-expanded-box" title="🔍 Nhấp để phóng to toàn văn bản OCR"><strong>OCR:</strong> -</div>
+        <div id="modal-asr" class="scrollable-text-box modal-expanded-box" title="🔍 Nhấp để phóng to toàn văn bản ASR"><strong>ASR:</strong> -</div>
       </div>
     </div>
   </div>
@@ -173,6 +316,6 @@
     </div>
   </div>
 
-  <script src="/ui/app.js"></script>
+  <script src="/ui/app.js?v=2026.15"></script>
 </body>
 </html>
