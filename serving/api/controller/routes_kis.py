@@ -130,6 +130,84 @@ async def get_keyframe_image(video_id: str, frame_id: int):
     return FileResponse(img_path)
 
 
+@router.get("/frame/{video_id}/{frame_id}", summary="Lấy metadata chi tiết cho 1 frame (phục vụ kiểm tra đáp án nhanh)")
+async def get_frame_metadata(video_id: str, frame_id: int):
+    """
+    Tra cứu metadata (description, OCR, ASR, timestamps) cho 1 frame cụ thể.
+    Ưu tiên lookup từ VideoContextIndex (parquet unified), fallback về thông tin tối thiểu.
+
+    Frontend Inspector sẽ gọi endpoint này để hiển thị đúng thông tin khi mở video bằng tay:
+    Nhập "video_id,frame_id" → mở video ngay lập tức kèm metadata nếu có.
+    """
+    # 1. Thử lookup qua VideoContextIndex (in-memory parquet)
+    try:
+        from serving.api.service.retrieval.video_context_service import get_video_context_index
+
+        idx = get_video_context_index()
+        if idx.ensure_loaded():
+            v_data = idx.video_contexts.get(video_id)
+            if v_data:
+                for sc in v_data.get("scenes", []):
+                    try:
+                        fid = int(sc.get("frame_id", -1))
+                    except Exception:
+                        continue
+                    if fid == int(frame_id):
+                        # Build CandidateResult JSON
+                        return {
+                            "video_id": str(sc.get("video_id", video_id)),
+                            "scene_id": str(sc.get("scene_id", f"{video_id}_{frame_id}")),
+                            "frame_id": int(sc.get("frame_id", frame_id)),
+                            "timestamp_start": float(sc.get("timestamp_start", 0.0)),
+                            "timestamp_end": float(sc.get("timestamp_end", 0.0)),
+                            "timestamp_mid": float(sc.get("timestamp_mid", 0.0)),
+                            "keyframe_path": str(sc.get("keyframe_path", "")),
+                            "ocr_text": str(sc.get("ocr_text", "")),
+                            "asr_text": str(sc.get("asr_text", "")),
+                            "description": str(sc.get("description", "")),
+                            "score": 1.0,
+                            "exists_video": bool(resolve_video_path(video_id) is not None),
+                            "exists_image": bool(resolve_keyframe_path(video_id, frame_id) is not None),
+                        }
+    except Exception as e:
+        logger.debug(f"get_frame_metadata fallback lookup failed: {e}")
+
+    # 2. Fallback: kiểm tra file tồn tại và trả về metadata tối thiểu
+    img_path = resolve_keyframe_path(video_id, frame_id)
+    vid_path = resolve_video_path(video_id)
+    # Thử lấy fps để suy ra timestamp
+    fps = 25.0
+    if vid_path and vid_path.exists():
+        try:
+            cap = cv2.VideoCapture(str(vid_path))
+            f = cap.get(cv2.CAP_PROP_FPS) or 25.0
+            cap.release()
+            if f and f > 0:
+                fps = float(f)
+        except Exception:
+            pass
+    ts = float(frame_id) / fps if fps > 0 else 0.0
+    if not img_path and not vid_path:
+        # Không tìm thấy cả video lẫn ảnh nhưng vẫn trả về synthetic để frontend vẫn mở được (sẽ báo lỗi trong player)
+        logger.warning(f"get_frame_metadata: không tìm thấy file cho {video_id},{frame_id} — trả về synthetic")
+    return {
+        "video_id": video_id,
+        "scene_id": f"{video_id}_{frame_id}",
+        "frame_id": int(frame_id),
+        "timestamp_start": max(0.0, ts - 0.5),
+        "timestamp_end": ts + 0.5,
+        "timestamp_mid": ts,
+        "keyframe_path": "",
+        "ocr_text": "",
+        "asr_text": "",
+        "description": "",
+        "score": 1.0,
+        "exists_video": bool(vid_path and vid_path.exists()),
+        "exists_image": bool(img_path and img_path.exists()),
+        "fps": fps,
+    }
+
+
 # =============================================================================
 # Core Retrieval Endpoints
 # =============================================================================

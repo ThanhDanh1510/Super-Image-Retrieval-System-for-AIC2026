@@ -108,7 +108,7 @@
               <span class="slider"></span>
               <span class="label-text">📝 ViRanker</span>
             </label>
-            <label class="spider-switch switch-jina" title="Jina M0 Visual Cross-Encoder (áp dụng cho KIS & Q&A trên pixel ảnh - Tự động nạp sẵn lên GPU khi bật)">
+            <label class="spider-switch switch-jina" title="Jina M0 Visual Cross-Encoder (jina-reranker-m0 trực tiếp trên pixel ảnh - áp dụng cho KIS & Q&A trên pixel ảnh - Tự động nạp sẵn lên GPU khi bật - Độ trễ ~1-2s)">
               <input type="checkbox" id="use-jina-checkbox" />
               <span class="slider"></span>
               <span class="label-text">👁️ Jina M0</span>
@@ -128,6 +128,22 @@
         </div>
       </section>
 
+      <!-- Kiểm Tra Đáp Án Nhanh (video_id,frame_id) -->
+      <section class="inspector-panel spider-card" id="inspector-panel">
+        <div class="inspector-left">
+          <span class="inspector-icon">🎬</span>
+          <div class="inspector-title-group">
+            <span class="inspector-title">KIỂM TRA ĐÁP ÁN</span>
+            <span class="inspector-subtitle">Mở video tức thì để đối chiếu</span>
+          </div>
+        </div>
+        <div class="inspector-input-group">
+          <input type="text" id="inspector-input" placeholder="Nhập video_id,frame_id  ví dụ: L22_V020,10428" autocomplete="off" spellcheck="false" />
+          <button id="inspector-open-btn" class="spider-inspector-btn" title="Mở video tại frame này ngay trong Lightbox (Enter)">▶️ MỞ VIDEO</button>
+        </div>
+        <span class="inspector-hint">Định dạng: <code>video_id,frame_id</code> &nbsp;|&nbsp; Ví dụ: <code>L21_V001,120</code> &nbsp;hoặc&nbsp; <code>L22_V020,10428</code></span>
+      </section>
+
       <!-- Search Status Bar -->
       <div id="status-bar" class="status-bar">
         <span id="status-text">🕷️ Hệ thống sẵn sàng. Nhập câu truy vấn để bắt đầu.</span>
@@ -143,12 +159,20 @@
 
     </main>
 
+    <!-- Floating Toggle (hiện khi sidebar đang thu gọn) -->
+    <button id="floating-toggle-btn" class="floating-toggle-btn" style="display: none;" title="Mở Giỏ Nộp Bài (Giỏ đang ẩn)">
+      🕸️<span id="floating-count">0</span>
+    </button>
+
     <!-- Right Collapsible Sidebar (Giỏ Nộp Bài) -->
     <aside id="submission-sidebar" class="spider-sidebar">
       <div class="sidebar-header">
         <div class="sidebar-title-row">
           <h3>🕸️ GIỎ NỘP BÀI</h3>
-          <span id="selected-count-badge" class="selected-badge">0 mục</span>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span id="selected-count-badge" class="selected-badge">0 mục</span>
+            <button id="close-sidebar-btn" class="close-sidebar-btn" title="Thu gọn giỏ nộp bài">✕</button>
+          </div>
         </div>
         <div class="query-config-box">
           <label for="query-id-input" class="query-config-label">Mã câu hỏi BTC:</label>
