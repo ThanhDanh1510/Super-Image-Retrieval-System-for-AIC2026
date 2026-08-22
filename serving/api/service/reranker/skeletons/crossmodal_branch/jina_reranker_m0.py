@@ -100,7 +100,9 @@ def score(
             if not valid_pairs:
                 return [float(c.score) for c in candidates]
 
-            raw_scores = model.compute_score(valid_pairs, doc_type="image")
+            import torch
+            with torch.inference_mode():
+                raw_scores = model.compute_score(valid_pairs, doc_type="image", max_query_length=256)
             if isinstance(raw_scores, (list, float, int)):
                 if not isinstance(raw_scores, list):
                     raw_scores = [raw_scores]

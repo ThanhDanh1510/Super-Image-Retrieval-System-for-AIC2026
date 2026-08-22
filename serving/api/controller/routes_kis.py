@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import mimetypes
+import os
 from pathlib import Path
 
 import cv2
@@ -400,4 +401,212 @@ async def warmup_jina_model(
     except Exception as e:
         logger.error(f"Error warming up Jina M0: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# Video Timeline & Smart QA Submission Endpoints
+# =============================================================================
+
+@router.get(
+    "/videos/{video_id}/timeline",
+    summary="Lấy toàn bộ dòng thời gian OCR & ASR cho video đang xem",
+)
+async def get_video_timeline(
+    video_id: str,
+    qdrant_client=Depends(get_qdrant_client),
+):
+    """
+    Truy xuất toàn bộ danh sách keyframe, OCR text và ASR text theo thứ tự thời gian (timestamps)
+    cho 1 video cụ thể, phục vụ tính năng OCR & ASR Inspector Drawer trên Web UI.
+    """
+    try:
+        from qdrant_client.http import models as qmodels
+
+        # Scroll points từ AsyncQdrantClient
+        points, _ = await qdrant_client.scroll(
+            collection_name="production",
+            scroll_filter=qmodels.Filter(
+                must=[qmodels.FieldCondition(key="video_id", match=qmodels.MatchValue(value=video_id))]
+            ),
+            limit=500,
+            with_payload=True,
+            with_vectors=False,
+        )
+
+        ocr_events = []
+        asr_events = []
+        keyframe_events = []
+
+        seen_frames = set()
+        for p in points:
+            payload = p.payload or {}
+            fid = int(payload.get("frame_id", 0))
+            if fid in seen_frames:
+                continue
+            seen_frames.add(fid)
+
+            ts_mid = float(payload.get("timestamp_mid", fid / 30.0))
+            ocr_text = payload.get("ocr_text", "").strip()
+            asr_text = payload.get("asr_text", "").strip()
+            desc = payload.get("description", "").strip()
+            kpath = payload.get("keyframe_path", "")
+
+            keyframe_events.append({
+                "frame_id": fid,
+                "timestamp": ts_mid,
+                "keyframe_path": kpath,
+                "description": desc,
+            })
+
+            if ocr_text:
+                ocr_events.append({
+                    "frame_id": fid,
+                    "timestamp": ts_mid,
+                    "text": ocr_text,
+                })
+
+            if asr_text:
+                asr_events.append({
+                    "frame_id": fid,
+                    "timestamp": ts_mid,
+                    "text": asr_text,
+                })
+
+        # Sắp xếp tăng dần theo frame_id
+        ocr_events.sort(key=lambda x: x["frame_id"])
+        asr_events.sort(key=lambda x: x["frame_id"])
+        keyframe_events.sort(key=lambda x: x["frame_id"])
+
+        return {
+            "video_id": video_id,
+            "total_keyframes": len(keyframe_events),
+            "ocr_events": ocr_events,
+            "asr_events": asr_events,
+            "keyframe_events": keyframe_events,
+        }
+    except Exception as err:
+        logger.error(f"Error fetching timeline for video {video_id}: {err}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(err))
+
+
+@router.post(
+    "/submission/smart-save",
+    summary="Lưu nhanh câu trả lời Q&A hoặc KIS kèm tự động sinh Top 30 frames lân cận",
+)
+async def smart_save_submission(
+    payload: dict,
+):
+    """
+    Nhận dữ liệu từ Smart QA / KIS Input Widget trên Web UI, tự động chuẩn hóa Unicode NFC,
+    bọc dấu ngoặc kép chuẩn BTC, sinh mốc lân cận +-10, +-15, +-20... và cập nhật file CSV + ZIP.
+    """
+    import unicodedata
+    import zipfile
+
+    query_id = payload.get("query_id", "query-1-kis")
+    task_type = payload.get("task_type", "kis").lower()
+    video_id = payload.get("video_id", "").strip()
+    frame_id = int(payload.get("frame_id", 0))
+    raw_answer = payload.get("answer", "").strip()
+
+    if not video_id or frame_id <= 0:
+        raise HTTPException(status_code=400, detail="video_id và frame_id hợp lệ là bắt buộc")
+
+    # Chuẩn hóa Unicode NFC
+    clean_ans = unicodedata.normalize("NFC", raw_answer)
+    if clean_ans.startswith('"') and clean_ans.endswith('"') and len(clean_ans) >= 2:
+        clean_ans = clean_ans[1:-1].strip()
+
+    # Bọc quote cho CSV
+    quoted_ans = f'"{clean_ans}"'
+
+    # Offsets lân cận (không có +-5, bắt đầu +-10)
+    offsets = [10, -10, 15, -15, 20, -20, 25, -25, 30, -30, 40, -40, 50, -50, 60, -60, 75, -75, 90, -90, 100, -100, 120, -120, 150, -150]
+
+    lines = []
+    seen = set()
+
+    if task_type == "qa" or task_type == "vqa":
+        base_line = f"{video_id},{frame_id},{quoted_ans}"
+        lines.append(base_line)
+        seen.add(base_line)
+
+        for off in offsets:
+            if len(lines) >= 30:
+                break
+            cand_f = frame_id + off
+            if cand_f > 0:
+                cand_l = f"{video_id},{cand_f},{quoted_ans}"
+                if cand_l not in seen:
+                    seen.add(cand_l)
+                    lines.append(cand_l)
+    elif task_type == "trake":
+        # TRAKE sequence
+        e1 = int(payload.get("e1", frame_id))
+        e2 = int(payload.get("e2", frame_id + 300))
+        e3 = int(payload.get("e3", frame_id + 600))
+        base_line = f"{video_id},{e1},{e2},{e3}"
+        lines.append(base_line)
+        seen.add(base_line)
+
+        for off in [10, -10, 15, -15, 20, -20, 25, -25, 30, -30, 40, -40]:
+            for var in [
+                (e1 + off, e2, e3), (e1, e2 + off, e3), (e1, e2, e3 + off),
+                (e1 + off, e2 + off, e3 + off), (e1 - off, e2 - off, e3 - off)
+            ]:
+                if len(lines) >= 30:
+                    break
+                if var[0] < var[1] < var[2] and var[0] > 0:
+                    comb = f"{video_id},{var[0]},{var[1]},{var[2]}"
+                    if comb not in seen:
+                        seen.add(comb)
+                        lines.append(comb)
+    else:
+        # KIS
+        base_line = f"{video_id},{frame_id}"
+        lines.append(base_line)
+        seen.add(base_line)
+
+        for off in offsets:
+            if len(lines) >= 30:
+                break
+            cand_f = frame_id + off
+            if cand_f > 0:
+                cand_l = f"{video_id},{cand_f}"
+                if cand_l not in seen:
+                    seen.add(cand_l)
+                    lines.append(cand_l)
+
+    # Đảm bảo tên file chuẩn
+    filename = f"{query_id}.csv" if not query_id.endswith(".csv") else query_id
+
+    # Lưu vào cả D:\submission và D:\submission\submission nếu có
+    saved_paths = []
+    for base_dir in [r"D:\submission\submission", r"D:\submission"]:
+        if os.path.exists(base_dir):
+            target_p = os.path.join(base_dir, filename)
+            with open(target_p, "w", encoding="utf-8", newline="\n") as fp:
+                fp.write("\n".join(lines) + "\n")
+            saved_paths.append(target_p)
+
+    # Auto repack zip D:\submission.zip nếu thư mục D:\submission tồn tại
+    zip_p = r"D:\submission.zip"
+    src_dir = r"D:\submission\submission" if os.path.exists(r"D:\submission\submission") else r"D:\submission"
+    if os.path.exists(src_dir):
+        with zipfile.ZipFile(zip_p, "w", compression=zipfile.ZIP_DEFLATED) as zipf:
+            for f in sorted(os.listdir(src_dir)):
+                f_full = os.path.join(src_dir, f)
+                if os.path.isfile(f_full) and f.endswith(".csv"):
+                    zipf.write(f_full, arcname=f"submission/{f}")
+
+    return {
+        "status": "success",
+        "query_id": query_id,
+        "filename": filename,
+        "total_lines": len(lines),
+        "top_line": lines[0] if lines else "",
+        "saved_paths": saved_paths,
+        "zip_updated": os.path.exists(zip_p),
+    }
+
 

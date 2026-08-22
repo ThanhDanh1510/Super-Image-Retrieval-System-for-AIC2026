@@ -241,17 +241,27 @@ class ModelRegistry:
 
     def _load_asr_model(self):
         try:
-            from transformers import pipeline
+            import torch
+            from faster_whisper import WhisperModel
 
-            logger.info("ModelRegistry: lazy-loading ASR model (vinai/PhoWhisper-medium)...")
-            return pipeline(
-                "automatic-speech-recognition",
-                model="vinai/PhoWhisper-medium",
-                device=-1,
-            )
-        except Exception as e:
-            logger.warning(f"Không thể load ASR model: {e}. Voice queries sẽ dùng fallback.")
-            return None
+            device = "cuda" if torch.cuda.is_available() and self._device == "cuda" else "cpu"
+            compute_type = "float16" if device == "cuda" else "int8"
+            logger.info(f"ModelRegistry: lazy-loading faster-whisper (model='small', device={device}, compute_type={compute_type})...")
+            return WhisperModel("small", device=device, compute_type=compute_type)
+        except Exception as e_fw:
+            logger.info(f"faster-whisper load failed ({e_fw}), trying fallback PhoWhisper...")
+            try:
+                from transformers import pipeline
+
+                logger.info("ModelRegistry: lazy-loading ASR model (vinai/PhoWhisper-medium)...")
+                return pipeline(
+                    "automatic-speech-recognition",
+                    model="vinai/PhoWhisper-medium",
+                    device=-1,
+                )
+            except Exception as e:
+                logger.warning(f"Không thể load ASR model: {e}. Voice queries sẽ dùng fallback.")
+                return None
 
     def _load_viranker(self):
         import torch

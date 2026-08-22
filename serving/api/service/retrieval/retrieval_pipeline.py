@@ -30,7 +30,7 @@ from serving.api.schema.retrieval import (
     ImageSearchRequest,
     UserChoice,
 )
-from serving.api.service.retrieval import text_query, image_query, voice_query
+from serving.api.service.retrieval import text_query, image_query, voice_query, sub_event_parser
 from serving.api.service.retrieval.text_query import TextQueryInput, TextQueryOutput
 from serving.api.service.retrieval.image_query import ImageQueryInput, ImageQueryOutput
 from serving.api.service.retrieval.voice_query import VoiceQueryInput, VoiceQueryOutput
@@ -371,6 +371,11 @@ async def _run_trake(
         base_res = await _run_text(request, TaskType.TRAKE, qdrant_client, text_embedder, image_embedder)
 
     sub_events = base_res.sub_events
+    if not sub_events or len(sub_events) < request.num_events:
+        parsed = sub_event_parser.parse_sub_events(request.query, target_num_events=request.num_events)
+        if parsed and len(parsed) >= 2:
+            sub_events = parsed
+
     results: list[list[CandidateResult]] = []
 
     if sub_events and len(sub_events) >= 2:

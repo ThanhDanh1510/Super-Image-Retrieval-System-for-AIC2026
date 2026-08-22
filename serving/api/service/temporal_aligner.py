@@ -1,29 +1,28 @@
 """
 serving/api/service/temporal_aligner.py
 ========================================
-Căn chỉnh thời gian cho TRAKE query (Skeleton).
+Thuat toan Quy Hoach Dong (Dynamic Programming) & Monotonic Sequence Alignment (DANTE Engine)
+cho bai toan Temporal Retrieval and Alignment of Key Events (TRAKE).
 
-Nhận vào N danh sách candidates ứng với N sub-events của TRAKE query.
-Tìm kiếm và lựa chọn tổ hợp các frame/scene tối ưu thỏa mãn:
-  1. Các frame được chọn phải nằm trong CÙNG MỘT VIDEO.
-  2. Thứ tự thời gian của các frame được chọn phải TĂNG DẦN
-     (tức là frame_1.timestamp_mid < frame_2.timestamp_mid < ... < frame_N.timestamp_mid).
-  3. Ưu tiên video có số lượng event khớp (matched events) nhiều nhất,
-     sau đó mới tối ưu hóa điểm số (score) của các frame trong video đó.
-
-CONSTRAINTS:
-  - Chỉ trả về danh sách candidates tối ưu thỏa mãn các điều kiện trên.
+Nguyen ly hoat dong:
+  1. Constraint bat buoc: N keyframe trong moi chuoi (chain) phai cung thuoc ve 1 VIDEO (video_id duy nhat).
+  2. Monotonicity Constraint: timestamp_mid(event_1) < timestamp_mid(event_2) < ... < timestamp_mid(event_N).
+  3. Min Temporal Separation: Khoang cach giua 2 su kien lien tiep phai dat toi thieu delta (mac dinh 1.0s).
+  4. Time-Aware Penalty: Phat tuyen tinh theo do tre thoi gian thuc (seconds) thay vi chi dem so frame.
+  5. All-Event Consensus Scoring: Uu tien cac video co do bao phu 100% cac su kien.
 """
 
 from __future__ import annotations
 
 import logging
+import numpy as np
 from serving.api.schema.retrieval import CandidateResult
 
 logger = logging.getLogger(__name__)
 
+
 def _get_lambda_penalty() -> float:
-    """Đọc λ penalty factor từ fusion_config.yaml (mặc định 0.001)."""
+    """Doc lambda penalty factor tu fusion_config.yaml (mac dinh 0.001)."""
     try:
         from shared.utils.config_loader import load_fusion_config
         cfg = load_fusion_config()
@@ -36,22 +35,21 @@ def align(
     event_candidates: list[list[CandidateResult]],
     max_results: int = 100,
     lambda_penalty: float | None = None,
+    min_separation_sec: float = 1.0,
+    max_chains_per_video: int = 3,
 ) -> list[list[CandidateResult]]:
     """
-    Căn chỉnh thời gian giữa N sub-events sử dụng thuật toán DANTE.
-
-    ĐIỀU KIỆN TIÊN QUYẾT:
-      1. Tất cả keyframes trong 1 chuỗi trả về BẮT BUỘC phải thuộc CÙNG MỘT VIDEO (video_id giống nhau).
-      2. Thứ tự thời gian phải tăng dần: timestamp_mid(event_1) <= timestamp_mid(event_2) <= ...
+    Can chinh chuoi N su kien tuan tu trong video su dung Quy hoach dong (DANTE).
 
     Args:
-        event_candidates: Danh sách N danh sách CandidateResult.
-            event_candidates[i] chứa candidates cho sub-event i.
-        max_results: Số lượng chuỗi event tối đa trả về.
-        lambda_penalty: Hệ số phạt khoảng cách thời gian λ. None -> tự động nạp từ config.
+        event_candidates: Danh sach N danh sach CandidateResult (moi danh sach ung voi 1 sub-event).
+        max_results: So luong chuoi toi da can tra ve.
+        lambda_penalty: He so phat khoang cach thoi gian (None -> load tu config).
+        min_separation_sec: Khoang cach thoi gian toi thieu giua 2 su kien lien tiep (giay).
+        max_chains_per_video: So luong chuoi toi da duoc trich xuat tu moi video.
 
     Returns:
-        list[list[CandidateResult]]: Danh sách các chuỗi N keyframe trong cùng 1 video.
+        list[list[CandidateResult]]: Danh sach cac N-tuples keyframe duoc sap xep giam dan theo diem DP.
     """
     if not event_candidates or any(not c for c in event_candidates):
         return []
@@ -63,8 +61,7 @@ def align(
     if lambda_penalty is None:
         lambda_penalty = _get_lambda_penalty()
 
-    # 1. Group candidates strictly by video_id
-    # video_map: video_id -> dict(event_idx -> list[CandidateResult])
+    # 1. Gom nhom candidates theo tung video_id
     video_map: dict[str, dict[int, list[CandidateResult]]] = {}
 
     for event_idx, candidates in enumerate(event_candidates):
@@ -76,9 +73,8 @@ def align(
 
     valid_chains: list[tuple[float, list[CandidateResult]]] = []
 
-    # 2. Process each video independently
+    # 2. Xu ly quy hoach dong rieng biet cho tung video
     for v_id, events_dict in video_map.items():
-        # Flatten and collect all candidate keyframes for this specific video
         all_cands_in_video: list[CandidateResult] = []
         for ev_idx in range(num_events):
             all_cands_in_video.extend(events_dict[ev_idx])
@@ -86,67 +82,84 @@ def align(
         if not all_cands_in_video:
             continue
 
-        # Sort keyframes in this video by timestamp_mid
+        # Sap xep toan bo keyframe trong video theo thoi gian thuc
         sorted_kfs = sorted(all_cands_in_video, key=lambda c: (c.timestamp_mid, c.frame_id))
 
-        # Deduplicate keyframes in this video by timestamp_mid while preserving highest score
+        # Loai bo trung lap gan nhau (< 0.2s) va giu candidate diem cao nhat
         unique_kfs: list[CandidateResult] = []
-        seen_timestamps: set[float] = set()
+        seen_timestamps: list[float] = []
         for kf in sorted_kfs:
-            ts_key = round(kf.timestamp_mid, 2)
-            if ts_key not in seen_timestamps:
-                seen_timestamps.add(ts_key)
+            ts = float(kf.timestamp_mid if kf.timestamp_mid is not None else (kf.frame_id / 25.0))
+            if not any(abs(ts - prev_ts) < 0.2 for prev_ts in seen_timestamps):
+                seen_timestamps.append(ts)
                 unique_kfs.append(kf)
 
         T = len(unique_kfs)
         if T < num_events:
-            # Video does not have enough distinct keyframes/timestamps to form an N-tuple without duplicate timestamps
             continue
 
-        # Run DP for optimal strictly monotonic chain with distinct timestamps
-        import numpy as np
+        # Timestamps vector in seconds
+        kf_timestamps = np.array(
+            [float(c.timestamp_mid if c.timestamp_mid is not None else (c.frame_id / 25.0)) for c in unique_kfs],
+            dtype=np.float32,
+        )
 
-        # Similarity matrix S[num_events, T]
+        # Ma tran tuong dong S[num_events, T]
         S = np.zeros((num_events, T), dtype=np.float32)
         for i in range(num_events):
             ev_frame_scores = {c.frame_id: c.score for c in events_dict[i]}
             for t, kf in enumerate(unique_kfs):
                 S[i, t] = ev_frame_scores.get(kf.frame_id, 0.0)
 
+        # Bang quy hoach dong DP[num_events, T] va parent pointer
         DP = np.full((num_events, T), -np.inf, dtype=np.float32)
         parent = np.full((num_events, T), -1, dtype=np.int32)
 
-        for t in range(T):
-            DP[0, t] = S[0, t]
+        # Base case: event dau tien (i = 0)
+        DP[0, :] = S[0, :]
 
+        # DP Transitions: DP[i, t] = S[i, t] + max_{tau} (DP[i-1, tau] - lambda * (t_sec - tau_sec))
         for i in range(1, num_events):
             running_max = -np.inf
             best_tau = -1
+            tau_ptr = 0
+
             for t in range(T):
-                if t > 0:
-                    val = DP[i - 1, t - 1] + lambda_penalty * (t - 1)
-                    if val > running_max:
-                        running_max = val
-                        best_tau = t - 1
+                cur_time = kf_timestamps[t]
+
+                # Cap nhat running_max voi cac tau thoa man min_separation_sec
+                while tau_ptr < t and (cur_time - kf_timestamps[tau_ptr]) >= min_separation_sec:
+                    prev_val = DP[i - 1, tau_ptr]
+                    if prev_val > -np.inf:
+                        cand_val = prev_val + lambda_penalty * kf_timestamps[tau_ptr]
+                        if cand_val > running_max:
+                            running_max = cand_val
+                            best_tau = tau_ptr
+                    tau_ptr += 1
+
                 if running_max > -np.inf:
-                    DP[i, t] = S[i, t] + running_max - lambda_penalty * t
+                    DP[i, t] = S[i, t] + running_max - lambda_penalty * cur_time
                     parent[i, t] = best_tau
 
-        # Backtrack from candidate terminal keyframes in the last event row
-        top_t_ends = np.argsort(DP[num_events - 1])[::-1]
-        chains_from_this_video = 0
-        seen_frame_sets = set()
+        # 3. Backtrack tim top chuoi tot nhat tu hang cuoi cung DP[num_events - 1]
+        terminal_scores = DP[num_events - 1]
+        sorted_terminals = np.argsort(terminal_scores)[::-1]
 
-        for best_t_end in top_t_ends[:10]:
-            if chains_from_this_video >= 3:
+        chains_from_this_video = 0
+        seen_frame_tuples: set[tuple[int, ...]] = set()
+
+        for t_end in sorted_terminals:
+            if chains_from_this_video >= max_chains_per_video:
                 break
-            best_dp_score = float(DP[num_events - 1, best_t_end])
-            if best_dp_score <= -np.inf:
+
+            if terminal_scores[t_end] <= -np.inf:
                 continue
 
+            # Truy vet nguoc (Backtracking)
+            curr_t = int(t_end)
             chain_indices = [0] * num_events
-            curr_t = int(best_t_end)
             valid = True
+
             for i in range(num_events - 1, -1, -1):
                 chain_indices[i] = curr_t
                 if i > 0:
@@ -156,39 +169,47 @@ def align(
                         break
 
             if valid:
-                chain_candidates = [unique_kfs[k_idx] for k_idx in chain_indices]
-                ts_list = [round(c.timestamp_mid, 2) for c in chain_candidates]
-                frame_tuple = tuple(c.frame_id for c in chain_candidates)
-                if len(set(ts_list)) == num_events and ts_list == sorted(ts_list) and frame_tuple not in seen_frame_sets:
-                    seen_frame_sets.add(frame_tuple)
-                    # Chấm điểm đồng thuận đa sự kiện (All-Event Consensus Scoring):
-                    event_scores = [float(S[i, chain_indices[i]]) for i in range(num_events)]
-                    matched_count = sum(1 for sc in event_scores if sc > 0.01)
-                    avg_sim = sum(event_scores) / float(num_events)
-                    consensus_ratio = float(matched_count) / float(num_events)
-                    span_penalty = lambda_penalty * float(chain_indices[-1] - chain_indices[0])
+                chain_cands = [unique_kfs[idx] for idx in chain_indices]
+                chain_ts = [kf_timestamps[idx] for idx in chain_indices]
+                frame_tuple = tuple(c.frame_id for c in chain_cands)
 
-                    # Phạt mạnh các chuỗi chỉ có 1 sự kiện khớp và các sự kiện khác bằng 0
-                    chain_score = (avg_sim * (consensus_ratio ** 2)) - span_penalty
+                # Kiem tra don dieu nghiem ngat & khong trung lap chuoi
+                is_strictly_monotonic = all(chain_ts[k] < chain_ts[k + 1] for k in range(num_events - 1))
+                if is_strictly_monotonic and frame_tuple not in seen_frame_tuples:
+                    seen_frame_tuples.add(frame_tuple)
 
-                    valid_chains.append((chain_score, chain_candidates))
+                    # Tinh diem dong thuan (All-Event Consensus & Temporal Span Penalty)
+                    event_sims = [float(S[k, chain_indices[k]]) for k in range(num_events)]
+                    matched_count = sum(1 for s in event_sims if s > 0.01)
+                    avg_sim = sum(event_sims) / float(num_events)
+                    consensus_factor = (float(matched_count) / float(num_events)) ** 2
+                    span_seconds = float(chain_ts[-1] - chain_ts[0])
+                    span_penalty = lambda_penalty * span_seconds
+
+                    final_chain_score = (avg_sim * consensus_factor) - span_penalty
+
+                    # Gan diem cho tung frame de UI hien thi
+                    for k, cand in enumerate(chain_cands):
+                        cand.score = round(event_sims[k], 4)
+
+                    valid_chains.append((final_chain_score, chain_cands))
                     chains_from_this_video += 1
 
-        if chains_from_this_video == 0:
-            # Fallback for video with T >= num_events: select N keyframes with strictly increasing timestamps
-            indices = [int(round(i * (T - 1) / (num_events - 1))) for i in range(num_events)]
-            for i in range(1, num_events):
-                if indices[i] <= indices[i - 1]:
-                    indices[i] = indices[i - 1] + 1
-            if indices[-1] < T:
-                chain_candidates = [unique_kfs[idx] for idx in indices]
-                ts_list = [round(c.timestamp_mid, 2) for c in chain_candidates]
-                if len(set(ts_list)) == num_events and ts_list == sorted(ts_list):
-                    avg_score = sum(c.score for c in chain_candidates) / num_events
-                    valid_chains.append((avg_score, chain_candidates))
+        # Fallback cho video neu DP bi miss do threshold
+        if chains_from_this_video == 0 and T >= num_events:
+            step = (T - 1) / float(num_events - 1)
+            fallback_indices = [int(round(k * step)) for k in range(num_events)]
+            for k in range(1, num_events):
+                if fallback_indices[k] <= fallback_indices[k - 1]:
+                    fallback_indices[k] = fallback_indices[k - 1] + 1
 
-    # 3. Sort chains across videos by DANTE score descending
+            if fallback_indices[-1] < T:
+                fallback_cands = [unique_kfs[idx] for idx in fallback_indices]
+                fallback_ts = [kf_timestamps[idx] for idx in fallback_indices]
+                if all(fallback_ts[k] < fallback_ts[k + 1] for k in range(num_events - 1)):
+                    avg_sc = sum(c.score for c in fallback_cands) / num_events
+                    valid_chains.append((avg_sc * 0.5, fallback_cands))
+
+    # 4. Sap xep tat ca chuoi tren toan bo cac video theo diem giam dan
     valid_chains.sort(key=lambda x: x[0], reverse=True)
     return [chain for _, chain in valid_chains[:max_results]]
-
-
