@@ -435,44 +435,43 @@ async def _run_trake(
         candidate_vids: list[str] = []
         seen_vids: set[str] = set()
         for cand_list in event_candidates_list:
-            for c in cand_list[:50]:
+            for c in cand_list[:30]:
                 if c.video_id not in seen_vids:
                     seen_vids.add(c.video_id)
                     candidate_vids.append(c.video_id)
 
         # 4. Dense Similarity Matrix: Tính Cosine Similarity toàn phần từ Qdrant vectors
-        max_dense_vids = max(request.top_k * 2, 40)
+        max_dense_vids = max(request.top_k, 15)
         top_dense_vids = candidate_vids[:max_dense_vids]
         dense_matrices: dict[str, tuple[list[CandidateResult], np.ndarray]] = {}
 
-        if image_embedder is not None:
+        if image_embedder is not None and top_dense_vids:
             try:
                 dense_matrices = await dense_similarity.build_dense_matrices_for_videos(
                     sub_events=sub_events,
                     video_ids=top_dense_vids,
                     qdrant_client=qdrant_client,
                     image_embedder=image_embedder,
-                    limit_per_video=500,
+                    limit_per_video=300,
                 )
             except Exception as e:
                 logger.warning(f"Building dense similarity matrices failed: {e}")
 
-        # 5. Video-Level DANTE: Trích xuất frames dày đặc cho top 3 video có sẵn file gốc
+        # 5. Video-Level DANTE: Trích xuất frames dày đặc cho top 2 video có sẵn file gốc
         if image_embedder is not None and top_dense_vids:
             try:
                 sub_event_clip_vecs = await dense_similarity.encode_sub_events(sub_events, image_embedder)
                 if sub_event_clip_vecs.shape[0] > 0:
-                    for vid in top_dense_vids[:3]:
+                    for vid in top_dense_vids[:2]:
                         dense_sample_res = await dense_frame_extractor.extract_and_dense_score_video(
                             video_id=vid,
                             sub_event_embeddings=sub_event_clip_vecs,
                             image_embedder=image_embedder,
-                            interval_sec=0.5,
-                            max_frames=600,
+                            interval_sec=1.0,
+                            max_frames=150,
                         )
                         if dense_sample_res is not None:
                             dense_cands, dense_s_mat = dense_sample_res
-                            # Cập nhật hoặc ghi đè ma trận dense có độ phân giải cao hơn
                             dense_matrices[vid] = (dense_cands, dense_s_mat)
             except Exception as e:
                 logger.warning(f"Video-level dense sampling failed: {e}")

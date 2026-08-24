@@ -159,7 +159,7 @@ _GOOGLE_ERROR_MARKERS = (
 
 # deep_translator không set timeout cho requests.get() -> có thể treo vô hạn.
 # Giới hạn cứng mỗi lần dịch để request API không bao giờ bị chặn lâu.
-TRANSLATE_TIMEOUT_S = 15.0
+TRANSLATE_TIMEOUT_S = 2.5
 
 
 def _is_valid_translation(text: str, source: str) -> bool:

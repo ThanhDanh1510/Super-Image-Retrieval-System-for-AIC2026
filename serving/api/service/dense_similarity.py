@@ -77,14 +77,15 @@ async def encode_sub_events(
     if not sub_events:
         return np.zeros((0, 1024), dtype=np.float32)
 
-    # Dịch song ngữ sang tiếng Anh cho CLIP text encoder
-    en_sub_events = []
-    for ev in sub_events:
+    # Dịch song ngữ sang tiếng Anh đồng thời cho CLIP text encoder
+    async def _trans(text: str) -> str:
         try:
-            en_ev = await _translate(ev, target_lang="en")
-            en_sub_events.append(en_ev if en_ev else ev)
+            res = await _translate(text, target="en")
+            return res if res else text
         except Exception:
-            en_sub_events.append(ev)
+            return text
+
+    en_sub_events = list(await asyncio.gather(*[_trans(ev) for ev in sub_events]))
 
     # Encode bằng image_embedder.encode_text
     vecs = await asyncio.to_thread(image_embedder.encode_text, en_sub_events)

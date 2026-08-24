@@ -591,6 +591,7 @@ async def get_keyframes_by_video_id(
     """
     Lấy tất cả keyframe thuộc 1 video cụ thể theo video_id.
     """
+    collection_name = await _resolve_collection(client, collection_name)
     try:
         res, _ = await client.scroll(
             collection_name=collection_name,
@@ -628,6 +629,7 @@ async def get_keyframes_with_vectors_by_video_id(
     Returns:
         tuple (sorted_cands, sorted_vectors): danh sách candidate và vector tương ứng.
     """
+    collection_name = await _resolve_collection(client, collection_name)
     try:
         res, _ = await client.scroll(
             collection_name=collection_name,
@@ -661,5 +663,6 @@ async def get_keyframes_with_vectors_by_video_id(
     except Exception as err:
         logger.warning(f"Error fetching keyframe vectors for video {video_id}: {err}")
         return [], []
+
 
 
