@@ -368,16 +368,19 @@ async def _run_trake(
     6. DANTE DP Monotonic Alignment với First-Occurrence Bias
     7. Strict Single Video & Monotonicity Final Guard
     """
+    # 0. Tách sub-events từ raw Vietnamese query trước tiên
     if request.input_type == InputType.VOICE:
         base_res = await _run_voice(request, TaskType.TRAKE, qdrant_client, text_embedder, image_embedder, asr_model)
+        raw_query = base_res.query_text or request.query
     else:
-        base_res = await _run_text(request, TaskType.TRAKE, qdrant_client, text_embedder, image_embedder)
+        raw_query = request.query
 
-    sub_events = base_res.sub_events
-    if not sub_events or len(sub_events) < request.num_events:
-        parsed = sub_event_parser.parse_sub_events(request.query, target_num_events=request.num_events)
-        if parsed and len(parsed) >= 2:
-            sub_events = parsed
+    sub_events = sub_event_parser.parse_sub_events(raw_query, target_num_events=request.num_events)
+    if not sub_events or len(sub_events) < 2:
+        try:
+            sub_events = text_query._split_events(raw_query)
+        except Exception:
+            sub_events = [raw_query]
 
     results: list[list[CandidateResult]] = []
 
@@ -387,7 +390,7 @@ async def _run_trake(
             sub_events = sub_events[:n_events]
         elif len(sub_events) < n_events:
             while len(sub_events) < n_events:
-                sub_events.append(request.query)
+                sub_events.append(raw_query)
 
         # 1. Truy xuất song song candidates cho từng sub-event
         sub_event_top_k = max(request.top_k * 3, 150)
@@ -406,6 +409,7 @@ async def _run_trake(
         ]
         outputs = await asyncio.gather(*tasks)
         event_candidates_list = [out.candidates for out in outputs]
+        sub_events_en = [out.enhanced_query for out in outputs]
 
         # 2. Sub-Event Reranking: Chạy ViRanker / Jina M0 nếu được bật
         use_viranker = getattr(request, "use_viranker", True)
@@ -453,6 +457,7 @@ async def _run_trake(
                     qdrant_client=qdrant_client,
                     image_embedder=image_embedder,
                     limit_per_video=300,
+                    sub_events_en=sub_events_en,
                 )
             except Exception as e:
                 logger.warning(f"Building dense similarity matrices failed: {e}")
@@ -460,7 +465,9 @@ async def _run_trake(
         # 5. Video-Level DANTE: Trích xuất frames dày đặc cho top 2 video có sẵn file gốc
         if image_embedder is not None and top_dense_vids:
             try:
-                sub_event_clip_vecs = await dense_similarity.encode_sub_events(sub_events, image_embedder)
+                sub_event_clip_vecs = await dense_similarity.encode_sub_events(
+                    sub_events, image_embedder, sub_events_en=sub_events_en
+                )
                 if sub_event_clip_vecs.shape[0] > 0:
                     for vid in top_dense_vids[:2]:
                         dense_sample_res = await dense_frame_extractor.extract_and_dense_score_video(
@@ -560,8 +567,8 @@ async def _run_trake(
     return PipelineResult(
         candidates=[],
         task_type=TaskType.TRAKE,
-        enhanced_query=base_res.enhanced_query,
-        transcript=base_res.transcript,
+        enhanced_query=" ".join(sub_events_en) if "sub_events_en" in locals() and sub_events_en else raw_query,
+        transcript=base_res.transcript if "base_res" in locals() and base_res else None,
         sub_events=sub_events,
         chains=final_chains,
     )

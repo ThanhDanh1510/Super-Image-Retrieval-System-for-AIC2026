@@ -198,43 +198,101 @@ def _is_valid_translation(text: str, source: str) -> bool:
     return True
 
 
+_LOCAL_LLM_CACHE = None
+
+
+def _get_qwen_bundle():
+    """Lấy cached Qwen2.5 bundle cho offline translation và event splitting."""
+    global _LOCAL_LLM_CACHE
+    if _LOCAL_LLM_CACHE is not None:
+        return _LOCAL_LLM_CACHE
+    try:
+        from serving.api.core.models import ModelRegistry
+        import torch
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+
+        model_id = "Qwen/Qwen2.5-1.5B-Instruct"
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
+        model = AutoModelForCausalLM.from_pretrained(
+            model_id,
+            torch_dtype=torch.float16 if device == "cuda" else torch.float32,
+            device_map=device,
+            trust_remote_code=True,
+        )
+        model.eval()
+        _LOCAL_LLM_CACHE = {"model": model, "tokenizer": tokenizer, "device": device}
+        return _LOCAL_LLM_CACHE
+    except Exception as e:
+        logger.warning(f"Failed to load local Qwen2.5 model for translation: {e}")
+        return None
+
+
+def _translate_with_llm_sync(query: str, target: str, bundle: dict) -> str | None:
+    try:
+        import torch
+        model = bundle["model"]
+        tokenizer = bundle["tokenizer"]
+        device = bundle["device"]
+
+        target_lang = "English" if target == "en" else "Vietnamese"
+        source_lang = "Vietnamese" if target == "en" else "English"
+        prompt = (
+            f"Translate the following {source_lang} search query to {target_lang}. "
+            f"Output ONLY the direct translation without any commentary, quotes, or explanations.\n\n"
+            f"Query: {query}\n\nTranslation:"
+        )
+        messages = [
+            {"role": "system", "content": "You are a professional search query translator. Output only the clean translated query text."},
+            {"role": "user", "content": prompt}
+        ]
+        input_text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        inputs = tokenizer(input_text, return_tensors="pt").to(device)
+        with torch.no_grad():
+            out = model.generate(**inputs, max_new_tokens=128, do_sample=False)
+        res = tokenizer.decode(out[0][inputs.input_ids.shape[1]:], skip_special_tokens=True).strip(' "\'\n\t`')
+        return res if res else None
+    except Exception as e:
+        logger.warning(f"Local LLM translation failed: {e}")
+        return None
+
+
 async def _translate(query: str, target: str) -> str | None:
     """
-    Dịch `query` sang ngôn ngữ `target` bằng deep_translator.GoogleTranslator,
-    kèm validate + retry để trang lỗi HTML của Google không bao giờ lọt vào kết quả.
-
-    Args:
-        query: Query nguồn (tiếng Việt hoặc tiếng Anh).
-        target: Mã ngôn ngữ đích ("en" / "vi").
-
-    Returns:
-        Bản dịch hợp lệ, hoặc None nếu mọi lần dịch đều lỗi/không hợp lệ.
+    Dịch `query` sang ngôn ngữ `target` ("en" / "vi").
+    Ưu tiên dùng model Qwen2.5-1.5B-Instruct cục bộ trên GPU/CPU (siêu nhanh, 100% offline).
+    Fallback sang GoogleTranslator / MyMemoryTranslator nếu LLM không khả dụng.
     """
+    if not query or not query.strip():
+        return ""
+
     import asyncio
-    from deep_translator import GoogleTranslator
 
-    attempts = 0
-    while attempts < 2:
-        attempts += 1
+    # 1. Ưu tiên Local Qwen2.5 LLM trước (nhanh, 100% offline, không lỗi mạng)
+    bundle = _get_qwen_bundle()
+    if bundle is not None:
         try:
-            translator = GoogleTranslator(source="auto", target=target)
-            # deep_translator KHÔNG set timeout cho requests.get() -> có thể treo vô hạn.
-            # Bọc thêm timeout cứng để không bao giờ chặn request > TRANSLATE_TIMEOUT_S.
-            out = await asyncio.wait_for(
-                asyncio.to_thread(translator.translate, query),
-                timeout=TRANSLATE_TIMEOUT_S,
-            )
-        except Exception as e:
-            logger.warning(f"GoogleTranslator (attempt {attempts} -> {target}) failed: {e}")
-            out = None
+            res = await asyncio.to_thread(_translate_with_llm_sync, query, target, bundle)
+            if res and _is_valid_translation(res, query):
+                return res
+        except Exception as err:
+            logger.debug(f"Local LLM translation fallback: {err}")
 
-        if out and _is_valid_translation(out, query):
-            return out
+    # 2. Fallback Web Translators (GoogleTranslator / MyMemory)
+    from deep_translator import GoogleTranslator, MyMemoryTranslator
 
-        logger.warning(
-            f"GoogleTranslator (attempt {attempts} -> {target}) returned non-translation "
-            f"output (len={len(out or '')}): {str(out)[:120]!r}. Falling back."
-        )
+    for translator_cls in (GoogleTranslator, MyMemoryTranslator):
+        for _ in range(2 if translator_cls == GoogleTranslator else 1):
+            try:
+                translator = translator_cls(source="auto", target=target)
+                out = await asyncio.wait_for(
+                    asyncio.to_thread(translator.translate, query),
+                    timeout=TRANSLATE_TIMEOUT_S,
+                )
+                if out and _is_valid_translation(out, query):
+                    return out
+            except Exception:
+                pass
 
     return None
 
@@ -270,7 +328,6 @@ async def _enhance_query(raw_query: str) -> tuple[str, str]:
 
     if has_vietnamese_accent:
         # Query gốc là tiếng Việt -> Dịch sang tiếng Anh cho CLIP
-        # Với cụm từ ngắn (<= 6 từ), dùng Title Case khi dịch để bảo toàn danh từ riêng (Đào Sơn Tây -> Dao Son Tay)
         words = cleaned_query.split()
         query_to_translate = cleaned_query.title() if len(words) <= 6 else cleaned_query
 
@@ -303,69 +360,14 @@ async def _enhance_query(raw_query: str) -> tuple[str, str]:
 
 def _split_events(query: str) -> list[str]:
     """
-    Tách TRAKE query thành N sub-event descriptions.
-    Hybrid approach: Pattern-based (nhanh) → LLM fallback (chính xác).
-
-    Args:
-        query: Query tiếng Anh đã enhanced (hoặc tiếng Việt).
-
-    Returns:
-        List các sub-event strings. Mỗi string mô tả 1 khoảnh khắc.
-
-    Raises:
-        ValueError: Nếu không thể tách được ít nhất 2 sub-events từ query.
+    Tách TRAKE query thành N sub-event descriptions bằng sub_event_parser.
     """
-    import re
+    from serving.api.service.retrieval import sub_event_parser
+    events = sub_event_parser.parse_sub_events(query)
+    if len(events) >= 2:
+        return events
 
-    # --- Strategy 1: Pattern-based (nhanh, ~0s) ---
-
-    # 1a. Explicit labels: E1:, E2:, 1., 2., - , *
-    # Hỗ trợ cả single-line (cách nhau bởi space) và multi-line
-    explicit_pattern = r"(?:E?\d+[\.:\)]\s*)(.+?)(?=(?:E?\d+[\.:\)]\s*)|\Z)"
-    matches = re.findall(explicit_pattern, query, flags=re.DOTALL)
-    if len(matches) >= 2:
-        return [m.strip(" .,;-") for m in matches if m.strip(" .,;-")]
-
-    # 1b. Bullet points: -, *, •
-    bullet_pattern = r"(?:^|\n)\s*[\-\*\•]\s*(.+?)(?=(?:\n\s*[\-\*\•]\s*)|\Z)"
-    matches = re.findall(bullet_pattern, query, flags=re.MULTILINE | re.DOTALL)
-    if len(matches) >= 2:
-        return [m.strip(" .,;-") for m in matches if m.strip(" .,;-")]
-
-    # 1c. Newline split (có số dòng >= 2)
-    if "\n" in query:
-        raw_lines = [line.strip(" .,;-•*") for line in query.split("\n") if line.strip(" .,;-•*")]
-        lines = []
-        for l in raw_lines:
-            cleaned = re.sub(
-                r"^(?:then|sau đó|tiếp theo|next|after that|followed by|và|and|rồi|bắt đầu bằng|bắt đầu với|bắt đầu|cuối cùng|finally)\s+",
-                "",
-                l,
-                flags=re.IGNORECASE,
-            ).strip(" .,;-•*")
-            lines.append(cleaned if cleaned else l)
-        if len(lines) >= 2:
-            return lines
-
-    # 1c. Temporal markers / connectors
-    connectors_pattern = (
-        r"\b(?:bắt đầu(?: bằng| với)?|tiếp theo|sau đó|rồi|cuối cùng|"
-        r"trước tiếp|cuối cùng|finally|then|after(?: that|wards)?|followed by|next|subsequently|later|"
-        r"và|and)\b"
-    )
-    segments = re.split(connectors_pattern, query, flags=re.IGNORECASE)
-    sub_events = [s.strip(" .,;-") for s in segments if s and len(s.strip(" .,;-")) > 5]
-
-    if len(sub_events) >= 2:
-        return sub_events
-
-    # 1d. Phân tách theo dấu chấm/phẩy (events dài > 5 từ)
-    punct_segments = re.split(r"[.;,]", query)
-    sub_events = [s.strip(" .,;-") for s in punct_segments if s and len(s.strip(" .,;-")) > 5]
-    if len(sub_events) >= 2:
-        return sub_events
-
-    # --- Strategy 2: LLM-based fallback (~1-2s) ---
+    # Fallback sang LLM splitting nếu regex parser không tách được
     llm_events = _split_events_llm(query)
     if len(llm_events) >= 2:
         return llm_events
@@ -384,43 +386,35 @@ def _split_events_llm(query: str) -> list[str]:
         List các sub-event strings. Trả về [] nếu LLM fail.
     """
     try:
-        from serving.api.core.models import ModelRegistry
-
-        # Standalone loader nếu chưa nạp
-        model_id = "Qwen/Qwen2.5-1.5B-Instruct"
         import torch
-        from transformers import AutoModelForCausalLM, AutoTokenizer
+        bundle = _get_qwen_bundle()
+        if not bundle:
+            return []
+        model, tokenizer, device = bundle["model"], bundle["tokenizer"], bundle["device"]
 
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
-        model = AutoModelForCausalLM.from_pretrained(
-            model_id,
-            torch_dtype=torch.float16 if device == "cuda" else torch.float32,
-            device_map=device,
-            trust_remote_code=True,
-        )
-        model.eval()
-
-        prompt = f"""Tách câu sau thành các sự kiện riêng biệt, mỗi sự kiện trên 1 dòng. Chỉ liệt kê sự kiện, không giải thích.
+        prompt = f"""Tách câu sau thành các sự kiện riêng biệt theo thứ tự thời gian, mỗi sự kiện trên 1 dòng. Chỉ liệt kê sự kiện, không giải thích.
 
 Query: "{query}"
 
 Sự kiện:"""
 
-        inputs = tokenizer(prompt, return_tensors="pt", max_length=512, truncation=True).to(model.device)
+        messages = [
+            {"role": "system", "content": "You are a temporal event parsing assistant. Output only the list of sequential events, one per line."},
+            {"role": "user", "content": prompt}
+        ]
+        input_text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        inputs = tokenizer(input_text, return_tensors="pt", max_length=512, truncation=True).to(device)
 
         with torch.no_grad():
             outputs = model.generate(
                 **inputs,
                 max_new_tokens=256,
-                temperature=0.3,
                 do_sample=False,
                 pad_token_id=tokenizer.eos_token_id,
             )
 
         response = tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
 
-        # Parse response → events
         events = []
         for line in response.strip().split("\n"):
             line = line.strip(" .,;-•*1234567890.)")

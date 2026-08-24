@@ -68,6 +68,7 @@ def compute_dense_similarity(
 async def encode_sub_events(
     sub_events: list[str],
     image_embedder,
+    sub_events_en: list[str] | None = None,
 ) -> np.ndarray:
     """
     Encode N sub-events thành N vector CLIP text (shape: [N, 1024], L2-normalized).
@@ -77,15 +78,18 @@ async def encode_sub_events(
     if not sub_events:
         return np.zeros((0, 1024), dtype=np.float32)
 
-    # Dịch song ngữ sang tiếng Anh đồng thời cho CLIP text encoder
-    async def _trans(text: str) -> str:
-        try:
-            res = await _translate(text, target="en")
-            return res if res else text
-        except Exception:
-            return text
+    if sub_events_en and len(sub_events_en) == len(sub_events):
+        en_sub_events = sub_events_en
+    else:
+        # Dịch song ngữ sang tiếng Anh đồng thời cho CLIP text encoder
+        async def _trans(text: str) -> str:
+            try:
+                res = await _translate(text, target="en")
+                return res if res else text
+            except Exception:
+                return text
 
-    en_sub_events = list(await asyncio.gather(*[_trans(ev) for ev in sub_events]))
+        en_sub_events = list(await asyncio.gather(*[_trans(ev) for ev in sub_events]))
 
     # Encode bằng image_embedder.encode_text
     vecs = await asyncio.to_thread(image_embedder.encode_text, en_sub_events)
@@ -108,6 +112,7 @@ async def build_dense_matrices_for_videos(
     qdrant_client,
     image_embedder,
     limit_per_video: int = 500,
+    sub_events_en: list[str] | None = None,
 ) -> dict[str, tuple[list[CandidateResult], np.ndarray]]:
     """
     Lấy keyframes và vector từ Qdrant cho danh sách video_ids và tính ma trận S_dense[N, T].
@@ -119,7 +124,7 @@ async def build_dense_matrices_for_videos(
         return {}
 
     # 1. Encode N sub-events sang vector CLIP
-    sub_event_vecs = await encode_sub_events(sub_events, image_embedder)
+    sub_event_vecs = await encode_sub_events(sub_events, image_embedder, sub_events_en=sub_events_en)
     if sub_event_vecs.shape[0] == 0:
         return {}
 

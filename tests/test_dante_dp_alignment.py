@@ -58,6 +58,20 @@ def test_sub_event_parser_newlines():
     assert "Chon hang tren ke" in events[0]
 
 
+def test_sub_event_parser_complex_preamble_and_e_tags():
+    query = (
+        "Đoạn video bắt đầu bằng ảnh cận đầu một con lân trắng, mũi đỏ, bên cạnh lá cờ trắng viền đỏ. "
+        "E1 Khoảnh khắc đầu tiên xuất hiện đầy đủ hai con rồng vàng đang xoay vòng. "
+        "E2 Khoảnh khắc đầu tiên con lân hoàn tất cú xoay người trên các thanh trụ (thời điểm đầu tiên các chân của lân đặt trên trụ sau khi xoay). "
+        "E3 Khoảnh khắc đầu tiên dùi chạm vào kẻng đồng múa lân."
+    )
+    events = parse_sub_events(query, target_num_events=3)
+    assert len(events) == 3
+    assert "hai con rồng vàng đang xoay vòng" in events[0]
+    assert "con lân hoàn tất cú xoay người" in events[1]
+    assert "dùi chạm vào kẻng đồng" in events[2]
+
+
 def test_dante_dp_monotonic_alignment_basic():
     # Tao tap candidate cho 3 su kien trong 2 video: L21_V001 (khop tot) va L21_V002 (sai thu tu)
     cands_e1 = [
