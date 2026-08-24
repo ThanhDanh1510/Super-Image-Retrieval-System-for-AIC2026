@@ -585,7 +585,7 @@ def _scored_point_to_candidate(scored_point: any) -> CandidateResult:
 async def get_keyframes_by_video_id(
     client: AsyncQdrantClient,
     video_id: str,
-    limit: int = 100,
+    limit: int = 500,
     collection_name: str = PRODUCTION_ALIAS,
 ) -> list[CandidateResult]:
     """
@@ -613,4 +613,53 @@ async def get_keyframes_by_video_id(
     except Exception as err:
         logger.warning(f"Error fetching keyframes for video {video_id}: {err}")
         return []
+
+
+async def get_keyframes_with_vectors_by_video_id(
+    client: AsyncQdrantClient,
+    video_id: str,
+    limit: int = 500,
+    vector_name: str = "image_dense",
+    collection_name: str = PRODUCTION_ALIAS,
+) -> tuple[list[CandidateResult], list[list[float]]]:
+    """
+    Lấy tất cả keyframe và vector tương ứng (mặc định image_dense) của 1 video.
+
+    Returns:
+        tuple (sorted_cands, sorted_vectors): danh sách candidate và vector tương ứng.
+    """
+    try:
+        res, _ = await client.scroll(
+            collection_name=collection_name,
+            scroll_filter=Filter(
+                must=[FieldCondition(key="video_id", match=MatchText(text=video_id))]
+            ),
+            limit=limit,
+            with_payload=True,
+            with_vectors=[vector_name],
+        )
+        items = []
+        for point in res:
+            try:
+                cand = _scored_point_to_candidate(point)
+                if cand.video_id == video_id:
+                    vec = None
+                    if isinstance(point.vector, dict):
+                        vec = point.vector.get(vector_name)
+                    elif isinstance(point.vector, list):
+                        vec = point.vector
+                    if vec is not None:
+                        items.append((cand, vec))
+            except Exception:
+                pass
+
+        # Sắp xếp theo thứ tự thời gian
+        items.sort(key=lambda item: (item[0].timestamp_mid, item[0].frame_id))
+        sorted_cands = [item[0] for item in items]
+        sorted_vectors = [item[1] for item in items]
+        return sorted_cands, sorted_vectors
+    except Exception as err:
+        logger.warning(f"Error fetching keyframe vectors for video {video_id}: {err}")
+        return [], []
+
 

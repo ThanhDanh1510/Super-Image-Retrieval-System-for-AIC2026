@@ -61,6 +61,12 @@ reranker:
 
 # --- DANTE Temporal Aligner Configuration ------------------------------------
 temporal_aligner:
-  lambda_penalty: 0.001    # λ penalty cho khoảng cách thời gian giữa events
-  max_results: 100         # Số lượng chuỗi event tối đa trả về
+  lambda_penalty: 0.001          # λ penalty cho khoảng cách thời gian giữa events
+  max_results: 100               # Số lượng chuỗi event tối đa trả về
+  earliest_bias: 0.05            # Hệ số ưu tiên chuỗi xuất hiện sớm nhất (First-Occurrence Bias)
+  min_separation_sec: 1.0        # Khoảng cách tối thiểu giữa 2 events liên tiếp (giây)
+  max_chains_per_video: 5        # Số chuỗi tối đa trích xuất từ 1 video
+  dense_sampling_interval_sec: 0.5 # Bước nhảy lấy mẫu khung hình video-level (giây)
+  max_dense_videos: 3            # Số lượng video top đầu chạy Dense Frame Extraction
+  enable_sub_event_reranking: true # Bật rerank độc lập cho từng sub-event
 

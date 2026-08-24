@@ -35,7 +35,7 @@ from serving.api.service.retrieval.text_query import TextQueryInput, TextQueryOu
 from serving.api.service.retrieval.image_query import ImageQueryInput, ImageQueryOutput
 from serving.api.service.retrieval.voice_query import VoiceQueryInput, VoiceQueryOutput
 from serving.api.service.reranker import rerank_service
-from serving.api.service import temporal_aligner
+from serving.api.service import temporal_aligner, dense_similarity, dense_frame_extractor
 from serving.api.repo import qdrant_repo
 from serving.api.core.config import get_settings
 
@@ -359,11 +359,14 @@ async def _run_trake(
     model_registry=None,
 ) -> PipelineResult:
     """
-    Xử lý tìm kiếm chuỗi thời gian (TRAKE):
-    1. Phân rã query thành sub-events
+    Xử lý tìm kiếm chuỗi thời gian (TRAKE Precision Engine):
+    1. Phân rã query thành N sub-events
     2. Retrieve candidates song song cho từng sub-event
-    3. Enrich video timeline
-    4. DANTE Alignment thuật toán Dynamic Programming
+    3. Rerank từng sub-event với ViRanker (Cross-Encoder) nếu được bật
+    4. Dense Similarity Matrix: Tính True Cosine Similarity S[N, T] từ vector Qdrant
+    5. Video-Level DANTE: Lấy mẫu khung hình dày đặc (0.5s/frame) cho top candidate videos có file gốc
+    6. DANTE DP Monotonic Alignment với First-Occurrence Bias
+    7. Strict Single Video & Monotonicity Final Guard
     """
     if request.input_type == InputType.VOICE:
         base_res = await _run_voice(request, TaskType.TRAKE, qdrant_client, text_embedder, image_embedder, asr_model)
@@ -386,6 +389,7 @@ async def _run_trake(
             while len(sub_events) < n_events:
                 sub_events.append(request.query)
 
+        # 1. Truy xuất song song candidates cho từng sub-event
         sub_event_top_k = max(request.top_k * 3, 150)
         tasks = [
             text_query.process(
@@ -403,29 +407,98 @@ async def _run_trake(
         outputs = await asyncio.gather(*tasks)
         event_candidates_list = [out.candidates for out in outputs]
 
-        # Thu thập top video_ids để enrich
-        candidate_vids: set[str] = set()
+        # 2. Sub-Event Reranking: Chạy ViRanker / Jina M0 nếu được bật
+        use_viranker = getattr(request, "use_viranker", True)
+        use_jina_m0 = getattr(request, "use_jina_m0", False)
+        if (use_viranker or use_jina_m0) and event_candidates_list:
+            try:
+                rerank_tasks = [
+                    rerank_service.rerank(
+                        query=sub_events[i],
+                        candidates=event_candidates_list[i],
+                        enhanced_query=outputs[i].enhanced_query if i < len(outputs) else None,
+                        keyframes_root_dir=str(get_settings().DATA_DIR),
+                        use_viranker=use_viranker,
+                        use_jina_m0=use_jina_m0,
+                        model_registry=model_registry,
+                    )
+                    for i in range(len(sub_events))
+                ]
+                reranked_lists = await asyncio.gather(*rerank_tasks, return_exceptions=True)
+                for i, r_res in enumerate(reranked_lists):
+                    if isinstance(r_res, list):
+                        event_candidates_list[i] = r_res
+            except Exception as e:
+                logger.warning(f"Sub-event reranking failed, proceeding with initial candidates: {e}")
+
+        # 3. Thu thập danh sách candidate video_ids ưu tiên
+        candidate_vids: list[str] = []
+        seen_vids: set[str] = set()
         for cand_list in event_candidates_list:
             for c in cand_list[:50]:
-                candidate_vids.add(c.video_id)
+                if c.video_id not in seen_vids:
+                    seen_vids.add(c.video_id)
+                    candidate_vids.append(c.video_id)
 
-        max_enrich_vids = max(request.top_k * 2, 60)
-        enrich_tasks = [
-            qdrant_repo.get_keyframes_by_video_id(qdrant_client, v_id)
-            for v_id in list(candidate_vids)[:max_enrich_vids]
-        ]
-        enriched_results = await asyncio.gather(*enrich_tasks)
-        for video_kfs in enriched_results:
-            if video_kfs:
-                for ev_cands in event_candidates_list:
-                    existing_frames = {c.frame_id for c in ev_cands}
-                    for kf in video_kfs:
-                        if kf.frame_id not in existing_frames:
-                            ev_cands.append(kf)
+        # 4. Dense Similarity Matrix: Tính Cosine Similarity toàn phần từ Qdrant vectors
+        max_dense_vids = max(request.top_k * 2, 40)
+        top_dense_vids = candidate_vids[:max_dense_vids]
+        dense_matrices: dict[str, tuple[list[CandidateResult], np.ndarray]] = {}
 
+        if image_embedder is not None:
+            try:
+                dense_matrices = await dense_similarity.build_dense_matrices_for_videos(
+                    sub_events=sub_events,
+                    video_ids=top_dense_vids,
+                    qdrant_client=qdrant_client,
+                    image_embedder=image_embedder,
+                    limit_per_video=500,
+                )
+            except Exception as e:
+                logger.warning(f"Building dense similarity matrices failed: {e}")
+
+        # 5. Video-Level DANTE: Trích xuất frames dày đặc cho top 3 video có sẵn file gốc
+        if image_embedder is not None and top_dense_vids:
+            try:
+                sub_event_clip_vecs = await dense_similarity.encode_sub_events(sub_events, image_embedder)
+                if sub_event_clip_vecs.shape[0] > 0:
+                    for vid in top_dense_vids[:3]:
+                        dense_sample_res = await dense_frame_extractor.extract_and_dense_score_video(
+                            video_id=vid,
+                            sub_event_embeddings=sub_event_clip_vecs,
+                            image_embedder=image_embedder,
+                            interval_sec=0.5,
+                            max_frames=600,
+                        )
+                        if dense_sample_res is not None:
+                            dense_cands, dense_s_mat = dense_sample_res
+                            # Cập nhật hoặc ghi đè ma trận dense có độ phân giải cao hơn
+                            dense_matrices[vid] = (dense_cands, dense_s_mat)
+            except Exception as e:
+                logger.warning(f"Video-level dense sampling failed: {e}")
+
+        # 6. Timeline Enrichment cho các candidate còn lại (để không bị thiếu frame)
+        enrich_vids = [v for v in candidate_vids[:max_dense_vids] if v not in dense_matrices]
+        if enrich_vids:
+            enrich_tasks = [
+                qdrant_repo.get_keyframes_by_video_id(qdrant_client, v_id, limit=500)
+                for v_id in enrich_vids
+            ]
+            enriched_results = await asyncio.gather(*enrich_tasks, return_exceptions=True)
+            for video_kfs in enriched_results:
+                if isinstance(video_kfs, list) and video_kfs:
+                    for ev_cands in event_candidates_list:
+                        existing_frames = {c.frame_id for c in ev_cands}
+                        for kf in video_kfs:
+                            if kf.frame_id not in existing_frames:
+                                ev_cands.append(kf)
+
+        # 7. DANTE DP Monotonic Alignment Engine
         aligned_chains = temporal_aligner.align(
             event_candidates=event_candidates_list,
             max_results=request.top_k * 2,
+            dense_matrices=dense_matrices if dense_matrices else None,
+            max_chains_per_video=5,
         )
         results = aligned_chains
 
@@ -456,7 +529,7 @@ async def _run_trake(
                 for i in range(0, min(len(uniq_v_cands) - n + 1, 5)):
                     results.append(uniq_v_cands[i : i + n])
 
-    # Final Guard: Enforce strict single video & monotonic timestamps
+    # 8. Final Guard: Enforce strict single video & monotonic timestamps
     final_chains: list[list[CandidateResult]] = []
     n_req = request.num_events
     seen_chain_signatures: set[tuple[str, ...]] = set()

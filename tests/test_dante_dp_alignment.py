@@ -109,3 +109,74 @@ def test_dante_dp_min_separation_window():
     top_chain = aligned_chains[0]
     assert top_chain[0].frame_id == 100
     assert top_chain[1].frame_id == 200 # Phai chon frame 200 thoa man min separation 1.0s
+
+
+def test_dense_similarity_computation():
+    import numpy as np
+    from serving.api.service.dense_similarity import compute_dense_similarity
+
+    # N=3 sub-events, T=4 keyframes, D=8
+    queries = np.random.randn(3, 8).astype(np.float32)
+    keyframes = np.random.randn(4, 8).astype(np.float32)
+
+    sim = compute_dense_similarity(queries, keyframes)
+    assert sim.shape == (3, 4)
+    assert np.all(sim >= 0.0)
+    assert np.all(sim <= 1.0)
+
+
+def test_dante_dp_earliest_bias():
+    # 2 chuoi cung video co score tuong duong nhau, chuoi xuat hien som hon (t=2s -> t=6s) phai dung tren chuoi muon hon (t=20s -> t=24s)
+    cands_e1 = [
+        _create_cand(video_id="L23_V001", frame_id=10, timestamp_mid=2.0, score=0.9),
+        _create_cand(video_id="L23_V001", frame_id=100, timestamp_mid=20.0, score=0.9),
+    ]
+    cands_e2 = [
+        _create_cand(video_id="L23_V001", frame_id=30, timestamp_mid=6.0, score=0.9),
+        _create_cand(video_id="L23_V001", frame_id=120, timestamp_mid=24.0, score=0.9),
+    ]
+
+    event_candidates = [cands_e1, cands_e2]
+    aligned_chains = align(event_candidates, max_results=5, earliest_bias=0.1)
+
+    assert len(aligned_chains) >= 2
+    top_chain = aligned_chains[0]
+    assert top_chain[0].frame_id == 10 # Chuoi som hon duoc uu tien
+    assert top_chain[1].frame_id == 30
+
+
+def test_dante_dp_dense_matrices_integration():
+    import numpy as np
+    # Tao dense matrix S[2, 3] cho video L24_V024
+    dense_kfs = [
+        _create_cand(video_id="L24_V024", frame_id=9807, timestamp_mid=10.0, score=0.0),
+        _create_cand(video_id="L24_V024", frame_id=10158, timestamp_mid=15.0, score=0.0),
+        _create_cand(video_id="L24_V024", frame_id=10210, timestamp_mid=20.0, score=0.0),
+    ]
+    # S matrix: Event 0 match frame 9807 (0.95), Event 1 match frame 10158 (0.92), Event 2 match frame 10210 (0.88)
+    S_dense = np.array([
+        [0.95, 0.10, 0.05],
+        [0.10, 0.92, 0.15],
+        [0.05, 0.10, 0.88],
+    ], dtype=np.float32)
+
+    dense_matrices = {
+        "L24_V024": (dense_kfs, S_dense)
+    }
+
+    # Pass empty sparse candidate list, DP will use dense_matrices
+    event_candidates = [[dense_kfs[0]], [dense_kfs[1]], [dense_kfs[2]]]
+    aligned_chains = align(
+        event_candidates=event_candidates,
+        max_results=5,
+        dense_matrices=dense_matrices,
+        min_separation_sec=1.0,
+    )
+
+    assert len(aligned_chains) >= 1
+    top_chain = aligned_chains[0]
+    assert len(top_chain) == 3
+    assert top_chain[0].frame_id == 9807
+    assert top_chain[1].frame_id == 10158
+    assert top_chain[2].frame_id == 10210
+
