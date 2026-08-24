@@ -404,6 +404,7 @@ async def _run_trake(
                     raw_query=q_text,
                     task_type=TaskType.KIS,
                     top_k=sub_event_top_k,
+                    context=preamble if q_text != preamble else None,
                 ),
                 qdrant_client=qdrant_client,
                 text_embedder=text_embedder,
@@ -440,15 +441,23 @@ async def _run_trake(
             except Exception as e:
                 logger.warning(f"Sub-event reranking failed, proceeding with initial candidates: {e}")
 
-        # 3. Thu thập danh sách candidate video_ids ưu tiên
+        # 3. Thu thập danh sách candidate video_ids ưu tiên và tính điểm Intro Match
         candidate_vids: list[str] = []
         seen_vids: set[str] = set()
+        intro_score_by_vid: dict[str, float] = {}
 
         # 3.1 Ưu tiên video khớp với Preamble (đặc biệt các cảnh mở đầu video)
         if preamble_candidates:
             is_start_desc = any(w in (preamble or "").lower() for w in ["bắt đầu", "đầu tiên", "mở đầu", "starts with", "begins"])
-            for c in preamble_candidates[:50]:
-                if is_start_desc and c.timestamp_mid > 40.0:
+            for c in preamble_candidates:
+                if is_start_desc:
+                    if c.timestamp_mid <= 35.0:
+                        intro_score_by_vid[c.video_id] = max(intro_score_by_vid.get(c.video_id, 0.0), c.score)
+                else:
+                    intro_score_by_vid[c.video_id] = max(intro_score_by_vid.get(c.video_id, 0.0), c.score)
+
+            for c in sorted(preamble_candidates, key=lambda x: x.score, reverse=True)[:50]:
+                if is_start_desc and c.timestamp_mid > 35.0:
                     continue  # Bỏ qua nếu frame nằm ngoài đoạn mở đầu video
                 if c.video_id not in seen_vids:
                     seen_vids.add(c.video_id)
@@ -551,8 +560,8 @@ async def _run_trake(
             if len(uniq_v_cands) >= n:
                 results.append(uniq_v_cands[:n])
 
-    # 8. Final Guard: Enforce strict single video, monotonic timestamps, and Distinct Video Diversity
-    final_chains: list[list[CandidateResult]] = []
+    # 8. Final Guard: Enforce strict single video, monotonic timestamps, Distinct Video Diversity, and Intro Fusion
+    scored_chains: list[tuple[float, list[CandidateResult]]] = []
     n_req = request.num_events
     seen_chain_signatures: set[tuple[str, ...]] = set()
     seen_video_ids: set[str] = set()
@@ -563,10 +572,6 @@ async def _run_trake(
 
         target_vid = chain[0].video_id
         if not all(c.video_id == target_vid for c in chain):
-            continue
-
-        # Đảm bảo mỗi Video chỉ xuất hiện tối đa 1 lần trong top-K kết quả
-        if target_vid in seen_video_ids:
             continue
 
         sorted_chain = sorted(chain, key=lambda c: (c.timestamp_mid, c.frame_id))
@@ -580,10 +585,29 @@ async def _run_trake(
             sig = tuple(f"{c.video_id}_{c.frame_id}" for c in sorted_chain)
             if sig not in seen_chain_signatures:
                 seen_chain_signatures.add(sig)
-                seen_video_ids.add(target_vid)
-                final_chains.append(sorted_chain)
-                if len(final_chains) >= request.top_k:
-                    break
+                
+                # Tính điểm tổng hợp: Fused DP similarity + Intro Match
+                dp_avg_score = sum(c.score for c in sorted_chain) / float(len(sorted_chain))
+                intro_score = intro_score_by_vid.get(target_vid, 0.0) if 'intro_score_by_vid' in locals() else 0.0
+                
+                if intro_score > 0.0:
+                    final_rank_score = 0.65 * dp_avg_score + 0.35 * intro_score
+                else:
+                    final_rank_score = dp_avg_score
+
+                scored_chains.append((final_rank_score, sorted_chain))
+
+    # Sắp xếp lại theo điểm kết hợp giảm dần
+    scored_chains.sort(key=lambda x: x[0], reverse=True)
+
+    final_chains: list[list[CandidateResult]] = []
+    for score, sorted_chain in scored_chains:
+        target_vid = sorted_chain[0].video_id
+        if target_vid not in seen_video_ids:
+            seen_video_ids.add(target_vid)
+            final_chains.append(sorted_chain)
+            if len(final_chains) >= request.top_k:
+                break
 
     return PipelineResult(
         candidates=[],

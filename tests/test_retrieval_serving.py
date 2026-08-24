@@ -86,7 +86,7 @@ def test_is_valid_translation_accepts_real_translation():
 @pytest.mark.anyio
 async def test_enhance_query_falls_back_when_translation_is_error_page(monkeypatch):
     """Khi Google trả về trang lỗi, enhanced_query phải giữ nguyên query gốc (không rò rỉ 'Error 500')."""
-    async def fake_translate(query, target):
+    async def fake_translate(query, target, *args, **kwargs):
         return "Error 500 (Server Error)!!1500.That’s an error. Please try again later."
 
     monkeypatch.setattr(text_query, "_translate", fake_translate)

@@ -50,6 +50,9 @@ class TextQueryInput:
     search_mode: str = "all"
     """Chế độ tìm kiếm: 'all', 'embedding', 'ocr', 'asr'."""
 
+    context: str | None = None
+    """Ngữ cảnh tổng quan của video (Preamble / Global video context) để làm giàu sub-events."""
+
 
 @dataclass
 class TextQueryOutput:
@@ -84,7 +87,7 @@ async def process(
     import time
 
     _t0 = time.perf_counter()
-    en_query, vi_query = await _enhance_query(query_input.raw_query)
+    en_query, vi_query = await _enhance_query(query_input.raw_query, context=query_input.context)
     _t1 = time.perf_counter()
     logger.info(f"[PROFILE] enhance_query: {(_t1 - _t0) * 1000:.2f}ms")
 
@@ -178,7 +181,7 @@ def _is_valid_translation(text: str, source: str) -> bool:
         source: Query nguồn gốc (dùng để chặn output quá lệch).
 
     Returns:
-        True nếu text được coi là bản dịch hợp lệ, ngược lại False.
+        bool: True nếu hợp lệ, False nếu là trang lỗi.
     """
     if not text or not text.strip():
         return False
@@ -208,11 +211,17 @@ def _get_qwen_bundle():
         return _LOCAL_LLM_CACHE
     try:
         from serving.api.core.models import ModelRegistry
+        reg = ModelRegistry()
+        bundle = reg.get("event_splitter")
+        if bundle is not None and isinstance(bundle, dict) and "model" in bundle:
+            _LOCAL_LLM_CACHE = bundle
+            return _LOCAL_LLM_CACHE
+
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
-        model_id = "Qwen/Qwen2.5-1.5B-Instruct"
         device = "cuda" if torch.cuda.is_available() else "cpu"
+        model_id = "Qwen/Qwen2.5-1.5B-Instruct"
         tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
         model = AutoModelForCausalLM.from_pretrained(
             model_id,
@@ -228,7 +237,7 @@ def _get_qwen_bundle():
         return None
 
 
-def _translate_with_llm_sync(query: str, target: str, bundle: dict) -> str | None:
+def _translate_with_llm_sync(query: str, target: str, bundle: dict, context: str | None = None) -> str | None:
     try:
         import torch
         model = bundle["model"]
@@ -238,7 +247,8 @@ def _translate_with_llm_sync(query: str, target: str, bundle: dict) -> str | Non
         if target == "en":
             system_prompt = (
                 "You are an expert AI visual search translator translating Vietnamese video descriptions to English for CLIP image-text retrieval.\n"
-                "CRITICAL DOMAIN TRANSLATIONS:\n"
+                "CRITICAL DOMAIN RULES:\n"
+                "- Incorporate relevant entity visual attributes (color, costume, subject, setting) from the Video Context into the sub-event translation so the visual description is complete and self-contained.\n"
                 "- 'lân', 'con lân', 'đầu lân', 'múa lân' -> 'lion dance', 'costumed lion', 'chinese lion head', 'lion dancer' (NEVER 'crane' or 'unicorn').\n"
                 "- 'thanh trụ', 'cột múa lân', 'mai hoa thung' -> 'high poles', 'stepping pillars', 'metal poles'.\n"
                 "- 'kẻng', 'kẻng đồng', 'chiêng' -> 'bronze gong', 'brass gong', 'cymbals'.\n"
@@ -246,9 +256,13 @@ def _translate_with_llm_sync(query: str, target: str, bundle: dict) -> str | Non
                 "- 'dùi chạm vào kẻng' -> 'drumstick striking a bronze gong', 'mallet hitting gong'.\n"
                 "- 'rồng vàng', 'múa rồng' -> 'golden dragons', 'dragon dance'.\n"
                 "- 'ảnh cận', 'cận cảnh' -> 'close-up of'.\n"
+                "- Preserve all color attributes (e.g. 'white', 'red nose', 'golden', 'white flag with red border') exactly as described.\n"
                 "Output ONLY the concise visual English description for CLIP. No explanations, markdown or quotes."
             )
-            prompt = f"Translate to English visual caption: {query}\nTranslation:"
+            if context:
+                prompt = f"Video Global Context: {context}\nSub-event to translate: {query}\nTranslation:"
+            else:
+                prompt = f"Translate to English visual caption: {query}\nTranslation:"
         else:
             system_prompt = "You are a professional search query translator translating English to Vietnamese. Output only the clean translated query text."
             prompt = f"Translate to Vietnamese search query: {query}\nTranslation:"
@@ -268,10 +282,10 @@ def _translate_with_llm_sync(query: str, target: str, bundle: dict) -> str | Non
         return None
 
 
-async def _translate(query: str, target: str) -> str | None:
+async def _translate(query: str, target: str, context: str | None = None) -> str | None:
     """
     Dịch `query` sang ngôn ngữ `target` ("en" / "vi").
-    Ưu tiên dùng model Qwen2.5-1.5B-Instruct cục bộ trên GPU/CPU (siêu nhanh, 100% offline).
+    Ưu tiên dùng model Qwen2.5-1.5B-Instruct cục bộ trên GPU/CPU.
     Fallback sang GoogleTranslator / MyMemoryTranslator nếu LLM không khả dụng.
     """
     if not query or not query.strip():
@@ -279,17 +293,17 @@ async def _translate(query: str, target: str) -> str | None:
 
     import asyncio
 
-    # 1. Ưu tiên Local Qwen2.5 LLM trước (nhanh, 100% offline, không lỗi mạng)
+    # 1. Ưu tiên Local Qwen2.5 LLM trước
     bundle = _get_qwen_bundle()
     if bundle is not None:
         try:
-            res = await asyncio.to_thread(_translate_with_llm_sync, query, target, bundle)
+            res = await asyncio.to_thread(_translate_with_llm_sync, query, target, bundle, context)
             if res and _is_valid_translation(res, query):
                 return res
         except Exception as err:
             logger.debug(f"Local LLM translation fallback: {err}")
 
-    # 2. Fallback Web Translators (GoogleTranslator / MyMemory)
+    # 2. Fallback Web Translators
     from deep_translator import GoogleTranslator, MyMemoryTranslator
 
     for translator_cls in (GoogleTranslator, MyMemoryTranslator):
@@ -308,18 +322,9 @@ async def _translate(query: str, target: str) -> str | None:
     return None
 
 
-async def _enhance_query(raw_query: str) -> tuple[str, str]:
+async def _enhance_query(raw_query: str, context: str | None = None) -> tuple[str, str]:
     """
     Dịch và chuẩn hóa query song ngữ (English cho CLIP, Tiếng Việt cho Qwen2/OCR/ASR).
-
-    Nếu dịch thất bại hoặc Google trả về trang lỗi, hàm KHÔNG ghi đè query gốc:
-    giữ nguyên query đã làm sạch để không làm hỏng enhanced_query/query_text.
-
-    Args:
-        raw_query: Query gốc từ người dùng.
-
-    Returns:
-        Tuple (en_query, vi_query).
     """
     from shared.utils.text_normalizer import sanitize_search_query
     cleaned_query = sanitize_search_query(raw_query)
@@ -338,7 +343,6 @@ async def _enhance_query(raw_query: str) -> tuple[str, str]:
     vi_query = cleaned_query
 
     if has_vietnamese_accent:
-        # Query gốc là tiếng Việt -> Dịch sang tiếng Anh cho CLIP
         words = cleaned_query.split()
         query_to_translate = cleaned_query.title() if len(words) <= 6 else cleaned_query
 
@@ -347,9 +351,9 @@ async def _enhance_query(raw_query: str) -> tuple[str, str]:
         unaccented = ''.join([c for c in nfkd if not unicodedata.combining(c)]).replace('đ', 'd').replace('Đ', 'D')
         title_cased = unaccented.title()
 
-        translated_en = await _translate(query_to_translate, "en")
+        translated_en = await _translate(query_to_translate, "en", context=context)
         if not translated_en or not _is_valid_translation(translated_en, query_to_translate):
-            translated_en = await _translate(cleaned_query, "en")
+            translated_en = await _translate(cleaned_query, "en", context=context)
 
         if translated_en and _is_valid_translation(translated_en, cleaned_query):
             en_clean = sanitize_search_query(translated_en)
