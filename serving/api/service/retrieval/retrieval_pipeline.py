@@ -368,14 +368,14 @@ async def _run_trake(
     6. DANTE DP Monotonic Alignment với First-Occurrence Bias
     7. Strict Single Video & Monotonicity Final Guard
     """
-    # 0. Tách sub-events từ raw Vietnamese query trước tiên
+    # 0. Tách preamble (bối cảnh tổng quan mở đầu video) và sub-events từ raw Vietnamese query
     if request.input_type == InputType.VOICE:
         base_res = await _run_voice(request, TaskType.TRAKE, qdrant_client, text_embedder, image_embedder, asr_model)
         raw_query = base_res.query_text or request.query
     else:
         raw_query = request.query
 
-    sub_events = sub_event_parser.parse_sub_events(raw_query, target_num_events=request.num_events)
+    preamble, sub_events = sub_event_parser.extract_preamble_and_sub_events(raw_query, target_num_events=request.num_events)
     if not sub_events or len(sub_events) < 2:
         try:
             sub_events = text_query._split_events(raw_query)
@@ -392,12 +392,16 @@ async def _run_trake(
             while len(sub_events) < n_events:
                 sub_events.append(raw_query)
 
-        # 1. Truy xuất song song candidates cho từng sub-event
+        # 1. Truy xuất song song candidates cho từng sub-event và preamble (nếu có)
         sub_event_top_k = max(request.top_k * 3, 150)
+        query_items = list(sub_events)
+        if preamble:
+            query_items.append(preamble)
+
         tasks = [
             text_query.process(
                 query_input=text_query.TextQueryInput(
-                    raw_query=ev_text,
+                    raw_query=q_text,
                     task_type=TaskType.KIS,
                     top_k=sub_event_top_k,
                 ),
@@ -405,11 +409,12 @@ async def _run_trake(
                 text_embedder=text_embedder,
                 image_embedder=image_embedder,
             )
-            for ev_text in sub_events
+            for q_text in query_items
         ]
         outputs = await asyncio.gather(*tasks)
-        event_candidates_list = [out.candidates for out in outputs]
-        sub_events_en = [out.enhanced_query for out in outputs]
+        event_candidates_list = [out.candidates for out in outputs[:len(sub_events)]]
+        sub_events_en = [out.enhanced_query for out in outputs[:len(sub_events)]]
+        preamble_candidates = outputs[len(sub_events)].candidates if preamble and len(outputs) > len(sub_events) else []
 
         # 2. Sub-Event Reranking: Chạy ViRanker / Jina M0 nếu được bật
         use_viranker = getattr(request, "use_viranker", True)
@@ -438,6 +443,18 @@ async def _run_trake(
         # 3. Thu thập danh sách candidate video_ids ưu tiên
         candidate_vids: list[str] = []
         seen_vids: set[str] = set()
+
+        # 3.1 Ưu tiên video khớp với Preamble (đặc biệt các cảnh mở đầu video)
+        if preamble_candidates:
+            is_start_desc = any(w in (preamble or "").lower() for w in ["bắt đầu", "đầu tiên", "mở đầu", "starts with", "begins"])
+            for c in preamble_candidates[:50]:
+                if is_start_desc and c.timestamp_mid > 40.0:
+                    continue  # Bỏ qua nếu frame nằm ngoài đoạn mở đầu video
+                if c.video_id not in seen_vids:
+                    seen_vids.add(c.video_id)
+                    candidate_vids.append(c.video_id)
+
+        # 3.2 Bổ sung các candidate videos từ các sub-events
         for cand_list in event_candidates_list:
             for c in cand_list[:30]:
                 if c.video_id not in seen_vids:
@@ -445,7 +462,7 @@ async def _run_trake(
                     candidate_vids.append(c.video_id)
 
         # 4. Dense Similarity Matrix: Tính Cosine Similarity toàn phần từ Qdrant vectors
-        max_dense_vids = max(request.top_k, 15)
+        max_dense_vids = max(request.top_k * 2, 20)
         top_dense_vids = candidate_vids[:max_dense_vids]
         dense_matrices: dict[str, tuple[list[CandidateResult], np.ndarray]] = {}
 
@@ -499,12 +516,12 @@ async def _run_trake(
                             if kf.frame_id not in existing_frames:
                                 ev_cands.append(kf)
 
-        # 7. DANTE DP Monotonic Alignment Engine
+        # 7. DANTE DP Monotonic Alignment Engine (Mỗi video chỉ lấy 1 chuỗi tốt nhất)
         aligned_chains = temporal_aligner.align(
             event_candidates=event_candidates_list,
-            max_results=request.top_k * 2,
+            max_results=request.top_k * 3,
             dense_matrices=dense_matrices if dense_matrices else None,
-            max_chains_per_video=5,
+            max_chains_per_video=1,
         )
         results = aligned_chains
 
@@ -532,13 +549,13 @@ async def _run_trake(
                     uniq_v_cands.append(c)
 
             if len(uniq_v_cands) >= n:
-                for i in range(0, min(len(uniq_v_cands) - n + 1, 5)):
-                    results.append(uniq_v_cands[i : i + n])
+                results.append(uniq_v_cands[:n])
 
-    # 8. Final Guard: Enforce strict single video & monotonic timestamps
+    # 8. Final Guard: Enforce strict single video, monotonic timestamps, and Distinct Video Diversity
     final_chains: list[list[CandidateResult]] = []
     n_req = request.num_events
     seen_chain_signatures: set[tuple[str, ...]] = set()
+    seen_video_ids: set[str] = set()
 
     for chain in results:
         if not chain or len(chain) != n_req:
@@ -546,6 +563,10 @@ async def _run_trake(
 
         target_vid = chain[0].video_id
         if not all(c.video_id == target_vid for c in chain):
+            continue
+
+        # Đảm bảo mỗi Video chỉ xuất hiện tối đa 1 lần trong top-K kết quả
+        if target_vid in seen_video_ids:
             continue
 
         sorted_chain = sorted(chain, key=lambda c: (c.timestamp_mid, c.frame_id))
@@ -559,10 +580,10 @@ async def _run_trake(
             sig = tuple(f"{c.video_id}_{c.frame_id}" for c in sorted_chain)
             if sig not in seen_chain_signatures:
                 seen_chain_signatures.add(sig)
+                seen_video_ids.add(target_vid)
                 final_chains.append(sorted_chain)
-
-    if len(final_chains) > request.top_k:
-        final_chains = final_chains[:request.top_k]
+                if len(final_chains) >= request.top_k:
+                    break
 
     return PipelineResult(
         candidates=[],

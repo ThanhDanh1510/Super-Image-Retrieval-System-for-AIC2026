@@ -43,25 +43,28 @@ _TEMPORAL_MARKERS = [
 _TEMPORAL_SPLIT_REGEX = re.compile(r"(?:\b(?:" + "|".join(_TEMPORAL_MARKERS) + r")\b)\s*[:,\\-]?\s*", re.IGNORECASE)
 
 
-def parse_sub_events(query: str, target_num_events: int | None = None) -> list[str]:
+def extract_preamble_and_sub_events(query: str, target_num_events: int | None = None) -> tuple[str | None, list[str]]:
     """
-    Phân tách query thành danh sách các sub-events độc lập theo thứ tự thời gian.
-
-    Args:
-        query: Chuỗi truy vấn đa sự kiện.
-        target_num_events: Số lượng sự kiện kỳ vọng (2-10).
+    Phân tách query thành preamble (nội dung mô tả tổng quan bối cảnh / đoạn mở đầu video trước E1)
+    và danh sách các sub-events độc lập theo thứ tự thời gian.
 
     Returns:
-        list[str]: Danh sách các chuỗi con mô tả từng sự kiện.
+        tuple[str | None, list[str]]: (preamble_text, sub_events_list)
     """
     if not query or not query.strip():
-        return []
+        return None, []
 
     text = query.strip()
+    preamble = None
 
     # 1. Khớp theo Explicit Event Markers (E1, E2, E3, Event 1, Bước 1...)
     matches = list(_EXPLICIT_MARKER_REGEX.finditer(text))
     if len(matches) >= 2:
+        if matches[0].start() > 0:
+            preamble_cand = text[:matches[0].start()].strip()
+            if len(preamble_cand) > 5:
+                preamble = preamble_cand
+
         extracted = []
         for i in range(len(matches)):
             start = matches[i].end()
@@ -70,24 +73,24 @@ def parse_sub_events(query: str, target_num_events: int | None = None) -> list[s
             if seg:
                 extracted.append(seg)
         if len(extracted) >= 2:
-            return _adjust_count(extracted, target_num_events, text)
+            return preamble, _adjust_count(extracted, target_num_events, text)
 
     # 2. Xuống dòng (Newlines)
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     if len(lines) >= 2:
         cleaned = [_clean_sub_event(l) for l in lines if _clean_sub_event(l)]
         if len(cleaned) >= 2:
-            return _adjust_count(cleaned, target_num_events, text)
+            return None, _adjust_count(cleaned, target_num_events, text)
 
     # 3. Đánh số phân đoạn (1. 2. 3.)
     numbered = _NUMBERED_PATTERN.split(text)
     if len(numbered) >= 2:
         cleaned = [_clean_sub_event(p) for p in numbered if _clean_sub_event(p)]
-        # Nếu phần tử đầu tiên là preamble giới thiệu video trước E1/1., bỏ qua nếu số phần tử còn lại >= 2
         if target_num_events and len(cleaned) == target_num_events + 1:
+            preamble = cleaned[0]
             cleaned = cleaned[1:]
         if len(cleaned) >= 2:
-            return _adjust_count(cleaned, target_num_events, text)
+            return preamble, _adjust_count(cleaned, target_num_events, text)
 
     # 4. Mũi tên / Chấm phẩy (->, =>, ;, |)
     for sep in [r"\s*-->\s*", r"\s*->\s*", r"\s*=>\s*", r"\s*;\s*", r"\s*\|\s*"]:
@@ -95,26 +98,34 @@ def parse_sub_events(query: str, target_num_events: int | None = None) -> list[s
         if len(parts) >= 2:
             cleaned = [_clean_sub_event(p) for p in parts if _clean_sub_event(p)]
             if len(cleaned) >= 2:
-                return _adjust_count(cleaned, target_num_events, text)
+                return None, _adjust_count(cleaned, target_num_events, text)
 
     # 5. Từ nối thời gian (Temporal Connectors)
     temp_parts = _TEMPORAL_SPLIT_REGEX.split(text)
     if len(temp_parts) >= 2:
         cleaned = [_clean_sub_event(p) for p in temp_parts if _clean_sub_event(p)]
         if len(cleaned) >= 2:
-            return _adjust_count(cleaned, target_num_events, text)
+            return None, _adjust_count(cleaned, target_num_events, text)
 
     # 6. Sentence split theo dấu câu (.?!)
     sents = [s.strip() for s in re.split(r"[.?!]\s+", text) if s.strip()]
     if len(sents) >= 2:
         cleaned = [_clean_sub_event(p) for p in sents if _clean_sub_event(p)]
         if len(cleaned) >= 2:
-            return _adjust_count(cleaned, target_num_events, text)
+            return None, _adjust_count(cleaned, target_num_events, text)
 
     single = _clean_sub_event(text)
     if target_num_events and target_num_events > 1:
-        return [single] * target_num_events
-    return [single]
+        return None, [single] * target_num_events
+    return None, [single]
+
+
+def parse_sub_events(query: str, target_num_events: int | None = None) -> list[str]:
+    """
+    Phân tách query thành danh sách các sub-events độc lập theo thứ tự thời gian.
+    """
+    _, events = extract_preamble_and_sub_events(query, target_num_events)
+    return events
 
 
 def _clean_sub_event(s: str) -> str:

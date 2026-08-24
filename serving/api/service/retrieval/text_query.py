@@ -235,15 +235,26 @@ def _translate_with_llm_sync(query: str, target: str, bundle: dict) -> str | Non
         tokenizer = bundle["tokenizer"]
         device = bundle["device"]
 
-        target_lang = "English" if target == "en" else "Vietnamese"
-        source_lang = "Vietnamese" if target == "en" else "English"
-        prompt = (
-            f"Translate the following {source_lang} search query to {target_lang}. "
-            f"Output ONLY the direct translation without any commentary, quotes, or explanations.\n\n"
-            f"Query: {query}\n\nTranslation:"
-        )
+        if target == "en":
+            system_prompt = (
+                "You are an expert AI visual search translator translating Vietnamese video descriptions to English for CLIP image-text retrieval.\n"
+                "CRITICAL DOMAIN TRANSLATIONS:\n"
+                "- 'lân', 'con lân', 'đầu lân', 'múa lân' -> 'lion dance', 'costumed lion', 'chinese lion head', 'lion dancer' (NEVER 'crane' or 'unicorn').\n"
+                "- 'thanh trụ', 'cột múa lân', 'mai hoa thung' -> 'high poles', 'stepping pillars', 'metal poles'.\n"
+                "- 'kẻng', 'kẻng đồng', 'chiêng' -> 'bronze gong', 'brass gong', 'cymbals'.\n"
+                "- 'dùi', 'dùi gõ' -> 'drumstick', 'mallet', 'striking stick'.\n"
+                "- 'dùi chạm vào kẻng' -> 'drumstick striking a bronze gong', 'mallet hitting gong'.\n"
+                "- 'rồng vàng', 'múa rồng' -> 'golden dragons', 'dragon dance'.\n"
+                "- 'ảnh cận', 'cận cảnh' -> 'close-up of'.\n"
+                "Output ONLY the concise visual English description for CLIP. No explanations, markdown or quotes."
+            )
+            prompt = f"Translate to English visual caption: {query}\nTranslation:"
+        else:
+            system_prompt = "You are a professional search query translator translating English to Vietnamese. Output only the clean translated query text."
+            prompt = f"Translate to Vietnamese search query: {query}\nTranslation:"
+
         messages = [
-            {"role": "system", "content": "You are a professional search query translator. Output only the clean translated query text."},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": prompt}
         ]
         input_text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
