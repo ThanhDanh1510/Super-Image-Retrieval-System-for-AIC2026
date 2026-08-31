@@ -7,6 +7,7 @@ Nhánh rerank văn bản sử dụng ViRanker (BGE-M3 / MMARCO-VI tuned).
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Optional
 from serving.api.schema.retrieval import CandidateResult
 from serving.api.service.reranker.skeletons.text_branch.entity_scorer import compute_entity_coverage_scores
@@ -43,25 +44,27 @@ def _slice_context_around_keywords(text: str, keywords: set[str], window_words: 
 
 
 def _build_doc_text(c: CandidateResult, keywords: set[str] | None = None) -> str:
+    """
+    Xây dựng văn bản tài liệu đầy đủ cho Cross-Encoder.
+
+    Sử dụng FULL document (Visual + OCR + ASR) thay vì keyword slicing để:
+    - BGE-M3 thấy toàn bộ danh sách thực thể (không bị cắt giữa chừng)
+    - Tránh lỗi: từ khóa chung ('ingredients') xuất hiện ở cuối, slicing cắt mất đầu mô tả
+    - Keyframe descriptions chỉ 60-100 từ → an toàn trong max_length=384
+    """
     desc_text = getattr(c, "description", "") or ""
     ocr_text = getattr(c, "ocr_text", "") or ""
     asr_text = getattr(c, "asr_text", "") or ""
 
-    if keywords:
-        desc_slice = _slice_context_around_keywords(desc_text, keywords, window_words=120)
-        ocr_slice = _slice_context_around_keywords(ocr_text, keywords, window_words=50)
-        asr_slice = _slice_context_around_keywords(asr_text, keywords, window_words=50)
-        parts = []
-        if ocr_slice:
-            parts.append(f"OCR: {ocr_slice}")
-        if desc_slice:
-            parts.append(f"Visual: {desc_slice}")
-        if asr_slice:
-            parts.append(f"ASR: {asr_slice}")
-        doc = " | ".join(parts).strip()
-    else:
-        doc = f"OCR: {ocr_text[:300]} | Visual: {desc_text[:600]} | ASR: {asr_text[:200]}".strip()
+    parts = []
+    if desc_text:
+        parts.append(f"Visual: {desc_text}")
+    if ocr_text:
+        parts.append(f"OCR: {ocr_text}")
+    if asr_text:
+        parts.append(f"ASR: {asr_text}")
 
+    doc = " | ".join(parts).strip()
     if not doc:
         doc = "[EMPTY]"
     return doc
@@ -147,6 +150,15 @@ def warmup(model_bundle: Optional[dict[str, Any]] = None) -> None:
         logger.debug(f"ViRanker warmup: {e}")
 
 
+def _split_into_sentences(text: str) -> list[str]:
+    """Tách văn bản thành danh sách câu theo dấu chấm / xuống dòng."""
+    if not text:
+        return []
+    parts = re.split(r"(?<=[.!?])\s+|(?<=\n)\s*", text.strip())
+    sentences = [p.strip() for p in parts if p.strip() and len(p.split()) >= 4]
+    return sentences
+
+
 def score(
     query: str,
     candidates: list[CandidateResult],
@@ -155,8 +167,12 @@ def score(
 ) -> list[float]:
     """
     Tính điểm tương đồng ngữ nghĩa giữa query và description + ocr_text + asr_text của từng candidate.
-    Hỗ trợ query song ngữ (Bilingual Query) và cross-lingual keyword boost.
-    Tối ưu single-pass batch 40 và max_length=384 để mô hình nhìn thấy trọn vẹn toàn bộ Document.
+
+    Tính năng:
+    - Full document text (không slicing) để BGE-M3 thấy toàn bộ thực thể
+    - Multi-clause sentence scoring: khi query EN có >= 2 câu, tính điểm từng câu
+      song song và lấy MAX để ngăn câu mở đầu chung chung làm loãng câu đặc tả chi tiết
+    - Entity Coverage blending: thưởng candidate khớp nhiều thực thể trong query
     """
     if not candidates:
         return []
@@ -190,11 +206,41 @@ def score(
         query_for_model = _build_bilingual_query(clean_q, clean_enh)
         keywords = _extract_keywords(clean_q, clean_enh)
 
-        pairs = [[query_for_model, _build_doc_text(c, keywords=keywords)] for c in candidates]
+        doc_texts = [_build_doc_text(c) for c in candidates]
+
+        # ─── Bước 1: Tính điểm với full query ───────────────────────────
+        pairs = [[query_for_model, doc] for doc in doc_texts]
         raw_scores = _score_pairs_chunked(
             pairs, model, tokenizer, device=device, batch_size=40, max_length=384
         )
 
+        # ─── Bước 2: Multi-clause sentence scoring (khi query >= 2 câu) ──
+        # Khi query có câu mở đầu chung ("Cảnh quay liệt kê nguyên liệu...")
+        # theo sau là câu đặc tả chi tiết, câu mở đầu làm loãng attention.
+        # Giải pháp: score từng câu riêng và lấy MAX.
+        effective_query = clean_enh if clean_enh else clean_q
+        sentences = _split_into_sentences(effective_query)
+        if len(sentences) >= 2:
+            logger.debug(f"[ViRanker] Multi-clause ({len(sentences)} câu), tính sentence-max scores")
+            # Gom tất cả pairs (sent_i, doc_j) thành 1 batch lớn
+            sent_pairs_all = []
+            for sent in sentences:
+                for doc in doc_texts:
+                    sent_pairs_all.append([sent, doc])
+            sent_scores_flat = _score_pairs_chunked(
+                sent_pairs_all, model, tokenizer, device=device, batch_size=40, max_length=384
+            )
+            n_docs = len(doc_texts)
+            n_sents = len(sentences)
+            # Reshape: sent_scores[sent_i][doc_j]
+            max_sent_scores = []
+            for j in range(n_docs):
+                best = max(sent_scores_flat[i * n_docs + j] for i in range(n_sents))
+                max_sent_scores.append(best)
+            # Fuse: lấy max giữa full-query score và sentence-max score
+            raw_scores = [max(rs, ms) for rs, ms in zip(raw_scores, max_sent_scores)]
+
+        # ─── Bước 3: Entity Coverage blending ────────────────────────────
         entity_coverages = compute_entity_coverage_scores(candidates, query_vi=clean_q, query_en=clean_enh)
         final_scores = []
         for sc, cov in zip(raw_scores, entity_coverages):

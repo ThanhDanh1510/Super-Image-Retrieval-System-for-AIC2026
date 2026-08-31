@@ -31,23 +31,29 @@ def fuse(
     candidates: list[CandidateResult],
     alpha: float | None = None,
     fusion_cfg: dict | None = None,
+    entity_coverage_scores: list[float] | None = None,
 ) -> list[CandidateResult]:
     """
     Hợp nhất điểm số và sắp xếp lại danh sách candidates.
 
-    Nếu alpha không truyền vào, đọc từ fusion_cfg hoặc configs/fusion_config.yaml.
-    Công thức Linear Fusion:
-        fused_score = alpha * text_score + (1 - alpha) * crossmodal_score
+    Công thức 3 thành phần (khi có entity_coverage_scores):
+        fused = w_dense * S_dense_rrf + w_cross_enc * S_viranker + w_coverage * S_entity_coverage
+        w_dense=0.30, w_cross_enc=0.45, w_coverage=0.25
+
+    Công thức 2 thành phần (fallback):
+        fused = 0.30 * S_dense_rrf + 0.70 * (alpha * S_text + (1-alpha) * S_crossmodal)
 
     Args:
-        text_scores: Điểm số từ nhánh văn bản.
+        text_scores: Điểm số từ nhánh văn bản (ViRanker).
         crossmodal_scores: Điểm số từ nhánh đa phương thức.
         candidates: Danh sách CandidateResult ban đầu.
         alpha: Trọng số cho text branch. None -> tự động load.
         fusion_cfg: Cấu hình fusion. None -> tự động load.
+        entity_coverage_scores: Entity Coverage [0,1] từng candidate (optional).
+            Nếu truyền vào, kích hoạt công thức 3 thành phần.
 
     Returns:
-        list[CandidateResult]: Danh sách candidates đã được sắp xếp lại theo fused_score giảm dần.
+        list[CandidateResult]: Danh sách đã sắp xếp theo fused_score giảm dần.
     """
     if not candidates:
         return []
@@ -69,6 +75,20 @@ def fuse(
     init_scores = [float(c.score) for c in candidates]
     d_norm = _normalize(init_scores)
 
+    # ─── 3-component fusion (khi có entity_coverage) ─────────────────────
+    if entity_coverage_scores is not None and len(entity_coverage_scores) == n and text_scores is not None:
+        t_norm = _normalize(list(text_scores) if len(text_scores) == n else init_scores)
+        e_norm = _normalize(list(entity_coverage_scores))
+        W_DENSE, W_CROSS, W_COV = 0.30, 0.45, 0.25
+        fused_candidates = []
+        for i, cand in enumerate(candidates):
+            fused_val = W_DENSE * d_norm[i] + W_CROSS * t_norm[i] + W_COV * e_norm[i]
+            clamped_score = round(max(0.0, min(1.0, float(fused_val))), 6)
+            fused_candidates.append(cand.model_copy(update={"score": clamped_score}))
+        fused_candidates.sort(key=lambda x: x.score, reverse=True)
+        return fused_candidates
+
+    # ─── 2-component fusion (fallback) ───────────────────────────────────
     if text_scores is not None and crossmodal_scores is not None:
         t_norm = _normalize(list(text_scores) if len(text_scores) == n else init_scores)
         c_norm = _normalize(list(crossmodal_scores) if len(crossmodal_scores) == n else init_scores)
