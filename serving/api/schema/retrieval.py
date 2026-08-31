@@ -222,6 +222,7 @@ class KISResponse(BaseModel):
     )
     total: int = Field(..., description="Tổng số kết quả trả về (≤ top_k)")
     query_text: str = Field(..., description="Query text sau khi đã enhance/dịch")
+    metrics: dict[str, Any] | None = Field(default=None, description="Chi tiết thời gian thực thi (ms) của pipeline")
 
 
 class VQAResponse(BaseModel):
@@ -234,6 +235,7 @@ class VQAResponse(BaseModel):
     )
     total: int
     query_text: str
+    metrics: dict[str, Any] | None = Field(default=None, description="Chi tiết thời gian thực thi (ms) của pipeline")
 
 
 class TRAKEResponse(BaseModel):
@@ -249,6 +251,7 @@ class TRAKEResponse(BaseModel):
     total: int
     query_text: str
     num_events: int
+    metrics: dict[str, Any] | None = Field(default=None, description="Chi tiết thời gian thực thi (ms) của pipeline")
 
 
 class ImageSearchResponse(BaseModel):
@@ -256,3 +259,4 @@ class ImageSearchResponse(BaseModel):
 
     results: list[CandidateResult]
     total: int
+    metrics: dict[str, Any] | None = Field(default=None, description="Chi tiết thời gian thực thi (ms) của pipeline")

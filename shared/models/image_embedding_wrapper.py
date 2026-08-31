@@ -156,6 +156,52 @@ class ImageEmbeddingWrapper:
             vecs = np.vstack([self._mock_encode_image(img) for img in images])
             return vecs[0] if is_single else vecs
 
+    def encode_numpy_batch(
+        self,
+        np_frames: np.ndarray,
+        batch_size: int = 64,
+    ) -> np.ndarray:
+        """
+        Encode trực tiếp batch numpy frames (B, 224, 224, 3) uint8 lên CUDA FP16 tensor
+        bỏ qua hoàn toàn PIL Image và CLIPProcessor. Siêu nhanh (chỉ vài ms).
+        Output: (B, 1024) L2-normalized vectors.
+        """
+        if len(np_frames) == 0:
+            return np.zeros((0, self.VECTOR_DIM), dtype=np.float32)
+
+        if self.is_mock or self.clip_model is None:
+            pil_list = [Image.fromarray(f) for f in np_frames]
+            res = self.encode(pil_list)
+            return np.atleast_2d(res)
+
+        device = self.device_str
+        dtype = self.torch.float16 if device in ("cuda", "mps") else self.torch.float32
+
+        mean = self.torch.tensor([0.48145466, 0.4578275, 0.40821073], device=device, dtype=dtype).view(1, 3, 1, 1)
+        std = self.torch.tensor([0.26862954, 0.26130258, 0.27577711], device=device, dtype=dtype).view(1, 3, 1, 1)
+
+        all_vecs = []
+        for i in range(0, len(np_frames), batch_size):
+            chunk = np_frames[i : i + batch_size]
+            t = self.torch.from_numpy(chunk).to(device, dtype=dtype).permute(0, 3, 1, 2) / 255.0
+            t_norm = (t - mean) / std
+            with self.torch.no_grad():
+                out = self.clip_model.get_image_features(pixel_values=t_norm)
+                feats = getattr(out, "image_embeds", getattr(out, "pooler_output", out[0]))
+                feats_np = feats.cpu().to(self.torch.float32).numpy()
+
+                if feats_np.shape[1] < self.VECTOR_DIM:
+                    pad_width = self.VECTOR_DIM - feats_np.shape[1]
+                    feats_np = np.pad(feats_np, ((0, 0), (0, pad_width)), mode="constant")
+                elif feats_np.shape[1] > self.VECTOR_DIM:
+                    feats_np = feats_np[:, : self.VECTOR_DIM]
+
+                all_vecs.append(self._normalize(feats_np))
+
+        if all_vecs:
+            return np.vstack(all_vecs)
+        return np.zeros((0, self.VECTOR_DIM), dtype=np.float32)
+
     def encode_from_bytes(self, image_bytes: bytes, batch_size: int = 32) -> np.ndarray:
         """Decode bytes → PIL Image → encode()."""
         try:

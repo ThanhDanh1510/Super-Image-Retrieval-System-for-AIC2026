@@ -38,6 +38,10 @@ def free_memory() -> None:
         pass
 
 
+_GLOBAL_REGISTRY_INSTANCE: ModelRegistry | None = None
+_GLOBAL_REGISTRY_LOCK = threading.Lock()
+
+
 class ModelRegistry:
     """
     Unified Model Registry cho toàn bộ các AI model và engine nặng của serving layer.
@@ -50,7 +54,17 @@ class ModelRegistry:
       - "jina_m0":       Jina Multimodal Reranker (jinaai/jina-reranker-m0)
       - "event_splitter": Qwen2.5 Event Splitter (Qwen/Qwen2.5-1.5B-Instruct)
       - "hybrid_engine": HybridSearchEngine (BGE-Large-EN + BM25)
+      - "marian_mt":     MarianMT Translation (Helsinki-NLP/opus-mt-vi-en)
     """
+
+    def __new__(cls, *args, **kwargs):
+        global _GLOBAL_REGISTRY_INSTANCE
+        if _GLOBAL_REGISTRY_INSTANCE is None:
+            with _GLOBAL_REGISTRY_LOCK:
+                if _GLOBAL_REGISTRY_INSTANCE is None:
+                    _GLOBAL_REGISTRY_INSTANCE = super().__new__(cls)
+                    _GLOBAL_REGISTRY_INSTANCE._initialized = False
+        return _GLOBAL_REGISTRY_INSTANCE
 
     def __init__(
         self,
@@ -59,6 +73,8 @@ class ModelRegistry:
         image_embedding_batch_size: int = 32,
         unload_ttl_s: int = 0,
     ) -> None:
+        if getattr(self, "_initialized", False):
+            return
         self._device = device
         self._text_batch_size = text_embedding_batch_size
         self._image_batch_size = image_embedding_batch_size
@@ -70,6 +86,7 @@ class ModelRegistry:
         self._last_used: dict[str, float] = {}
         self._load_lock = threading.Lock()
         self._async_locks: dict[str, asyncio.Lock] = {}
+        self._initialized = True
 
     def _get_async_lock(self, key: str) -> asyncio.Lock:
         if key not in self._async_locks:
@@ -148,15 +165,36 @@ class ModelRegistry:
     # Warmup / Unload Lifecycle
     # =========================================================================
 
-    async def warmup_async(self, exclude_keys: tuple[str, ...] = ("jina_m0",)) -> None:
+    async def warmup_async(self, exclude_keys: tuple[str, ...] = ("jina_m0", "marian_mt")) -> None:
         """
         Preload đồng thời tất cả các model đã đăng ký (trừ các model trong exclude_keys).
-        Mặc định loại trừ 'jina_m0' để tiết kiệm VRAM và chỉ load khi người dùng bật thủ công trên UI.
+        Mặc định loại trừ 'jina_m0' và 'marian_mt' để ưu tiên Google Translate và tiết kiệm VRAM.
         """
         keys = [k for k in self._loaders().keys() if k not in exclude_keys]
         tasks = [self.aget(k) for k in keys]
-        await asyncio.gather(*tasks, return_exceptions=True)
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for k, res in zip(keys, results):
+            if isinstance(res, Exception):
+                logger.error(f"ModelRegistry: Lỗi khi warmup model '{k}': {res}")
         logger.info(f"ModelRegistry: warmup hoàn tất đồng thời cho {len(keys)} models/engines (loại trừ: {list(exclude_keys)}).")
+
+        # Chạy inference mẫu (dummy forward pass) để CUDA compile kernels trước
+        try:
+            logger.info("🔥 Chạy warm-up forward pass để biên dịch CUDA kernels...")
+            # 1. Warmup CLIP image embedder
+            img_emb = self.get("image")
+            if img_emb and hasattr(img_emb, "encode_text"):
+                _ = img_emb.encode_text("warmup query")
+            # 2. Warmup HybridSearchEngine
+            hybrid = self.get("hybrid_engine")
+            if hybrid and hasattr(hybrid, "warmup"):
+                hybrid.warmup()
+            # 3. Warmup ViRanker
+            from serving.api.service.reranker.rerank_service import warmup_reranker
+            await warmup_reranker(self)
+            logger.info("⚡ Toàn bộ CUDA kernels và pipeline đã được compile & warmup sẵn sàng!")
+        except Exception as e:
+            logger.warning(f"Lỗi khi chạy warmup inference: {e}")
 
     def unload(self, key: str) -> None:
         """Giải phóng 1 model khỏi RAM/VRAM."""
@@ -223,6 +261,7 @@ class ModelRegistry:
             "jina_m0": self._load_jina_m0,
             "event_splitter": self._load_event_splitter,
             "hybrid_engine": self._load_hybrid_engine,
+            "marian_mt": self._load_marian_mt,
         }
         base.update(self._custom_loaders)
         return base
@@ -322,9 +361,24 @@ class ModelRegistry:
         return {"model": model, "tokenizer": tokenizer, "device": device}
 
     def _load_hybrid_engine(self):
+        from pathlib import Path
         from serving.api.service.retrieval.hybrid_search import HybridSearchEngine
         from serving.api.core.config import get_settings
 
-        data_dir = str(get_settings().DATA_DIR / "unified")
+        data_dir = str(Path(get_settings().DATA_DIR) / "unified")
         logger.info(f"ModelRegistry: lazy-loading HybridSearchEngine from {data_dir}...")
         return HybridSearchEngine(data_dir=data_dir)
+
+    def _load_marian_mt(self):
+        import torch
+        from transformers import MarianMTModel, MarianTokenizer
+
+        model_name = "Helsinki-NLP/opus-mt-vi-en"
+        device = self._device if torch.cuda.is_available() and self._device == "cuda" else "cpu"
+        logger.info(f"ModelRegistry: lazy-loading MarianMT ({model_name}) on {device}...")
+        tokenizer = MarianTokenizer.from_pretrained(model_name)
+        model = MarianMTModel.from_pretrained(model_name)
+        if device == "cuda":
+            model = model.to(device).half()
+        model.eval()
+        return {"model": model, "tokenizer": tokenizer, "device": device}

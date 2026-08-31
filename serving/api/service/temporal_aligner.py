@@ -43,29 +43,74 @@ def _get_earliest_bias() -> float:
         return 0.05
 
 
+def _get_interpolation_fallback_enabled() -> bool:
+    """Kiểm tra có bật C7 interpolation fallback từ fusion_config.yaml không."""
+    try:
+        from shared.utils.config_loader import load_fusion_config
+        cfg = load_fusion_config()
+        return bool(cfg.get("temporal_aligner", {}).get("enable_interpolation_fallback", True))
+    except Exception:
+        return True
+
+
+def _get_interpolation_conf_threshold() -> float:
+    """Đọc ngưỡng tin cậy để kích hoạt interpolation fallback (mặc định 0.08)."""
+    try:
+        from shared.utils.config_loader import load_fusion_config
+        cfg = load_fusion_config()
+        return float(cfg.get("temporal_aligner", {}).get("interpolation_conf_threshold", 0.08))
+    except Exception:
+        return 0.08
+
+
+def _get_top_k_beam() -> int:
+    """Đọc beam size cho Top-K Viterbi DP (mặc định 3)."""
+    try:
+        from shared.utils.config_loader import load_fusion_config
+        cfg = load_fusion_config()
+        return int(cfg.get("temporal_aligner", {}).get("top_k_viterbi_beam", 3))
+    except Exception:
+        return 3
+
+
+def _get_adaptive_lambda_enabled() -> bool:
+    """Kiểm tra có bật adaptive lambda penalty từ fusion_config.yaml không."""
+    try:
+        from shared.utils.config_loader import load_fusion_config
+        cfg = load_fusion_config()
+        return bool(cfg.get("temporal_aligner", {}).get("enable_adaptive_lambda", True))
+    except Exception:
+        return True
+
+
+def _get_max_separation_sec() -> float:
+    """Đọc khoảng cách tối đa giữa 2 sự kiện liên tiếp từ fusion_config.yaml (mặc định 15.0s)."""
+    try:
+        from shared.utils.config_loader import load_fusion_config
+        cfg = load_fusion_config()
+        return float(cfg.get("temporal_aligner", {}).get("max_separation_sec", 15.0))
+    except Exception:
+        return 15.0
+
+
 def align(
     event_candidates: list[list[CandidateResult]],
     max_results: int = 100,
     lambda_penalty: float | None = None,
     min_separation_sec: float = 1.0,
-    max_chains_per_video: int = 5,
+    max_separation_sec: float | None = None,
+    max_chains_per_video: int = 3,
     earliest_bias: float | None = None,
     dense_matrices: dict[str, tuple[list[CandidateResult], np.ndarray]] | None = None,
+    enable_adaptive_lambda: bool | None = None,
+    temporal_cues: list[dict[str, any]] | None = None,
+    enable_interpolation: bool | None = None,
+    interpolation_threshold: float | None = None,
+    top_k_beam: int | None = None,
 ) -> list[list[CandidateResult]]:
     """
-    Căn chỉnh chuỗi N sự kiện tuần tự trong video sử dụng Quy hoạch động (DANTE Engine).
-
-    Args:
-        event_candidates: Danh sách N danh sách CandidateResult (mỗi danh sách ứng với 1 sub-event).
-        max_results: Số lượng chuỗi tối đa cần trả về.
-        lambda_penalty: Hệ số phạt khoảng cách thời gian (None -> load từ config).
-        min_separation_sec: Khoảng cách thời gian tối thiểu giữa 2 sự kiện liên tiếp (giây).
-        max_chains_per_video: Số lượng chuỗi tối đa được trích xuất từ mỗi video.
-        earliest_bias: Hệ số ưu tiên chuỗi xuất hiện sớm trong video (First-Occurrence Bias).
-        dense_matrices: Optional dict mapping video_id -> (candidates, S_dense[N, T]).
-
-    Returns:
-        list[list[CandidateResult]]: Danh sách các N-tuples keyframe được sắp xếp giảm dần theo điểm DP.
+    Căn chỉnh chuỗi N sự kiện tuần tự trong video sử dụng Quy hoạch động Top-K Viterbi (DANTE Engine)
+    kết hợp C7 Interpolation Fallback và Temporal Cues.
     """
     if not event_candidates or any(not c for c in event_candidates):
         return []
@@ -79,6 +124,21 @@ def align(
 
     if earliest_bias is None:
         earliest_bias = _get_earliest_bias()
+
+    if enable_adaptive_lambda is None:
+        enable_adaptive_lambda = _get_adaptive_lambda_enabled()
+
+    if enable_interpolation is None:
+        enable_interpolation = _get_interpolation_fallback_enabled()
+
+    if interpolation_threshold is None:
+        interpolation_threshold = _get_interpolation_conf_threshold()
+
+    if top_k_beam is None:
+        top_k_beam = _get_top_k_beam()
+
+    if max_separation_sec is None:
+        max_separation_sec = _get_max_separation_sec()
 
     # 1. Gom nhóm candidates theo từng video_id
     video_map: dict[str, dict[int, list[CandidateResult]]] = {}
@@ -98,6 +158,8 @@ def align(
         for d_vid in dense_matrices.keys():
             if d_vid not in video_map:
                 all_vids.append(d_vid)
+
+    K = max(1, top_k_beam)
 
     # 2. Xử lý quy hoạch động riêng biệt cho từng video
     for v_id in all_vids:
@@ -154,109 +216,174 @@ def align(
                 for t, kf in enumerate(unique_kfs):
                     S[i, t] = ev_frame_scores.get(kf.frame_id, 0.0)
 
-        # Bảng quy hoạch động DP[num_events, T] và parent pointer
-        DP = np.full((num_events, T), -np.inf, dtype=np.float32)
-        parent = np.full((num_events, T), -1, dtype=np.int32)
+        # Tính lambda_penalty thích ứng (adaptive lambda) theo mật độ keyframe của video
+        curr_lambda = lambda_penalty
+        if enable_adaptive_lambda and T >= 2:
+            t_span = float(kf_timestamps[-1] - kf_timestamps[0])
+            avg_gap = t_span / max(float(T - 1), 1.0)
+            if avg_gap > 5.0:
+                curr_lambda = lambda_penalty * (5.0 / avg_gap)
+
+        # Kiểm tra C7: Interpolation Fallback cho các sự kiện bị miss
+        missing_events: set[int] = set()
+        S_work = S.copy()
+        if enable_interpolation and num_events >= 2:
+            for ev_idx in range(num_events):
+                max_sc = float(np.max(S_work[ev_idx])) if T > 0 else 0.0
+                if max_sc < interpolation_threshold:
+                    missing_events.add(ev_idx)
+
+            # Chỉ cho phép nội suy nếu không bị miss toàn bộ (miss tối đa N-1 sự kiện)
+            if 0 < len(missing_events) < num_events:
+                for m_ev in missing_events:
+                    S_work[m_ev, :] = 0.12
+
+        # Bảng quy hoạch động Top-K Viterbi DP[num_events, T, K] và parent pointer
+        DP = np.full((num_events, T, K), -np.inf, dtype=np.float32)
+        parent_tau = np.full((num_events, T, K), -1, dtype=np.int32)
+        parent_k = np.full((num_events, T, K), -1, dtype=np.int32)
 
         # Base case: event đầu tiên (i = 0)
-        DP[0, :] = S[0, :]
+        DP[0, :, 0] = S_work[0, :]
 
-        # DP Transitions: DP[i, t] = S[i, t] + max_{tau} (DP[i-1, tau] - lambda * (t_sec - tau_sec))
+        # DP Transitions với Top-K Viterbi
         for i in range(1, num_events):
-            running_max = -np.inf
-            best_tau = -1
-            tau_ptr = 0
+            step_min_sep = min_separation_sec
+            if temporal_cues and i - 1 < len(temporal_cues):
+                step_min_sep = float(temporal_cues[i - 1].get("min_separation_sec", min_separation_sec))
 
             for t in range(T):
                 cur_time = kf_timestamps[t]
+                curr_s = S_work[i, t]
 
-                # Cập nhật running_max với các tau thỏa mãn min_separation_sec
-                while tau_ptr < t and (cur_time - kf_timestamps[tau_ptr]) >= min_separation_sec:
-                    prev_val = DP[i - 1, tau_ptr]
-                    if prev_val > -np.inf:
-                        cand_val = prev_val + lambda_penalty * kf_timestamps[tau_ptr]
-                        if cand_val > running_max:
-                            running_max = cand_val
-                            best_tau = tau_ptr
-                    tau_ptr += 1
+                cand_transitions: list[tuple[float, int, int]] = []
+                for tau in range(t):
+                    dt = cur_time - kf_timestamps[tau]
+                    if dt < step_min_sep:
+                        continue
+                    if dt > max_separation_sec:
+                        continue
 
-                if running_max > -np.inf:
-                    DP[i, t] = S[i, t] + running_max - lambda_penalty * cur_time
-                    parent[i, t] = best_tau
+                    penalty = curr_lambda * dt
+                    for k_prev in range(K):
+                        prev_sc = DP[i - 1, tau, k_prev]
+                        if prev_sc > -np.inf:
+                            tot_sc = curr_s + prev_sc - penalty
+                            cand_transitions.append((tot_sc, tau, k_prev))
+
+                if cand_transitions:
+                    cand_transitions.sort(key=lambda x: x[0], reverse=True)
+                    for k_idx, (sc, tau_p, kp) in enumerate(cand_transitions[:K]):
+                        DP[i, t, k_idx] = sc
+                        parent_tau[i, t, k_idx] = tau_p
+                        parent_k[i, t, k_idx] = kp
 
         # 3. Backtrack tìm top chuỗi tốt nhất từ hàng cuối cùng DP[num_events - 1]
-        terminal_scores = DP[num_events - 1]
-        sorted_terminals = np.argsort(terminal_scores)[::-1]
+        terminal_candidates: list[tuple[float, int, int]] = []
+        for t_end in range(T):
+            for k_end in range(K):
+                sc = DP[num_events - 1, t_end, k_end]
+                if sc > -np.inf:
+                    terminal_candidates.append((sc, t_end, k_end))
+
+        terminal_candidates.sort(key=lambda x: x[0], reverse=True)
 
         chains_from_this_video = 0
         seen_frame_tuples: set[tuple[int, ...]] = set()
 
-        for t_end in sorted_terminals:
+        for term_sc, t_end, k_end in terminal_candidates:
             if chains_from_this_video >= max_chains_per_video:
                 break
 
-            if terminal_scores[t_end] <= -np.inf:
-                continue
-
-            # Truy vết ngược (Backtracking)
             curr_t = int(t_end)
+            curr_k = int(k_end)
             chain_indices = [0] * num_events
             valid = True
 
             for i in range(num_events - 1, -1, -1):
                 chain_indices[i] = curr_t
                 if i > 0:
-                    curr_t = parent[i, curr_t]
-                    if curr_t < 0:
+                    next_t = parent_tau[i, curr_t, curr_k]
+                    next_k = parent_k[i, curr_t, curr_k]
+                    if next_t < 0:
                         valid = False
                         break
+                    curr_t = next_t
+                    curr_k = next_k
 
             if valid:
+                # Xử lý C7 Interpolation: nếu có sự kiện bị miss, nội suy frame hợp lý nhất
+                if missing_events:
+                    for m_ev in missing_events:
+                        exp_gap = 5.0
+                        if temporal_cues and m_ev - 1 >= 0 and m_ev - 1 < len(temporal_cues):
+                            exp_gap = float(temporal_cues[m_ev - 1].get("expected_gap_sec", 5.0))
+
+                        if 0 < m_ev < num_events - 1:
+                            t_prev = kf_timestamps[chain_indices[m_ev - 1]]
+                            t_next = kf_timestamps[chain_indices[m_ev + 1]]
+                            t_target = min(t_prev + exp_gap, (t_prev + t_next) / 2.0)
+                            best_mid_idx = chain_indices[m_ev]
+                            best_diff = float("inf")
+                            for c_idx in range(chain_indices[m_ev - 1] + 1, chain_indices[m_ev + 1]):
+                                diff = abs(kf_timestamps[c_idx] - t_target)
+                                if diff < best_diff:
+                                    best_diff = diff
+                                    best_mid_idx = c_idx
+                            chain_indices[m_ev] = best_mid_idx
+
                 chain_cands = [unique_kfs[idx] for idx in chain_indices]
                 chain_ts = [kf_timestamps[idx] for idx in chain_indices]
                 frame_tuple = tuple(c.frame_id for c in chain_cands)
 
-                # Kiểm tra đơn điệu nghiêm ngặt & không trùng lặp chuỗi
-                is_strictly_monotonic = all(chain_ts[k] < chain_ts[k + 1] for k in range(num_events - 1))
+                is_strictly_monotonic = True
+                for k in range(num_events - 1):
+                    gap = chain_ts[k + 1] - chain_ts[k]
+                    if gap < 0.2 or gap > max_separation_sec:
+                        is_strictly_monotonic = False
+                        break
+
                 if is_strictly_monotonic and frame_tuple not in seen_frame_tuples:
                     seen_frame_tuples.add(frame_tuple)
 
-                    # Tính điểm đồng thuận (All-Event Consensus & Temporal Span Penalty)
-                    event_sims = [float(S[k, chain_indices[k]]) for k in range(num_events)]
-                    matched_count = sum(1 for s in event_sims if s > 0.01)
+                    event_sims = [
+                        0.10 if k in missing_events else float(S[k, chain_indices[k]])
+                        for k in range(num_events)
+                    ]
+                    matched_count = sum(1 for k in range(num_events) if k not in missing_events and event_sims[k] > 0.01)
                     avg_sim = sum(event_sims) / float(num_events)
                     consensus_factor = (float(matched_count) / float(num_events)) ** 2
                     span_seconds = float(chain_ts[-1] - chain_ts[0])
-                    span_penalty = lambda_penalty * span_seconds
+                    span_penalty = curr_lambda * span_seconds
 
-                    # First-occurrence bias (ưu tiên sự kiện xuất hiện sớm hơn trong video)
                     t_first = float(chain_ts[0])
                     t_max_vid = float(kf_timestamps[-1]) if len(kf_timestamps) > 0 else 1.0
                     earliest_bonus = earliest_bias * max(0.0, 1.0 - (t_first / (t_max_vid + 1e-5)))
 
                     final_chain_score = (avg_sim * consensus_factor) - span_penalty + earliest_bonus
 
-                    # Gán điểm cho từng frame để UI hiển thị
-                    for k, cand in enumerate(chain_cands):
-                        cand.score = round(event_sims[k], 4)
+                    chain_cands_cloned = [
+                        cand.model_copy(update={"score": round(event_sims[k], 4)})
+                        for k, cand in enumerate(chain_cands)
+                    ]
 
-                    valid_chains.append((final_chain_score, chain_cands))
+                    valid_chains.append((final_chain_score, chain_cands_cloned))
                     chains_from_this_video += 1
 
-        # Fallback cho video nếu DP bị miss do threshold
+        # Fallback cho video nếu DP bị miss do threshold: CHỈ chấp nhận nếu các frame liên tiếp nằm trong cửa sổ <= max_separation_sec
         if chains_from_this_video == 0 and T >= num_events:
-            step = (T - 1) / float(num_events - 1)
-            fallback_indices = [int(round(k * step)) for k in range(num_events)]
-            for k in range(1, num_events):
-                if fallback_indices[k] <= fallback_indices[k - 1]:
-                    fallback_indices[k] = fallback_indices[k - 1] + 1
-
-            if fallback_indices[-1] < T:
-                fallback_cands = [unique_kfs[idx] for idx in fallback_indices]
-                fallback_ts = [kf_timestamps[idx] for idx in fallback_indices]
-                if all(fallback_ts[k] < fallback_ts[k + 1] for k in range(num_events - 1)):
+            for start_idx in range(T - num_events + 1):
+                win_indices = list(range(start_idx, start_idx + num_events))
+                win_ts = [kf_timestamps[idx] for idx in win_indices]
+                if all(0.2 <= win_ts[k + 1] - win_ts[k] <= max_separation_sec for k in range(num_events - 1)):
+                    fallback_cands = [unique_kfs[idx] for idx in win_indices]
                     avg_sc = sum(c.score for c in fallback_cands) / num_events
-                    valid_chains.append((avg_sc * 0.5, fallback_cands))
+                    fallback_cands_cloned = [
+                        cand.model_copy(update={"score": round(cand.score, 4)})
+                        for cand in fallback_cands
+                    ]
+                    valid_chains.append((avg_sc * 0.5, fallback_cands_cloned))
+                    break
 
     # 4. Sắp xếp tất cả chuỗi trên toàn bộ các video theo điểm giảm dần
     valid_chains.sort(key=lambda x: x[0], reverse=True)

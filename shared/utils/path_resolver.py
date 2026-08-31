@@ -33,8 +33,10 @@ def resolve_keyframe_path(
 
     candidates = []
     for fid_s in fid_variants:
-        for ext in ["webp", "jpg", "png"]:
+        for ext in ["webp", "jpg", "png", "jpeg"]:
             candidates.extend([
+                data_dir / "cache" / "frames" / f"{video_id}_{frame_id}.{ext}",
+                data_dir / "cache" / "frames" / f"{video_id}_{fid_s}.{ext}",
                 data_dir / "image" / grp / grp / vsub / f"{fid_s}.{ext}",
                 data_dir / "image" / grp / vsub / f"{fid_s}.{ext}",
                 data_dir / "image" / grp / f"{video_id}" / f"{fid_s}.{ext}",

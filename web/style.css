@@ -337,9 +337,17 @@ body {
 .speed-tag {
   background: rgba(0, 210, 255, 0.15);
   color: var(--spider-blue);
-  padding: 2px 8px;
-  border-radius: 4px;
+  padding: 3px 10px;
+  border-radius: 6px;
   border: 1px solid var(--spider-blue);
+  font-size: 0.85rem;
+  cursor: help;
+  transition: all 0.2s ease;
+}
+
+.speed-tag:hover {
+  background: rgba(0, 210, 255, 0.25);
+  box-shadow: 0 0 10px rgba(0, 210, 255, 0.4);
 }
 
 /* --- High-Density Keyframe Results Grid --- */

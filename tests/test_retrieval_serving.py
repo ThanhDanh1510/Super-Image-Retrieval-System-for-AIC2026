@@ -26,6 +26,7 @@ from serving.api.service.retrieval import (
     voice_query,
     retrieval_pipeline,
 )
+from serving.api.repo import qdrant_repo
 from shared.models.text_embedding_wrapper import TextEmbeddingWrapper
 from shared.models.image_embedding_wrapper import ImageEmbeddingWrapper
 
@@ -114,6 +115,7 @@ async def test_translate_retries_then_returns_none(monkeypatch):
             return "Error 500 (Server Error)!!1500.That’s an error."
 
     monkeypatch.setattr(text_query, "_get_qwen_bundle", lambda: None)
+    monkeypatch.setattr(text_query, "_translate_with_marian_sync", lambda *a, **k: None)
     monkeypatch.setattr("deep_translator.GoogleTranslator", FakeTranslator)
 
     result = await text_query._translate("đoạn video mô tả bánh rán", "en")
@@ -135,6 +137,7 @@ async def test_translate_does_not_hang_when_translation_times_out(monkeypatch):
             return "never reached"
 
     monkeypatch.setattr(text_query, "_get_qwen_bundle", lambda: None)
+    monkeypatch.setattr(text_query, "_translate_with_marian_sync", lambda *a, **k: None)
     monkeypatch.setattr("deep_translator.GoogleTranslator", HangingTranslator)
     monkeypatch.setattr(text_query, "TRANSLATE_TIMEOUT_S", 0.2)
 
@@ -274,3 +277,96 @@ async def test_retrieval_pipeline_text(mock_qdrant_client, mock_text_embedder, m
         assert len(res.candidates) == 1
         assert res.candidates[0].video_id == "V003"
         assert res.task_type == TaskType.KIS
+
+
+@pytest.mark.anyio
+async def test_text_query_uses_description_vector_and_skips_ocr_dense(mock_qdrant_client, mock_text_embedder, mock_image_embedder):
+    """Xác minh text_query.process() gọi search_description_vector và KHÔNG gọi _encode_text cho OCR/ASR."""
+    desc_called = {"called": False}
+    encode_text_called = {"called": False}
+
+    mock_desc_cand = CandidateResult(
+        video_id="V099",
+        scene_id="V099_S001",
+        frame_id=123,
+        timestamp_start=1.0,
+        timestamp_end=3.0,
+        timestamp_mid=2.0,
+        keyframe_path="unified/V099-V099_S001-123.webp",
+        score=0.92,
+        description="A white lion costume dance",
+    )
+
+    async def fake_search_desc(query_en, top_k=200, **kwargs):
+        desc_called["called"] = True
+        return [mock_desc_cand]
+
+    async def fake_encode_text(query, embedder):
+        encode_text_called["called"] = True
+        return ([], [])
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(text_query, "search_description_vector", fake_search_desc)
+        mp.setattr(text_query, "_encode_text", fake_encode_text)
+
+        captured_args = {}
+        async def fake_search_repo(**kwargs):
+            captured_args.update(kwargs)
+            return kwargs.get("description_candidates", [])
+
+        mp.setattr("serving.api.repo.qdrant_repo.search_by_text_vectors", fake_search_repo)
+
+        inp = text_query.TextQueryInput(
+            raw_query="múa lân sư rồng",
+            task_type=TaskType.KIS,
+            search_mode="all",
+            top_k=10,
+        )
+        res = await text_query.process(inp, mock_qdrant_client, mock_text_embedder, mock_image_embedder)
+
+        assert desc_called["called"] is True, "Phải gọi search_description_vector"
+        assert encode_text_called["called"] is False, "KHÔNG được gọi _encode_text cho OCR/ASR ở mode all"
+        assert len(captured_args["description_candidates"]) == 1
+        assert captured_args["description_candidates"][0].video_id == "V099"
+        assert captured_args["ocr_vector"] == []
+        assert captured_args["asr_vector"] == []
+
+
+@pytest.mark.anyio
+async def test_qdrant_repo_description_candidates_fusion(mock_qdrant_client):
+    """Kiểm tra qdrant_repo.search_by_text_vectors tích hợp description_candidates vào Weighted RRF."""
+    desc_cand = CandidateResult(
+        video_id="V_DESC",
+        scene_id="V_DESC_S1",
+        frame_id=50,
+        timestamp_start=9.0,
+        timestamp_end=11.0,
+        timestamp_mid=10.0,
+        keyframe_path="unified/V_DESC-V_DESC_S1-50.webp",
+        score=0.95,
+        description="Detailed lion dance",
+    )
+
+    with pytest.MonkeyPatch.context() as mp:
+        # Mock _resolve_collection
+        mp.setattr("serving.api.repo.qdrant_repo._resolve_collection", AsyncMock(return_value="aic2026_clean_v3"))
+        # Mock search_by_text_match to return empty
+        mp.setattr("serving.api.repo.qdrant_repo.search_by_text_match", AsyncMock(return_value=[]))
+
+        results = await qdrant_repo.search_by_text_vectors(
+            client=mock_qdrant_client,
+            ocr_vector=[],
+            asr_vector=[],
+            ocr_sparse_vector=None,
+            asr_sparse_vector=None,
+            image_vector=None,
+            description_candidates=[desc_cand],
+            top_k=10,
+            search_mode="all",
+            query_text="lion dance",
+        )
+
+        assert len(results) >= 1
+        assert results[0].video_id == "V_DESC"
+        assert results[0].frame_id == 50
+

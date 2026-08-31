@@ -711,12 +711,34 @@ async function triggerSearch() {
 
   try {
     let endpoint = `${API_BASE}/api/v1/${state.mode}`;
+
+    // Trích xuất các frame người dùng đã chọn/ghim để gửi lên backend kích hoạt Temporal Halo Boost
+    let userChoicesList = [];
+    if (state.selectedItems && state.selectedItems.size > 0) {
+      state.selectedItems.forEach((cand) => {
+        if (cand && cand.video_id && cand.frame_id !== undefined) {
+          userChoicesList.push({
+            video_id: String(cand.video_id),
+            frame_id: Number(cand.frame_id),
+            scene_id: String(cand.scene_id || ""),
+            timestamp_start: Number(cand.timestamp_start || 0),
+            timestamp_end: Number(cand.timestamp_end || 0),
+            timestamp_mid: Number(cand.timestamp_mid || 0),
+            keyframe_path: String(cand.keyframe_path || ""),
+            ocr_text: String(cand.ocr_text || ""),
+            asr_text: String(cand.asr_text || ""),
+            answer: String(cand.answer || ""),
+          });
+        }
+      });
+    }
+
     let payload = {
       input_type: "text",
       query: queryText,
       search_mode: state.searchMode,
       top_k: state.topK,
-      user_choices: [],
+      user_choices: userChoicesList,
       use_viranker: state.useViranker,
       use_jina_m0: state.useJinaM0
     };
@@ -754,7 +776,20 @@ async function triggerSearch() {
     });
 
     statusBar.textContent = `✅ Tìm thấy ${state.rawResults.length} kết quả (Nhánh: ${state.searchMode.toUpperCase()})`;
-    speedTag.textContent = `${duration}s`;
+
+    // Hiển thị Metrics chi tiết Spider-Man HUD Chip
+    if (data.metrics) {
+      const m = data.metrics;
+      if (m.cached) {
+        speedTag.innerHTML = `⚡ <strong>Cache Hit</strong> (${m.total_ms}ms)`;
+        speedTag.title = `Phản hồi tức thì từ Query Cache (${m.total_ms}ms)`;
+      } else {
+        speedTag.innerHTML = `⏱️ <strong>${duration}s</strong> (Dịch: ${m.enhance_query_ms || 0}ms | Embed: ${m.encode_desc_ms || 0}ms | Qdrant: ${m.qdrant_search_ms || 0}ms | Rerank: ${m.rerank_ms || 0}ms)`;
+        speedTag.title = `Tổng thời gian: ${m.total_ms}ms\n- Dịch & Enhance: ${m.enhance_query_ms || 0}ms\n- Embed & Desc: ${m.encode_desc_ms || 0}ms\n- Qdrant Search: ${m.qdrant_search_ms || 0}ms\n- ViRanker: ${m.rerank_ms || 0}ms`;
+      }
+    } else {
+      speedTag.textContent = `${duration}s`;
+    }
     speedTag.style.display = "inline-block";
 
   } catch (err) {

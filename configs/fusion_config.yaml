@@ -24,9 +24,10 @@ rrf:
 # --- Prefetch limits (số candidates lấy về từ mỗi nhánh trước khi RRF) ------
 # Nguyên tắc: prefetch_limit >> top_k (để RRF có đủ candidates để fusion)
 prefetch:
-  image_dense: 200      # lấy top-200 từ nhánh image vector
-  ocr_dense: 200        # lấy top-200 từ nhánh OCR text vector
-  asr_dense: 200        # lấy top-200 từ nhánh ASR text vector
+  image_dense: 200      # lấy top-200 từ nhánh image vector (CLIP)
+  description_dense: 200 # lấy top-200 từ nhánh description vector (BGE-Large-EN VLM)
+  ocr_dense: 200        # lấy top-200 từ nhánh OCR text
+  asr_dense: 200        # lấy top-200 từ nhánh ASR text
   ocr_sparse: 200       # lấy top-200 từ nhánh OCR sparse (BM42)
   asr_sparse: 200       # lấy top-200 từ nhánh ASR sparse (BM42)
 
@@ -35,10 +36,12 @@ retrieval:
   top_k: 100            # Giới hạn submit theo contest rule: top-K ≤ 100
 
 # --- Trọng số nhánh (dùng trong Weighted RRF) --------------------------------
-# Tăng trọng số image_dense để ưu tiên tìm kiếm hình ảnh hình học/màu sắc (CLIP)
+# Tăng trọng số image_dense để ưu tiên tìm kiếm hình ảnh hình học/màu sắc (CLIP),
+# description_dense cho mô tả ngữ cảnh VLM chi tiết (BGE-Large-EN),
 # và giảm trọng số OCR/ASR để tránh nhiễu từ các từ khóa chữ trong video (như "màu", "xe")
 weights:
   image_dense: 2.5
+  description_dense: 2.0
   ocr_dense: 0.5
   asr_dense: 0.3
   ocr_sparse: 0.2
@@ -48,11 +51,11 @@ weights:
 # Với mỗi loại query, chỉ enable các nhánh liên quan để tránh nhiễu
 query_routing:
   text_query:
-    enabled_branches: [image_dense, ocr_dense, asr_dense, ocr_sparse, asr_sparse]
+    enabled_branches: [image_dense, description_dense, ocr_dense, asr_dense, ocr_sparse, asr_sparse]
   image_query:
     enabled_branches: [image_dense]
   multimodal_query:   # tương lai: query gồm cả ảnh và text
-    enabled_branches: [image_dense, ocr_dense, asr_dense, ocr_sparse, asr_sparse]
+    enabled_branches: [image_dense, description_dense, ocr_dense, asr_dense, ocr_sparse, asr_sparse]
 
 # --- Reranker Fusion Configuration -------------------------------------------
 reranker:
@@ -65,8 +68,94 @@ temporal_aligner:
   max_results: 100               # Số lượng chuỗi event tối đa trả về
   earliest_bias: 0.05            # Hệ số ưu tiên chuỗi xuất hiện sớm nhất (First-Occurrence Bias)
   min_separation_sec: 1.0        # Khoảng cách tối thiểu giữa 2 events liên tiếp (giây)
-  max_chains_per_video: 5        # Số chuỗi tối đa trích xuất từ 1 video
-  dense_sampling_interval_sec: 0.5 # Bước nhảy lấy mẫu khung hình video-level (giây)
-  max_dense_videos: 3            # Số lượng video top đầu chạy Dense Frame Extraction
+  max_separation_sec: 15.0       # Khoảng cách tối đa giữa 2 events liên tiếp (giây) — Ràng buộc thực tế AIC2026
+  max_chains_per_video: 5        # Số chuỗi tối đa trích xuất từ 1 video trong DANTE DP
+  dense_sampling_interval_sec: 0.8 # Bước nhảy lấy mẫu khung hình video-level (giây)
+  max_dense_videos: 5            # Số lượng video top đầu chạy Dense Frame Extraction (Top 5 Candidate Videos)
+  max_dense_frames: 60           # Số khung hình dense tối đa trích xuất từ 1 video (Targeted ROI Window)
   enable_sub_event_reranking: true # Bật rerank độc lập cho từng sub-event
+  intro_fusion_weight: 0.35      # Trọng số Intro Preamble score (1 - weight = DP weight)
+  preamble_time_cutoff: 35.0     # Ngưỡng thời gian đầu video (giây) cho intro matching
+  top_video_hedging_count: 3     # Số lượng video top đầu được phép có nhiều chains (hedging)
+  max_hedging_chains_per_video: 3 # Số chuỗi tối đa cho mỗi video trong nhóm hedging
+  enable_adaptive_lambda: true   # Tự động co giãn lambda theo mật độ keyframe của từng video
+  enable_interpolation_fallback: true # Tự động nội suy sự kiện bị miss (C7 Interpolation)
+  interpolation_conf_threshold: 0.08  # Ngưỡng tin cậy kích hoạt nội suy sự kiện
+  top_k_viterbi_beam: 3              # Beam size cho Top-K Viterbi DP Hedging (Mục 4)
+  preamble_decay_tau: 35.0           # Hằng số thời gian tau cho Soft Exponential Decay (Mục 7)
+  rrf_k: 60                          # Hằng số làm mượt RRF cho Tầng 1 Video Identity (Mục 5)
+  elbow_drop_ratio: 0.70             # Tỷ lệ suy giảm điểm để phát hiện Elbow/Knee Point (Mục 6)
+
+# --- KIS Accuracy Optimizations (Zero Latency Trade-Off) ---------------------
+kis_accuracy:
+  enable_dual_language_ensemble: true  # Mã hóa song ngữ EN + VI song song
+  vi_weight: 0.85                      # Trọng số nhánh tiếng Việt trong Dual-Language Ensemble
+  enable_gpu_prf: true                 # Pseudo-Relevance Feedback trên GPU Tensor Cores
+  prf_top_k: 3                         # Số vector hàng đầu để mở rộng query
+  prf_alpha: 0.25                      # Trọng số Rocchio alpha
+  enable_entity_boost: true            # Tự động phát hiện thực thể (biển số, mã số, trích dẫn)
+  entity_boost_score: 0.35             # Điểm cộng thưởng cho candidate khớp thực thể
+  enable_temporal_smoothing: true      # Làm mịn điểm theo phân cảnh video (Temporal Scene Smoothing)
+  temporal_smooth_sigma: 8.0           # Độ lệch chuẩn hàm Gauss cho khoảng cách thời gian (giây)
+  enable_viranker_context_slicing: true # Cắt cửa sổ vàng quanh từ khóa cho ViRanker Cross-Encoder
+  viranker_context_tokens: 120         # Độ dài token cửa sổ trích xuất (bao quát toàn bộ nguyên liệu/thực thể)
+  viranker_max_length: 384             # Độ dài tối đa của cặp (Query, Document) trong ViRanker
+  enable_negation_filter: true         # Lọc và trừ điểm các từ khóa phủ định ("không có...", "chưa...")
+  negation_penalty_factor: 0.50        # Tỷ lệ giảm điểm khi vi phạm điều kiện phủ định
+  enable_fuzzy_matching: true          # Bật so khớp mờ unaccented và edit distance cho OCR/ASR
+  fuzzy_max_distance: 1                # Khoảng cách Levenshtein tối đa cho từ >= 4 ký tự
+  fuzzy_boost_score: 0.30              # Điểm cộng thưởng khi khớp mờ thực thể
+
+# --- Dynamic Adaptive Fusion Presets (Intent-Driven) -------------------------
+adaptive_fusion:
+  enabled: true
+  ocr_intent:
+    image_dense: 1.5
+    description_dense: 1.2
+    ocr_dense: 3.5
+    asr_dense: 0.1
+    ocr_sparse: 0.8
+    asr_sparse: 0.1
+  asr_intent:
+    image_dense: 1.5
+    description_dense: 1.2
+    ocr_dense: 0.2
+    asr_dense: 3.2
+    ocr_sparse: 0.1
+    asr_sparse: 0.8
+  visual_intent:
+    image_dense: 3.0
+    description_dense: 2.5
+    ocr_dense: 0.2
+    asr_dense: 0.1
+    ocr_sparse: 0.1
+    asr_sparse: 0.1
+  qa_intent:
+    image_dense: 2.0
+    description_dense: 2.8
+    ocr_dense: 1.8
+    asr_dense: 1.5
+    ocr_sparse: 0.5
+    asr_sparse: 0.5
+  balanced_intent:
+    image_dense: 2.5
+    description_dense: 2.5
+    ocr_dense: 0.5
+    asr_dense: 0.3
+    ocr_sparse: 0.2
+    asr_sparse: 0.2
+
+# --- Temporal Aligner (DANTE DP) Configuration -------------------------------
+temporal_aligner:
+  lambda_penalty: 0.001
+  min_separation_sec: 0.8
+  max_separation_sec: 60.0
+  enable_adaptive_lambda: true
+  enable_interpolation_fallback: true
+  interpolation_conf_threshold: 0.05
+  top_k_viterbi_beam: 3
+  intro_fusion_weight: 0.25
+  preamble_decay_tau: 120.0
+
+
 

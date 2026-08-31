@@ -14,8 +14,10 @@ Members KHÔNG cần sửa file này trừ khi có yêu cầu từ Leader.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import socket
+from typing import Any, Optional
 from urllib.parse import urlparse
 
 from qdrant_client import QdrantClient, AsyncQdrantClient
@@ -64,6 +66,16 @@ def _is_server_reachable(url: str) -> bool:
         return False
 
 
+def _get_local_qdrant_path() -> str:
+    """Xác định đường dẫn lưu trữ Local Embedded Qdrant chính xác trên đĩa."""
+    from pathlib import Path
+    for p in ["./data/qdrant_storage", "./data/qdrant_db"]:
+        path_obj = Path(p)
+        if path_obj.exists() and (path_obj / "collections").exists():
+            return p
+    return "./data/qdrant_storage" if Path("./data/qdrant_storage").exists() else "./data/qdrant_db"
+
+
 def get_qdrant_client(url: str, api_key: str | None = None) -> QdrantClient:
     """
     Tạo synchronous Qdrant client. Tự động fallback sang Local Embedded Qdrant nếu remote server không kết nối được.
@@ -73,11 +85,12 @@ def get_qdrant_client(url: str, api_key: str | None = None) -> QdrantClient:
         return QdrantClient(url=url, api_key=api_key, timeout=30)
     
     if url.startswith("http://") or url.startswith("https://"):
+        local_path = _get_local_qdrant_path()
         logger.warning(
             f"Không thể kết nối Qdrant server tại {url}. "
-            f"Tự động chuyển sang Local Embedded Qdrant tại './data/qdrant_db'..."
+            f"Tự động chuyển sang Local Embedded Qdrant tại '{local_path}'..."
         )
-        return QdrantClient(path="./data/qdrant_db")
+        return QdrantClient(path=local_path)
     return QdrantClient(path=url)
 
 
@@ -90,21 +103,53 @@ def get_async_qdrant_client(url: str, api_key: str | None = None) -> AsyncQdrant
         return AsyncQdrantClient(url=url, api_key=api_key, timeout=30)
 
     if url.startswith("http://") or url.startswith("https://"):
+        local_path = _get_local_qdrant_path()
         logger.warning(
             f"Không thể kết nối Qdrant server tại {url}. "
-            f"Tự động chuyển sang Local Embedded Qdrant tại './data/qdrant_db'..."
+            f"Tự động chuyển sang Local Embedded Qdrant tại '{local_path}'..."
         )
-        return AsyncQdrantClient(path="./data/qdrant_db")
-async def _resolve_collection(client: AsyncQdrantClient, collection_name: str) -> str:
-    """Tự động chuyển 'production' sang collection thực tế nếu alias chưa khởi tạo."""
+        return AsyncQdrantClient(path=local_path)
+    return AsyncQdrantClient(path=url)
+
+
+_RESOLVED_COLLECTIONS: dict[str, str] = {}
+
+
+async def _maybe_await(res):
+    if hasattr(res, "__await__"):
+        return await res
+    return res
+
+
+async def _resolve_collection(client: Any, collection_name: str) -> str:
+    """Tự động chuyển 'production' sang collection thực tế nếu alias chưa khởi tạo hoặc dùng Local Embedded Qdrant."""
+    if collection_name in _RESOLVED_COLLECTIONS:
+        return _RESOLVED_COLLECTIONS[collection_name]
+
     try:
-        if not await client.collection_exists(collection_name):
-            for candidate in ["aic2026_clean_v3", "aic2026_v1", "collection_v1"]:
-                if await client.collection_exists(candidate):
-                    logger.debug(f"Resolved collection '{collection_name}' -> '{candidate}'")
-                    return candidate
+        all_cols = await _maybe_await(client.get_collections())
+        col_names = [c.name for c in all_cols.collections] if all_cols and all_cols.collections else []
+
+        # Nếu collection_name đã tồn tại trong danh sách
+        if collection_name in col_names:
+            _RESOLVED_COLLECTIONS[collection_name] = collection_name
+            return collection_name
+
+        # Thử các candidate thông dụng
+        for candidate in ["aic2026_clean_v3", "aic2026_v1", "collection_v1"]:
+            if candidate in col_names:
+                logger.info(f"Resolved collection '{collection_name}' -> '{candidate}'")
+                _RESOLVED_COLLECTIONS[collection_name] = candidate
+                return candidate
+
+        # Fallback collection đầu tiên nếu có
+        if col_names:
+            resolved = col_names[0]
+            logger.info(f"Resolved fallback collection '{collection_name}' -> '{resolved}'")
+            _RESOLVED_COLLECTIONS[collection_name] = resolved
+            return resolved
     except Exception as e:
-        logger.warning(f"Could not check collection existence for '{collection_name}': {e}")
+        logger.warning(f"Could not check collections for '{collection_name}': {e}")
     return collection_name
 
 
@@ -237,15 +282,22 @@ async def search_by_text_match(
     seen_pids = set()
     all_points = []
 
+    async def _async_scroll(**kwargs):
+        if hasattr(client, "scroll") and asyncio.iscoroutinefunction(client.scroll):
+            return await client.scroll(**kwargs)
+        else:
+            return await asyncio.to_thread(client.scroll, **kwargs)
+
     # 1. Tier 1: Khớp đầy đủ toàn bộ từ khóa trong câu (Must MatchText)
     try:
-        res_must, _ = await client.scroll(
+        res = await _async_scroll(
             collection_name=collection_name,
             scroll_filter=Filter(must=[FieldCondition(key=field_name, match=MatchText(text=clean_query))]),
             limit=limit,
             with_payload=True,
             with_vectors=False,
         )
+        res_must = res[0] if isinstance(res, tuple) else getattr(res, "points", res)
         for p in res_must:
             seen_pids.add(str(p.id))
             all_points.append(p)
@@ -276,13 +328,14 @@ async def search_by_text_match(
 
         if should_conditions:
             try:
-                res_should, _ = await client.scroll(
+                res = await _async_scroll(
                     collection_name=collection_name,
                     scroll_filter=Filter(should=should_conditions),
                     limit=remaining_limit,
                     with_payload=True,
                     with_vectors=False,
                 )
+                res_should = res[0] if isinstance(res, tuple) else getattr(res, "points", res)
                 for p in res_should:
                     pid_str = str(p.id)
                     if pid_str not in seen_pids:
@@ -315,23 +368,29 @@ async def search_by_text_vectors(
     ocr_sparse_vector: SparseVector | None,
     asr_sparse_vector: SparseVector | None,
     image_vector: list[float] | None = None,
+    description_candidates: list[CandidateResult] | None = None,
+    asr_candidates: list[CandidateResult] | None = None,
+    ocr_candidates: list[CandidateResult] | None = None,
     top_k: int = 100,
     collection_name: str = PRODUCTION_ALIAS,
     score_threshold: float | None = None,
     search_mode: str = "all",
     query_text: str = "",
+    custom_weights: dict[str, float] | None = None,
 ) -> list[CandidateResult]:
     """
-    Tìm kiếm keyframe bằng text vectors và image vector qua Weighted RRF fusion.
-    Nếu search_mode là 'ocr' hoặc 'asr', tìm kiếm khớp từ khóa văn bản thuần túy (MatchText).
+    Tìm kiếm keyframe bằng text vectors, image vector, description vector, ASR và OCR qua Weighted RRF fusion.
+    Ưu tiên sử dụng In-Memory BM25 ASR & OCR (~25ms) trước khi fallback về MatchText mạng.
     """
     import asyncio
     from shared.utils.config_loader import load_fusion_config
 
     collection_name = await _resolve_collection(client, collection_name)
 
-    # 1. Chế độ tìm kiếm đơn nhánh OCR khớp từ khóa
+    # 1. Chế độ tìm kiếm đơn nhánh OCR
     if search_mode == "ocr":
+        if ocr_candidates:
+            return ocr_candidates[:top_k]
         logger.info(f"🔍 OCR-only search matching text: '{query_text}'")
         return await search_by_text_match(
             client=client,
@@ -341,8 +400,10 @@ async def search_by_text_vectors(
             collection_name=collection_name
         )
 
-    # 2. Chế độ tìm kiếm đơn nhánh ASR khớp từ khóa
+    # 2. Chế độ tìm kiếm đơn nhánh ASR
     if search_mode == "asr":
+        if asr_candidates:
+            return asr_candidates[:top_k]
         logger.info(f"🔍 ASR-only search matching text: '{query_text}'")
         return await search_by_text_match(
             client=client,
@@ -352,26 +413,44 @@ async def search_by_text_vectors(
             collection_name=collection_name
         )
 
-    # 3. Chế độ Hybrid (all) hoặc chỉ Embedding
-    try:
-        cfg = load_fusion_config()
-        weights = cfg.get("weights", {})
-        rrf_k = float(cfg.get("rrf", {}).get("k", 60))
-    except Exception:
-        weights = {"image_dense": 2.0, "ocr_dense": 2.5, "asr_dense": 1.5, "ocr_sparse": 0.2, "asr_sparse": 0.2}
-        rrf_k = 60.0
+    # 3. Chế độ tìm kiếm đơn nhánh Description vector
+    if search_mode == "description":
+        logger.info(f"🔍 Description-only vector search for: '{query_text}'")
+        return (description_candidates or [])[:top_k]
 
-    w_image = float(weights.get("image_dense", 2.0))
-    w_ocr_dense = float(weights.get("ocr_dense", 2.5))
-    w_asr_dense = float(weights.get("asr_dense", 1.5))
+    # 4. Chế độ Hybrid (all) hoặc chỉ Embedding
+    rrf_k = 60.0
+    if custom_weights:
+        weights = custom_weights
+    else:
+        try:
+            cfg = load_fusion_config()
+            weights = cfg.get("weights", {})
+            rrf_k = float(cfg.get("rrf", {}).get("k", 60))
+        except Exception:
+            weights = {"image_dense": 2.5, "description_dense": 2.0, "ocr_dense": 0.8, "asr_dense": 1.0, "ocr_sparse": 0.2, "asr_sparse": 0.2}
+            rrf_k = 60.0
+
+    w_image = float(weights.get("image_dense", 2.5))
+    w_desc = float(weights.get("description_dense", 2.0))
+    w_ocr_dense = float(weights.get("ocr_dense", 0.8))
+    w_asr_dense = float(weights.get("asr_dense", 1.0))
 
     tasks = []
     task_weights = []
 
-    # Nhánh image_dense (Visual CLIP)
-    if (search_mode in ["all", "embedding"]) and (image_vector is not None):
+    async def _async_query_points(**kwargs):
+        res = client.query_points(**kwargs)
+        return await _maybe_await(res)
+
+    async def _async_text_match(**kwargs):
+        res = search_by_text_match(**kwargs)
+        return await _maybe_await(res)
+
+    # Nhánh 1: image_dense (Visual CLIP)
+    if (search_mode in ["all", "embedding"]) and (image_vector is not None) and len(image_vector) > 0:
         tasks.append(
-            client.query_points(
+            _async_query_points(
                 collection_name=collection_name,
                 query=image_vector,
                 using=IMAGE_DENSE.name,
@@ -382,58 +461,78 @@ async def search_by_text_vectors(
         )
         task_weights.append(w_image)
 
-    # Nếu ở chế độ Hybrid (all), thay vì dùng dense vector embedding cho OCR/ASR,
-    # chúng ta thực hiện tìm kiếm khớp từ khóa văn bản thuần túy (MatchText)
-    if search_mode == "all" and query_text:
-        # Nhánh OCR text match
-        tasks.append(
-            search_by_text_match(
-                client=client,
-                field_name="ocr_text",
-                query_text=query_text,
-                limit=_DEFAULT_PREFETCH_LIMIT,
-                collection_name=collection_name
-            )
-        )
-        task_weights.append(w_ocr_dense)
+    # Nhánh 2: Image Description (BGE-Large-EN VLM Dense Vector Search)
+    if (search_mode in ["all", "embedding"]) and description_candidates:
+        async def _wrap_desc(c):
+            return c
+        tasks.append(_wrap_desc(description_candidates))
+        task_weights.append(w_desc)
 
-        # Nhánh ASR text match
-        tasks.append(
-            search_by_text_match(
-                client=client,
-                field_name="asr_text",
-                query_text=query_text,
-                limit=_DEFAULT_PREFETCH_LIMIT,
-                collection_name=collection_name
+    # Nhánh 3: ASR Stream (In-Memory BM25 hoặc Fallback MatchText)
+    if (search_mode in ["all", "embedding"]):
+        if asr_candidates:
+            async def _wrap_asr(c):
+                return c
+            tasks.append(_wrap_asr(asr_candidates))
+            task_weights.append(w_asr_dense)
+        elif search_mode == "all" and query_text and w_asr_dense > 0.05:
+            tasks.append(
+                _async_text_match(
+                    client=client,
+                    field_name="asr_text",
+                    query_text=query_text,
+                    limit=_DEFAULT_PREFETCH_LIMIT,
+                    collection_name=collection_name
+                )
             )
-        )
-        task_weights.append(w_asr_dense)
+            task_weights.append(w_asr_dense)
+
+    # Nhánh 4: OCR Stream (In-Memory BM25 hoặc Fallback MatchText)
+    if (search_mode in ["all", "embedding"]):
+        if ocr_candidates:
+            async def _wrap_ocr(c):
+                return c
+            tasks.append(_wrap_ocr(ocr_candidates))
+            task_weights.append(w_ocr_dense)
+        elif search_mode == "all" and query_text and w_ocr_dense > 0.05:
+            tasks.append(
+                _async_text_match(
+                    client=client,
+                    field_name="ocr_text",
+                    query_text=query_text,
+                    limit=_DEFAULT_PREFETCH_LIMIT,
+                    collection_name=collection_name
+                )
+            )
+            task_weights.append(w_ocr_dense)
         
     elif search_mode == "embedding":
-        # Chế độ chỉ dùng embedding: vẫn giữ dense query cho OCR/ASR nếu cần
-        tasks.append(
-            client.query_points(
-                collection_name=collection_name,
-                query=ocr_vector,
-                using=OCR_DENSE.name,
-                limit=_DEFAULT_PREFETCH_LIMIT,
-                score_threshold=score_threshold,
-                with_payload=True,
+        # Chế độ chỉ dùng embedding: nếu có ocr_vector/asr_vector thì vẫn query
+        if ocr_vector:
+            tasks.append(
+                _async_query_points(
+                    collection_name=collection_name,
+                    query=ocr_vector,
+                    using=OCR_DENSE.name,
+                    limit=_DEFAULT_PREFETCH_LIMIT,
+                    score_threshold=score_threshold,
+                    with_payload=True,
+                )
             )
-        )
-        task_weights.append(w_ocr_dense)
+            task_weights.append(w_ocr_dense)
 
-        tasks.append(
-            client.query_points(
-                collection_name=collection_name,
-                query=asr_vector,
-                using=ASR_DENSE.name,
-                limit=_DEFAULT_PREFETCH_LIMIT,
-                score_threshold=score_threshold,
-                with_payload=True,
+        if asr_vector:
+            tasks.append(
+                _async_query_points(
+                    collection_name=collection_name,
+                    query=asr_vector,
+                    using=ASR_DENSE.name,
+                    limit=_DEFAULT_PREFETCH_LIMIT,
+                    score_threshold=score_threshold,
+                    with_payload=True,
+                )
             )
-        )
-        task_weights.append(w_asr_dense)
+            task_weights.append(w_asr_dense)
 
     # Thực thi các nhánh
     branch_results = await asyncio.gather(*tasks)
@@ -529,8 +628,11 @@ def _get_scene_desc(scene_id: str) -> str:
     if not _SCENE_DESC_MAP:
         try:
             import pandas as pd
-            desc_df = pd.read_parquet("data/unified/scene_descriptions.parquet")
-            _SCENE_DESC_MAP = dict(zip(desc_df["scene_id"], desc_df["description"].fillna("")))
+            from pathlib import Path
+            desc_path = Path(__file__).resolve().parent.parent.parent.parent / "data" / "unified" / "scene_descriptions.parquet"
+            if desc_path.exists():
+                desc_df = pd.read_parquet(desc_path)
+                _SCENE_DESC_MAP = dict(zip(desc_df["scene_id"].astype(str), desc_df["description"].fillna("")))
         except Exception:
             pass
     return _SCENE_DESC_MAP.get(scene_id, "")
@@ -561,10 +663,8 @@ def _scored_point_to_candidate(scored_point: any) -> CandidateResult:
     ext = keyframe_path.rsplit(".", 1)[-1] if "." in keyframe_path else "webp"
     clean_keyframe_path = f"unified/{scene_id}-{frame_id}.{ext}"
 
-    # Lấy description từ payload hoặc tra cứu trực tiếp từ scene_descriptions.parquet
-    desc = payload.get("description", "") or payload.get("scene_description", "")
-    if not desc:
-        desc = _get_scene_desc(scene_id)
+    # Ưu tiên lấy description mới nhất từ scene_descriptions.parquet, fallback payload
+    desc = _get_scene_desc(scene_id) or payload.get("description", "") or payload.get("scene_description", "")
 
     return CandidateResult(
         video_id=payload["video_id"],
@@ -593,15 +693,15 @@ async def get_keyframes_by_video_id(
     """
     collection_name = await _resolve_collection(client, collection_name)
     try:
-        res, _ = await client.scroll(
+        res, _ = await _maybe_await(client.scroll(
             collection_name=collection_name,
             scroll_filter=Filter(
-                must=[FieldCondition(key="video_id", match=MatchText(text=video_id))]
+                must=[FieldCondition(key="video_id", match=MatchValue(value=video_id))]
             ),
             limit=limit,
             with_payload=True,
             with_vectors=False,
-        )
+        ))
         cands = []
         for point in res:
             try:
@@ -617,7 +717,7 @@ async def get_keyframes_by_video_id(
 
 
 async def get_keyframes_with_vectors_by_video_id(
-    client: AsyncQdrantClient,
+    client: Any,
     video_id: str,
     limit: int = 500,
     vector_name: str = "image_dense",
@@ -631,15 +731,15 @@ async def get_keyframes_with_vectors_by_video_id(
     """
     collection_name = await _resolve_collection(client, collection_name)
     try:
-        res, _ = await client.scroll(
+        res, _ = await _maybe_await(client.scroll(
             collection_name=collection_name,
             scroll_filter=Filter(
-                must=[FieldCondition(key="video_id", match=MatchText(text=video_id))]
+                must=[FieldCondition(key="video_id", match=MatchValue(value=video_id))]
             ),
             limit=limit,
             with_payload=True,
             with_vectors=[vector_name],
-        )
+        ))
         items = []
         for point in res:
             try:
