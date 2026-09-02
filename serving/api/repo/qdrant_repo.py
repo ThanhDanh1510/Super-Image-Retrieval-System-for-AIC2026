@@ -440,12 +440,20 @@ async def search_by_text_vectors(
     task_weights = []
 
     async def _async_query_points(**kwargs):
-        res = client.query_points(**kwargs)
-        return await _maybe_await(res)
+        try:
+            res = client.query_points(**kwargs)
+            return await _maybe_await(res)
+        except Exception as e:
+            logger.warning(f"query_points failed: {e}")
+            return []
 
     async def _async_text_match(**kwargs):
-        res = search_by_text_match(**kwargs)
-        return await _maybe_await(res)
+        try:
+            res = search_by_text_match(**kwargs)
+            return await _maybe_await(res)
+        except Exception as e:
+            logger.warning(f"search_by_text_match failed: {e}")
+            return []
 
     # Nhánh 1: image_dense (Visual CLIP)
     if (search_mode in ["all", "embedding"]) and (image_vector is not None) and len(image_vector) > 0:
@@ -596,18 +604,23 @@ async def search_by_image_vector(
 
     Chỉ dùng nhánh image_dense (CLIP ViT-L/14), không RRF vì chỉ có 1 nhánh.
     """
-    collection_name = await _resolve_collection(client, collection_name)
-    results = await client.query_points(
-        collection_name=collection_name,
-        query=image_vector,
-        using=IMAGE_DENSE.name,
-        limit=top_k,
-        score_threshold=score_threshold,
-        with_payload=True,
-    )
-
-    logger.debug(f"search_by_image_vector: {len(results.points)} results")
-    return [_scored_point_to_candidate(p) for p in results.points]
+    try:
+        collection_name = await _resolve_collection(client, collection_name)
+        res = client.query_points(
+            collection_name=collection_name,
+            query=image_vector,
+            using=IMAGE_DENSE.name,
+            limit=top_k,
+            score_threshold=score_threshold,
+            with_payload=True,
+        )
+        results = await _maybe_await(res)
+        pts = getattr(results, "points", results) if results else []
+        logger.debug(f"search_by_image_vector: {len(pts)} results")
+        return [_scored_point_to_candidate(p) for p in pts]
+    except Exception as e:
+        logger.warning(f"search_by_image_vector error: {e}")
+        return []
 
 
 # =============================================================================
