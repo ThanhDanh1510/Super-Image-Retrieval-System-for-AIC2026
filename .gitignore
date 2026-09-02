@@ -35,8 +35,9 @@ Desktop.ini
 *.env.local
 kaggle.json
 
-# --- Data (không commit video, ảnh, vector lên Git) ---
+# --- Data & Storage (không commit video, ảnh, vector, database lên Git) ---
 data/
+storage/
 *.npy
 *.npz
 *.parquet
@@ -47,12 +48,24 @@ data/
 *.pth
 *.bin
 *.safetensors
+*.zip
+*.rar
+*.tar
+*.gz
+*.7z
+
+# --- Binaries & Executables ---
+*.exe
+tools/bin/*.exe
+tools/bin/qdrant.exe
+
+# --- Qdrant snapshots & local state ---
+*.snapshot
+*.qdrant-initialized
+.qdrant-initialized
 
 # --- Kaggle ---
 /kaggle/
-
-# --- Qdrant snapshots ---
-*.snapshot
 
 # --- Logs ---
 logs/
@@ -69,21 +82,19 @@ htmlcov/
 .pytest_cache/
 .mypy_cache/
 
-# --- Docker ---
-*.tar
-
 # --- Temporary debug & test output files ---
 *_zoom.webp
 temp_*.json
 *.quality.tmp
 data/ocr_test_output/
+data/translation_cache.json
+data/backups/
+data/archive/
 
 # --- Scratch & orphaned temp files ---
 scratch/
-*.rar
 L_by_scene_id.json
 prompt*.md
-*.zip
 test_body.json
 tasks.md
 folder_structure.md

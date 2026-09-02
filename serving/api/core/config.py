@@ -46,10 +46,11 @@ class Settings(BaseSettings):
     QDRANT_API_KEY: str | None = None
     QDRANT_COLLECTION_ALIAS: str = "production"
 
-    # --- Model Loading ---
+    # --- Model Loading & Translation ---
     DEVICE: str = "cuda"   # "cuda" hoặc "cpu"
     TEXT_EMBEDDING_BATCH_SIZE: int = 16
     IMAGE_EMBEDDING_BATCH_SIZE: int = 32
+    USE_GOOGLE_TRANSLATE: bool = True   # Ưu tiên Google Translate API trực tuyến cho độ chính xác cao nhất (fallback sang MarianMT/Qwen khi offline)
 
     # --- RAM Saver ---
     # Warmup toàn bộ models ngay khi server khởi động (giúp request đầu tiên phản hồi siêu tốc ~0.3s)

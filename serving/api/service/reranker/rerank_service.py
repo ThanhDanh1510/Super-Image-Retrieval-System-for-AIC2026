@@ -10,6 +10,7 @@ Service layer duy nhất cho reranking — một interface đứng sau controlle
 from __future__ import annotations
 
 import asyncio
+import time
 import logging
 from typing import Optional
 
@@ -65,8 +66,9 @@ async def rerank(
     viranker_query = query if query else (enhanced_query or "")
     jina_query = enhanced_query or query
 
-    # Chỉ rerank top candidates để tăng tốc và đảm bảo độ bao phủ (ViRanker: 50, Jina M0: 25)
-    rerank_limit = 25 if use_jina_m0 else 50
+    # Nếu bật Jina M0 (đọc ảnh đĩa nặng), rerank 30 candidates để giữ latency < 1s
+    # Nếu chỉ dùng ViRanker, rerank toàn bộ top 100 candidates (GPU FP16 batch 40x2 ~35ms) để không bỏ sót candidate
+    rerank_limit = 30 if use_jina_m0 else min(100, len(candidates))
     rerank_candidates = candidates[:rerank_limit] if len(candidates) > rerank_limit else candidates
 
     try:
@@ -145,3 +147,65 @@ async def rerank(
     except Exception as e:
         logger.warning(f"Reranking error: {e}")
         return candidates
+
+
+async def batch_rerank_sub_events(
+    sub_events: list[str],
+    event_candidates_list: list[list[CandidateResult]],
+    enhanced_queries: Optional[list[str]] = None,
+    keyframes_root_dir: Optional[str] = None,
+    use_viranker: bool = True,
+    use_jina_m0: bool = False,
+    model_registry=None,
+    limit_per_event: int = 15,
+) -> list[list[CandidateResult]]:
+    """
+    Rerank tập trung (Batch Rerank) cho toàn bộ danh sách sub-events trong TRAKE.
+    Chạy unified single-pass forward pass trên GPU với max_length=160 và batch_size=64.
+    """
+    if not event_candidates_list or not sub_events:
+        return event_candidates_list
+
+    if not use_viranker and not use_jina_m0:
+        return event_candidates_list
+
+    _t_start = time.perf_counter()
+    try:
+        viranker_bundle = None
+        if model_registry and use_viranker:
+            viranker_bundle = await model_registry.aget_viranker()
+
+        if use_viranker and viranker_bundle:
+            _t_inf_start = time.perf_counter()
+            reranked_lists = await asyncio.to_thread(
+                viranker.batch_score_events,
+                event_queries=sub_events,
+                event_candidates_list=event_candidates_list,
+                model_bundle=viranker_bundle,
+                enhanced_queries=enhanced_queries,
+                limit_per_event=limit_per_event,
+                batch_size=64,
+                max_length=160,
+            )
+            _t_inf_end = time.perf_counter()
+            logger.info(
+                f"[PROFILE] Batch ViRanker Text inference ({len(sub_events)} events, limit={limit_per_event}) took {(_t_inf_end - _t_inf_start) * 1000:.2f}ms"
+            )
+            _t_end = time.perf_counter()
+            logger.info(f"[PROFILE] Total batch rerank process took {(_t_end - _t_start) * 1000:.2f}ms")
+            return reranked_lists
+        else:
+            return event_candidates_list
+    except Exception as e:
+        logger.warning(f"Batch sub-event reranking error: {e}")
+        return event_candidates_list
+
+
+async def warmup_reranker(model_registry: Optional[ModelRegistry] = None) -> None:
+    """Warmup ViRanker CUDA kernels tại thời điểm startup."""
+    try:
+        if model_registry:
+            viranker_bundle = await model_registry.aget_viranker()
+            viranker.warmup(viranker_bundle)
+    except Exception as e:
+        logger.debug(f"warmup_reranker: {e}")

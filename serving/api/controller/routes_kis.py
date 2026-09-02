@@ -13,7 +13,7 @@ import mimetypes
 import os
 from pathlib import Path
 
-import cv2
+import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, Header, Query
 from fastapi.responses import FileResponse, Response, StreamingResponse
 
@@ -124,54 +124,96 @@ async def get_video_fps(video_id: str):
 async def get_keyframe_image(video_id: str, frame_id: int):
     """
     Endpoint phục vụ ảnh keyframe thực tế trên đĩa cứng cho Frontend/UI.
+    Tự động fallback trích xuất on-the-fly từ video gốc nếu chưa có file ảnh tĩnh (100% hiển thị, không 404).
     """
     img_path = resolve_keyframe_path(video_id, frame_id)
-    if not img_path or not img_path.exists():
-        raise HTTPException(status_code=404, detail=f"Không tìm thấy ảnh cho video_id={video_id}, frame_id={frame_id}")
-    return FileResponse(img_path)
+    if img_path and img_path.exists():
+        return FileResponse(img_path)
+
+    # Fallback trích xuất on-the-fly từ video gốc
+    try:
+        vid_path = resolve_video_path(video_id)
+        if vid_path and vid_path.exists():
+            import cv2
+            from pathlib import Path
+            cap = cv2.VideoCapture(str(vid_path))
+            if cap.isOpened():
+                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_id)
+                ret, frame = cap.read()
+                cap.release()
+                if ret and frame is not None:
+                    cache_dir = Path("data/cache/frames")
+                    cache_dir.mkdir(parents=True, exist_ok=True)
+                    out_file = cache_dir / f"{video_id}_{frame_id}.jpg"
+                    cv2.imwrite(str(out_file), frame, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
+                    return FileResponse(out_file, media_type="image/jpeg")
+    except Exception as e:
+        logger.debug(f"On-the-fly frame extraction fallback failed for {video_id}:{frame_id}: {e}")
+
+    raise HTTPException(status_code=404, detail=f"Không tìm thấy ảnh cho video_id={video_id}, frame_id={frame_id}")
+
+
+_FRAME_META_INDEX: dict[tuple[str, int], dict] = {}
+
+
+def _get_frame_meta_dict() -> dict[tuple[str, int], dict]:
+    global _FRAME_META_INDEX
+    if not _FRAME_META_INDEX:
+        try:
+            data_dir = Path(__file__).resolve().parent.parent.parent.parent / "data" / "unified"
+            if (data_dir / "scene_metadata.parquet").exists():
+                df_meta = pd.read_parquet(data_dir / "scene_metadata.parquet")
+                df_desc = pd.read_parquet(data_dir / "scene_descriptions.parquet") if (data_dir / "scene_descriptions.parquet").exists() else pd.DataFrame()
+                df_ocr = pd.read_parquet(data_dir / "ocr_text.parquet") if (data_dir / "ocr_text.parquet").exists() else pd.DataFrame()
+                df_asr = pd.read_parquet(data_dir / "asr_text.parquet") if (data_dir / "asr_text.parquet").exists() else pd.DataFrame()
+
+                if not df_desc.empty and "scene_id" in df_desc.columns:
+                    df_meta = df_meta.merge(df_desc[["scene_id", "description"]], on="scene_id", how="left")
+                if not df_ocr.empty and "scene_id" in df_ocr.columns:
+                    df_meta = df_meta.merge(df_ocr[["scene_id", "ocr_text"]], on="scene_id", how="left")
+                if not df_asr.empty and "scene_id" in df_asr.columns:
+                    df_meta = df_meta.merge(df_asr[["scene_id", "asr_text"]], on="scene_id", how="left")
+
+                df_meta["description"] = df_meta.get("description", pd.Series(dtype=str)).fillna("")
+                df_meta["ocr_text"] = df_meta.get("ocr_text", pd.Series(dtype=str)).fillna("")
+                df_meta["asr_text"] = df_meta.get("asr_text", pd.Series(dtype=str)).fillna("")
+
+                for _, row in df_meta.iterrows():
+                    v_id = str(row["video_id"])
+                    f_id = int(row["frame_id"])
+                    _FRAME_META_INDEX[(v_id, f_id)] = {
+                        "video_id": v_id,
+                        "scene_id": str(row["scene_id"]),
+                        "frame_id": f_id,
+                        "timestamp_start": float(row.get("timestamp_start", 0.0)),
+                        "timestamp_end": float(row.get("timestamp_end", 0.0)),
+                        "timestamp_mid": float(row.get("timestamp_mid", 0.0)),
+                        "keyframe_path": str(row.get("keyframe_path", "")),
+                        "ocr_text": str(row.get("ocr_text", "")),
+                        "asr_text": str(row.get("asr_text", "")),
+                        "description": str(row.get("description", "")),
+                        "score": 1.0,
+                    }
+        except Exception as e:
+            logger.warning(f"Failed to build _FRAME_META_INDEX: {e}")
+    return _FRAME_META_INDEX
 
 
 @router.get("/frame/{video_id}/{frame_id}", summary="Lấy metadata chi tiết cho 1 frame (phục vụ kiểm tra đáp án nhanh)")
 async def get_frame_metadata(video_id: str, frame_id: int):
     """
     Tra cứu metadata (description, OCR, ASR, timestamps) cho 1 frame cụ thể.
-    Ưu tiên lookup từ VideoContextIndex (parquet unified), fallback về thông tin tối thiểu.
-
-    Frontend Inspector sẽ gọi endpoint này để hiển thị đúng thông tin khi mở video bằng tay:
-    Nhập "video_id,frame_id" → mở video ngay lập tức kèm metadata nếu có.
+    Ưu tiên lookup trực tiếp từ in-memory unified metadata, fallback về thông tin tối thiểu.
     """
-    # 1. Thử lookup qua VideoContextIndex (in-memory parquet)
-    try:
-        from serving.api.service.retrieval.video_context_service import get_video_context_index
-
-        idx = get_video_context_index()
-        if idx.ensure_loaded():
-            v_data = idx.video_contexts.get(video_id)
-            if v_data:
-                for sc in v_data.get("scenes", []):
-                    try:
-                        fid = int(sc.get("frame_id", -1))
-                    except Exception:
-                        continue
-                    if fid == int(frame_id):
-                        # Build CandidateResult JSON
-                        return {
-                            "video_id": str(sc.get("video_id", video_id)),
-                            "scene_id": str(sc.get("scene_id", f"{video_id}_{frame_id}")),
-                            "frame_id": int(sc.get("frame_id", frame_id)),
-                            "timestamp_start": float(sc.get("timestamp_start", 0.0)),
-                            "timestamp_end": float(sc.get("timestamp_end", 0.0)),
-                            "timestamp_mid": float(sc.get("timestamp_mid", 0.0)),
-                            "keyframe_path": str(sc.get("keyframe_path", "")),
-                            "ocr_text": str(sc.get("ocr_text", "")),
-                            "asr_text": str(sc.get("asr_text", "")),
-                            "description": str(sc.get("description", "")),
-                            "score": 1.0,
-                            "exists_video": bool(resolve_video_path(video_id) is not None),
-                            "exists_image": bool(resolve_keyframe_path(video_id, frame_id) is not None),
-                        }
-    except Exception as e:
-        logger.debug(f"get_frame_metadata fallback lookup failed: {e}")
+    # 1. Thử lookup qua in-memory parquet metadata index
+    meta_idx = _get_frame_meta_dict()
+    info = meta_idx.get((str(video_id), int(frame_id)))
+    if info:
+        return {
+            **info,
+            "exists_video": bool(resolve_video_path(video_id) is not None),
+            "exists_image": bool(resolve_keyframe_path(video_id, frame_id) is not None),
+        }
 
     # 2. Fallback: kiểm tra file tồn tại và trả về metadata tối thiểu
     img_path = resolve_keyframe_path(video_id, frame_id)
@@ -245,6 +287,7 @@ async def search_kis(
             results=pipeline_res.candidates,
             total=len(pipeline_res.candidates),
             query_text=pipeline_res.enhanced_query or request.query,
+            metrics=pipeline_res.metrics,
         )
     except Exception as e:
         logger.error(f"Error in search_kis: {e}", exc_info=True)
@@ -285,6 +328,7 @@ async def search_vqa(
             answers=answers,
             total=len(pipeline_res.candidates),
             query_text=pipeline_res.enhanced_query or request.query,
+            metrics=pipeline_res.metrics,
         )
     except Exception as e:
         logger.error(f"Error in search_vqa: {e}", exc_info=True)
@@ -325,6 +369,7 @@ async def search_trake(
             total=len(chains),
             query_text=pipeline_res.enhanced_query or request.query,
             num_events=request.num_events,
+            metrics=pipeline_res.metrics,
         )
     except Exception as e:
         logger.error(f"Error in search_trake: {e}", exc_info=True)

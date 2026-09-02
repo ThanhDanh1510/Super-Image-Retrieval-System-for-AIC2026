@@ -17,6 +17,13 @@ dependencies = [
     "transformers>=4.40.0",
     "Pillow>=10.0.0",
     "numpy>=1.26.0",
+    "scipy>=1.12.0",
+
+    # Data Processing, Computer Vision & Translation
+    "pandas>=2.2.0,<3.0.0",
+    "pyarrow>=17.0.0,<20.0.0",
+    "opencv-python-headless>=4.8.0",
+    "deep-translator>=1.11.4",
 
     # API
     "fastapi>=0.111.0",
@@ -33,7 +40,7 @@ dependencies = [
 [project.optional-dependencies]
 macos-server = [
     # Runtime imports used by the API and local indexing on macOS.
-    "opencv-python>=4.10.0,<5.0.0",
+    "opencv-python-headless>=4.8.0",
     "pandas>=2.2.0,<3.0.0",
     "pyarrow>=17.0.0,<20.0.0",
     "rank-bm25==0.2.2",
@@ -46,8 +53,10 @@ test = [
     "httpx>=0.27.0",
     "pandas>=2.2.0,<3.0.0",
     "pyarrow>=17.0.0,<20.0.0",
-    "deep-translator==1.11.4",
+    "opencv-python-headless>=4.8.0",
+    "deep-translator>=1.11.4",
     "rank-bm25==0.2.2",
+    "scipy>=1.12.0",
 ]
 
 # MỘT extra duy nhất — cài tất cả trong 1 virtual environment duy nhất
