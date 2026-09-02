@@ -38,37 +38,15 @@
 
 ---
 
-## 🚀 Hướng Dẫn Cài Đặt Nhanh (Quick Start)
+## 🚀 Hướng Dẫn Cài Đặt & Chạy Hệ Thống (Quick Start)
 
-### 🌟 LỰA CHỌN 1: Chạy Full-Stack Bằng Docker (Khuyên dùng cho máy mới)
-
-Nếu bạn muốn chạy hệ thống ngay lập tức mà không cần cấu hình thủ công Python/CUDA:
-
-1. **Clone repository:**
-   ```bash
-   git clone https://github.com/ThanhDanh1510/Super-Image-Retrieval-System-for-AIC2026.git
-   cd Super-Image-Retrieval-System-for-AIC2026
-   ```
-
-2. **Chuẩn bị Thư mục Dữ liệu (`data/`):**
-   * 📥 **Tải bộ dữ liệu trọn gói tại**: [Google Drive Data Folder (AIC2026)](https://drive.google.com/drive/folders/174LtGV8Zex9TSD0eTajtVaY59DSi23kF)
-   * Giải nén và đặt thư mục `data/` vào thư mục gốc của dự án.
-   * **Mẹo siêu tốc:** Nếu bạn tải sẵn thư mục **`data/qdrant_storage/`** (đã index sẵn toàn bộ 90,551 points), hệ thống sẽ có dữ liệu ngay lập tức!
-   * *(Nếu chỉ có `data/unified/` thô, nạp dữ liệu bằng lệnh: `docker compose run --rm api python -m indexing.run_index --dataset-dir /app/data/unified --collection aic2026_clean_v3 --create-collection`)*
-
-3. **Khởi chạy toàn bộ hệ thống:**
-   ```bash
-   docker compose up -d
-   ```
-   * 🌐 **Spider-Man Web UI:** [http://localhost:8000/ui/index.html](http://localhost:8000/ui/index.html)
-   * 📚 **API Swagger Docs:** [http://localhost:8000/docs](http://localhost:8000/docs)
-   * 🗄️ **Qdrant Dashboard:** [http://localhost:6333/dashboard](http://localhost:6333/dashboard)
+Hệ thống hỗ trợ 2 hình thức triển khai: **Cài đặt Native trên máy (Khuyên dùng để tối ưu tối đa GPU CUDA / Apple Silicon MPS)** hoặc **Chạy toàn bộ bằng Docker**.
 
 ---
 
-### 💻 LỰA CHỌN 2: Cài Đặt Native (Tối ưu tối đa GPU NVIDIA CUDA / Apple Silicon MPS)
+### 💻 LỰA CHỌN 1: Cài Đặt Native (Khuyên dùng cho Máy thi & Teammate)
 
-#### Bước 1: Cài đặt Môi trường với `uv`
+#### Bước 1: Clone Repository & Cài Đặt Môi Trường với `uv`
 
 ##### 🪟 Dành cho Windows (NVIDIA GPU CUDA):
 ```powershell
@@ -79,7 +57,7 @@ pip install uv
 uv venv .venv
 .venv\Scripts\Activate.ps1
 
-# Cài đặt PyTorch hỗ trợ CUDA 12.4
+# Cài đặt PyTorch hỗ trợ CUDA 12.4 và toàn bộ dependencies
 uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
 uv pip install -e ".[all]"
 ```
@@ -93,28 +71,77 @@ pip3 install uv
 uv venv .venv
 source .venv/bin/activate
 
-# Cài đặt PyTorch & Dependencies (Tự động nhận diện GPU Metal MPS)
+# Cài đặt PyTorch & Dependencies (Tự động nhận diện Apple Metal MPS)
 uv pip install torch torchvision torchaudio
 uv pip install -e ".[macos-server,test]"
 ```
 
-#### Bước 2: Khởi động Qdrant Vector Database
+##### 🐧 Dành cho Ubuntu / Linux:
 ```bash
+git clone https://github.com/ThanhDanh1510/Super-Image-Retrieval-System-for-AIC2026.git
+cd Super-Image-Retrieval-System-for-AIC2026
+
+pip3 install uv
+uv venv .venv
+source .venv/bin/activate
+uv pip install -e ".[all]"
+```
+
+---
+
+#### Bước 2: Chuẩn Bị & Giải Nén Thư Mục Dữ Liệu (`data/`)
+
+* 📥 **Tải gói dữ liệu**:
+  * **Dành cho Teammate (Đã có sẵn folder ảnh):** Tải gói dữ liệu tổng hợp `aic2026_data_bundle_for_team.zip` (~757 MB) và giải nén đè vào thư mục `data/` (giữ nguyên thư mục ảnh `data/image/` sẵn có trên máy).
+  * **Dành cho Máy mới hoàn toàn:** Tải toàn bộ thư mục dữ liệu tại [Google Drive Data Folder (AIC2026)](https://drive.google.com/drive/folders/174LtGV8Zex9TSD0eTajtVaY59DSi23kF).
+
+* 📂 **Cấu trúc thư mục `data/` chuẩn sau khi giải nén:**
+  ```text
+  data/
+  ├── image/                     # Thư mục ảnh keyframe (.webp)
+  ├── unified/                   # 11 file vector & parquet sạch (đã cập nhật L25 Gemini)
+  │   ├── scene_descriptions.parquet
+  │   ├── description_embeddings.npy
+  │   ├── image_vectors.npy
+  │   ├── ocr_text.parquet
+  │   ├── asr_text.parquet
+  │   └── ...
+  ├── gemini_output/             # JSON mô tả chi tiết VLM
+  └── translation_cache.json     # Cache dịch song ngữ tức thì (<1ms)
+  ```
+
+---
+
+#### Bước 3: Khởi Động Qdrant & Nạp Dữ Liệu (Indexing)
+
+```bash
+# 3.1 Khởi động Qdrant Vector DB
 docker compose up -d qdrant
+
+# 3.2 Nạp dữ liệu từ data/unified vào Qdrant (mất ~1 phút cho 88,899 points)
+python -m indexing.run_index --dataset-dir ./data/unified --collection aic2026_clean_v3 --create-collection
 ```
 
-#### Bước 3: Nạp Dữ Liệu vào Qdrant (Nếu chưa có storage)
-```bash
-python -m indexing.run_index --dataset-dir ./data/unified --collection aic2026_clean_v3 --recreate
-```
+---
 
-#### Bước 4: Khởi Động Search Server
+#### Bước 4: Khởi Động Server & Trải Nghiệm Web UI
+
 ```bash
 python start_api.py
 ```
-- **Web UI:** [http://localhost:8000/ui/index.html](http://localhost:8000/ui/index.html)
-- **API Docs:** [http://localhost:8000/docs](http://localhost:8000/docs)
-- **Health Check:** [http://localhost:8000/health](http://localhost:8000/health)
+* 🌐 **Spider-Man Web UI:** [http://localhost:8000/ui/index.html](http://localhost:8000/ui/index.html)
+* 📚 **API Swagger Docs:** [http://localhost:8000/docs](http://localhost:8000/docs)
+* 🗄️ **Qdrant Dashboard:** [http://localhost:6333/dashboard](http://localhost:6333/dashboard)
+
+---
+
+### 🐳 LỰA CHỌN 2: Chạy Full-Stack Bằng Docker
+
+Nếu bạn muốn chạy toàn bộ hệ thống (API + Qdrant) tự động qua container mà không cần cấu hình thủ công:
+```bash
+# Sau khi chuẩn bị thư mục data/, khởi chạy:
+docker compose up -d
+```
 
 ---
 
