@@ -343,16 +343,20 @@ def _is_valid_translation(text: str, source: str) -> bool:
     return True
 
 
-def _translate_with_google_sync(query: str, target: str = "en") -> str | None:
-    """Dịch query bằng Google Translator qua deep_translator."""
+def _translate_with_google_sync(query: str, target: str = "en", max_retries: int = 2) -> str | None:
+    """Dịch query bằng Google Translator qua deep_translator với cơ chế retry."""
     try:
         from deep_translator import GoogleTranslator
-        translator = GoogleTranslator(source="auto", target=target)
-        out = translator.translate(query)
-        if out and _is_valid_translation(out, query):
-            return out.strip()
+        for attempt in range(max_retries):
+            try:
+                translator = GoogleTranslator(source="auto", target=target)
+                out = translator.translate(query)
+                if out and _is_valid_translation(out, query):
+                    return out.strip()
+            except Exception as e:
+                logger.debug(f"GoogleTranslator sync error (attempt {attempt+1}): {e}")
     except Exception as e:
-        logger.debug(f"GoogleTranslator sync error: {e}")
+        logger.debug(f"GoogleTranslator init error: {e}")
     return None
 
 

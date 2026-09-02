@@ -4,7 +4,10 @@ import logging
 import torch
 import numpy as np
 import pandas as pd
-from scipy import sparse
+try:
+    from scipy import sparse
+except ImportError:
+    sparse = None
 from collections import Counter
 from transformers import AutoTokenizer, AutoModel
 
@@ -57,7 +60,12 @@ class VectorizedSparseBM25Index:
                 cols.append(t_id)
                 data.append(float(idf * bm25_tf))
 
-        self.matrix = sparse.csr_matrix((data, (rows, cols)), shape=(N, V), dtype=np.float32)
+        if sparse is not None:
+            self.matrix = sparse.csr_matrix((data, (rows, cols)), shape=(N, V), dtype=np.float32)
+            self._fallback_tuples = None
+        else:
+            self.matrix = None
+            self._fallback_tuples = (data, rows, cols)
 
     def get_scores(self, tokens: list[str]) -> np.ndarray:
         """Tính điểm BM25 cho tập tokens bằng 1 phép nhân ma trận thưa BLAS (<2ms)."""
@@ -71,8 +79,17 @@ class VectorizedSparseBM25Index:
         q_vec = np.zeros(self.V, dtype=np.float32)
         q_vec[q_toks] = 1.0
 
-        # Dot product: (N, V) @ (V, 1) -> (N,)
-        scores = self.matrix.dot(q_vec)
+        if self.matrix is not None:
+            # Dot product: (N, V) @ (V, 1) -> (N,)
+            scores = self.matrix.dot(q_vec)
+            return scores
+
+        # Fallback pure numpy nếu scipy chưa cài đặt
+        scores = np.zeros(self.N, dtype=np.float32)
+        data, rows, cols = self._fallback_tuples
+        for val, r, c in zip(data, rows, cols):
+            if q_vec[c] > 0:
+                scores[r] += val * q_vec[c]
         return scores
 
 
