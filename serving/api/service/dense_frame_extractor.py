@@ -18,8 +18,10 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
-from typing import Optional
-import cv2
+try:
+    import cv2
+except ImportError:
+    cv2 = None
 import numpy as np
 from PIL import Image
 
@@ -48,6 +50,10 @@ def _extract_frames_sync(
         tuple of (frames_data, fps)
         frames_data: list of (frame_idx, timestamp_sec, np_rgb_array (224, 224, 3))
     """
+    if cv2 is None:
+        logger.warning("OpenCV (cv2) is not installed. Skipping dense frame extraction.")
+        return [], 25.0
+
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
         logger.warning(f"Không thể mở file video: {video_path}")

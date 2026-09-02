@@ -13,7 +13,6 @@ import mimetypes
 import os
 from pathlib import Path
 
-import cv2
 import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, Header, Query
 from fastapi.responses import FileResponse, Response, StreamingResponse
