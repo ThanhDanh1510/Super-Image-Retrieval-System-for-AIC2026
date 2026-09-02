@@ -122,7 +122,17 @@ class QueryAnalyzer:
         has_qa = (task_type is not None and "qa" in str(task_type).lower()) or any(cue in q_lower for cue in cls.QA_CUES)
 
         # 3. Quyết định Primary Intent và Dynamic Weights
-        if has_ocr and not has_asr:
+        if has_qa:
+            primary = "qa"
+            weights = adaptive_cfg.get("qa_intent", {
+                "image_dense": 2.0,
+                "description_dense": 2.8,
+                "ocr_dense": 1.8,
+                "asr_dense": 1.5,
+                "ocr_sparse": 0.5,
+                "asr_sparse": 0.5,
+            })
+        elif has_ocr and not has_asr:
             primary = "ocr"
             weights = adaptive_cfg.get("ocr_intent", {
                 "image_dense": 1.5,
@@ -130,16 +140,6 @@ class QueryAnalyzer:
                 "ocr_dense": 3.5,
                 "asr_dense": 0.1,
                 "ocr_sparse": 0.8,
-                "asr_sparse": 0.1,
-            })
-        elif has_visual and not has_asr:
-            primary = "visual"
-            weights = adaptive_cfg.get("visual_intent", {
-                "image_dense": 3.0,
-                "description_dense": 3.0,
-                "ocr_dense": 0.2,
-                "asr_dense": 0.1,
-                "ocr_sparse": 0.1,
                 "asr_sparse": 0.1,
             })
         elif has_asr and not has_visual and not has_ocr:
@@ -152,15 +152,15 @@ class QueryAnalyzer:
                 "ocr_sparse": 0.1,
                 "asr_sparse": 0.8,
             })
-        elif has_qa:
-            primary = "qa"
-            weights = adaptive_cfg.get("qa_intent", {
-                "image_dense": 2.0,
-                "description_dense": 2.8,
-                "ocr_dense": 1.8,
-                "asr_dense": 1.5,
-                "ocr_sparse": 0.5,
-                "asr_sparse": 0.5,
+        elif has_visual:
+            primary = "visual"
+            weights = adaptive_cfg.get("visual_intent", {
+                "image_dense": 3.0,
+                "description_dense": 3.0,
+                "ocr_dense": 0.2,
+                "asr_dense": 0.1,
+                "ocr_sparse": 0.1,
+                "asr_sparse": 0.1,
             })
         else:
             primary = "balanced"
