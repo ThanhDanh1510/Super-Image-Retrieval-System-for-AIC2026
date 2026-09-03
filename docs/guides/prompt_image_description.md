@@ -15,10 +15,10 @@ Tài liệu này cung cấp Prompt chuẩn hóa đã được kiểm chứng đ�
 
 ---
 
-## 2. Câu Lệnh / Prompt Ngắn Để Gọi Gemini Flash Subagents Sinh Caption Song Song
+## 2. Câu Lệnh / Prompt Ngắn Để Gọi Gemini Flash Subagents Sinh Caption Cho Cả 1 Thư Mục (Folder)
 
-Để Antigravity tự động kích hoạt các Subagent chạy bằng mô hình **Gemini Flash** đọc ảnh trực tiếp và sinh caption chuẩn xác (không cần nạp GPU local Qwen2.5-VL), bạn chỉ cần gửi câu lệnh ngắn sau:
+Để Antigravity tự động chia nhỏ cả 1 thư mục chứa hàng trăm/hàng ngàn ảnh keyframe (ví dụ: `data/image/L25/` hoặc `data/image/L26/`) cho các **Subagent Gemini Flash** xử lý song song và lưu kết quả vào dataset `data/unified/scene_descriptions.parquet`, bạn chỉ cần gửi câu lệnh ngắn sau:
 
 ```text
-Hãy chia các subagent (sử dụng model 'flash') đọc trực tiếp danh sách ảnh keyframe trong thư mục [ĐƯỜNG DẪN ẢNH HOẶC BATCH], tuân thủ đúng prompt tại tools/vlm_captioning/prompt_image_description.md để sinh mô tả chuẩn 3 khối (MÔ TẢ TỔNG QUAN, CHI TIẾT THỰC THỂ & VỊ TRÍ, TAGS SONG NGỮ).
+Hãy phân chia các subagents (dùng model 'flash') quét toàn bộ thư mục ảnh [ĐƯỜNG DẪN THƯ MỤC CẦN CHẠY, VD: data/image/L26/], đọc trực tiếp từng ảnh và tuân thủ đúng prompt tại tools/vlm_captioning/prompt_image_description.md để sinh mô tả chuẩn 3 khối, sau đó lưu kết quả vào data/unified/scene_descriptions.parquet và chạy python -m tools.embeddings.build_description_embeddings để tự động cập nhật vector BGE.
 ```
