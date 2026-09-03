@@ -15,10 +15,10 @@ Tài liệu này cung cấp Prompt chuẩn hóa đã được kiểm chứng đ�
 
 ---
 
-## 2. Câu Lệnh / Prompt Ngắn Để Gọi Antigravity Sinh Caption
+## 2. Câu Lệnh / Prompt Ngắn Để Gọi Gemini Flash Subagents Sinh Caption Song Song
 
-Khi muốn Antigravity sinh mô tả cho một bức ảnh hoặc danh sách ảnh trong project, bạn chỉ cần gửi prompt ngắn sau:
+Để Antigravity tự động kích hoạt các Subagent chạy bằng mô hình **Gemini Flash** đọc ảnh trực tiếp và sinh caption chuẩn xác (không cần nạp GPU local Qwen2.5-VL), bạn chỉ cần gửi câu lệnh ngắn sau:
 
 ```text
-Hãy đọc hướng dẫn tại tools/vlm_captioning/prompt_image_description.md và sinh mô tả chuẩn 3 khối (MÔ TẢ TỔNG QUAN, CHI TIẾT THỰC THỂ & VỊ TRÍ, TAGS SONG NGỮ) cho ảnh này: [ĐƯỜNG DẪN ẢNH HOẶC ATTACHMENT]
+Hãy chia các subagent (sử dụng model 'flash') đọc trực tiếp danh sách ảnh keyframe trong thư mục [ĐƯỜNG DẪN ẢNH HOẶC BATCH], tuân thủ đúng prompt tại tools/vlm_captioning/prompt_image_description.md để sinh mô tả chuẩn 3 khối (MÔ TẢ TỔNG QUAN, CHI TIẾT THỰC THỂ & VỊ TRÍ, TAGS SONG NGỮ).
 ```
