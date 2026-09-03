@@ -2,6 +2,7 @@ import os
 import sys
 import time
 import torch
+import numpy as np
 import pandas as pd
 from pathlib import Path
 from tqdm import tqdm
@@ -70,8 +71,12 @@ def main():
     assert all_embeddings.shape[0] == num_items, f"Mismatch: {all_embeddings.shape[0]} != {num_items}"
     
     torch.save(all_embeddings, OUTPUT_EMBEDDINGS)
+    np_path = os.path.join(DATA_DIR, "description_embeddings.npy")
+    np.save(np_path, all_embeddings.cpu().numpy().astype(np.float32))
     print("\n" + "=" * 80)
-    print(f"🎉 SUCCESS! Saved description embeddings tensor shape {list(all_embeddings.shape)} to {OUTPUT_EMBEDDINGS}")
+    print(f"🎉 SUCCESS! Saved description embeddings shape {list(all_embeddings.shape)} to:")
+    print(f"   - PyTorch Tensor: {OUTPUT_EMBEDDINGS}")
+    print(f"   - NumPy Array   : {np_path}")
     print(f"⏱️ Total time elapsed: {time.time() - start_time:.1f}s")
     print("=" * 80)
 

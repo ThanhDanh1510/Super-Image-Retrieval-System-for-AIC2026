@@ -29,7 +29,7 @@ flowchart TD
     end
 
     subgraph VectorSearch ["4. TRUY XUẤT & FUSION"]
-        Qdrant[("Qdrant Vector DB<br/>collection: aic2026_clean_v3<br/>90,551 points")]
+        Qdrant[("Qdrant Vector DB<br/>collection: aic2026_clean_v3<br/>88,899 points")]
         HybridMem["In-Memory Hybrid Engine<br/>PyTorch CUDA Matmul (<15ms)"]
         RRF["Weighted RRF Fusion (k=60)<br/>Gộp điểm đa nhánh & Lọc sơ bộ Top-K"]
     end

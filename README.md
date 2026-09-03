@@ -30,7 +30,7 @@
   2. **VQA (Visual Question Answering):** Trả lời câu hỏi thị giác và truy xuất keyframe chứa bằng chứng.
   3. **TRAKE (Temporal Retrieval):** Tìm kiếm chuỗi sự kiện đa bước diễn ra theo trình tự thời gian (DANTE DP).
   4. **Image-to-Image Search:** Tìm kiếm keyframe tương đồng trực tiếp từ ảnh mẫu.
-* **Quy mô dữ liệu thực tế:** **872 video gốc** (130.13 giờ), **90,551 keyframe sạch** đã lập chỉ mục.
+* **Quy mô dữ liệu thực tế:** **872 video gốc** (130.13 giờ), **88,899 keyframe sạch** đã lập chỉ mục và trích xuất vector đa nhánh.
 * **Vector Database:** [Qdrant](https://qdrant.tech) collection `aic2026_clean_v3` (alias: `production`).
 
 ---
@@ -155,6 +155,7 @@ Toàn bộ tài liệu chi tiết được tổ chức trong thư mục [`docs/`
 
 * 🏗️ [**Kiến Trúc & Model Specs**](docs/architecture/system_architecture.md)
 * 🔌 [**Tài Liệu API Endpoints & Schemas**](docs/architecture/api_reference.md)
+* ⚡ [**Quy Trình Sinh Vector & Dữ Liệu (ASR, OCR, CLIP, Descriptions)**](docs/guides/vector_generation_and_pipeline.md)
 * 🔍 [**Thuật Toán KIS & Exact-Match Tiered Scoring**](docs/algorithms/kis_retrieval.md)
 * ⏱️ [**Thuật Toán Dòng Thời Gian TRAKE (DANTE Engine)**](docs/algorithms/trake_temporal.md)
 * 🛠️ [**Bộ Công Cụ Tiện Ích & Web UI Lọc Ảnh**](docs/guides/tools_and_pipelines.md)

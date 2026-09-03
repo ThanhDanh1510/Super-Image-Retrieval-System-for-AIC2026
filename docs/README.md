@@ -15,6 +15,7 @@ Chào mừng bạn đến với trung tâm tài liệu kỹ thuật của hệ t
 * [**Thuật Toán Dòng Thời Gian TRAKE (DANTE DP)**](algorithms/trake_temporal.md): Quy hoạch động DANTE, Sub-event splitting, Targeted Dense Frame Sampling qua OpenCV.
 
 ### 3. 🛠️ Hướng Dẫn & Bộ Công Cụ (Guides)
+* [**Quy Trình Sinh Vector & Dữ Liệu (ASR, OCR, CLIP, Descriptions)**](guides/vector_generation_and_pipeline.md): Hướng dẫn offline pipeline trích xuất văn bản, audio, VLM captioning và sinh vector đa nhánh.
 * [**Bộ Công Cụ & Pipeline Tiện Ích**](guides/tools_and_pipelines.md): Hướng dẫn Web UI lọc ảnh trùng lặp (`tools/image_filter`), kiểm toán độ phủ video, và quản trị Zero-Downtime Alias Qdrant.
 * [**Thể Lệ & Định Dạng Nộp Bài AIC2026**](guides/contest_rules.md): Quy chuẩn tác vụ, định dạng file CSV nộp bài chính thức.
 
