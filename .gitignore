@@ -93,10 +93,9 @@ data/archive/
 
 # --- Scratch & orphaned temp files ---
 scratch/
-L_by_scene_id.json
-prompt*.md
-test_body.json
-tasks.md
-folder_structure.md
-server.log
-server_error.log
+/L_by_scene_id.json
+/test_body.json
+/tasks.md
+/folder_structure.md
+/server.log
+/server_error.log
