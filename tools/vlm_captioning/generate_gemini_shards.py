@@ -27,7 +27,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("Gemini-Shard-Generator")
 
-BASE_DIR = Path("d:/AIC2026")
+BASE_DIR = _PROJECT_ROOT
 DATA_DIR = BASE_DIR / "data"
 UNIFIED_DIR = DATA_DIR / "unified"
 METADATA_PARQUET = UNIFIED_DIR / "scene_metadata.parquet"

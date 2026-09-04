@@ -28,8 +28,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger("Merge-and-Embed")
 
-BASE_DIR = Path("d:/AIC2026")
-UNIFIED_DIR = BASE_DIR / "data" / "unified"
+BASE_DIR = _PROJECT_ROOT
+DATA_DIR = BASE_DIR / "data"
+UNIFIED_DIR = DATA_DIR / "unified"
 SHARDS_DIR = UNIFIED_DIR / "vlm_shards"
 METADATA_PARQUET = UNIFIED_DIR / "scene_metadata.parquet"
 OUTPUT_PARQUET = UNIFIED_DIR / "scene_descriptions.parquet"
