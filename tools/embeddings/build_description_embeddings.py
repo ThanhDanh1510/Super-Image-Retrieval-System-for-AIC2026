@@ -8,7 +8,7 @@ from pathlib import Path
 from tqdm import tqdm
 from transformers import AutoTokenizer, AutoModel
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = os.path.join(PROJECT_ROOT, "data", "unified")
 DESCRIPTIONS_PARQUET = os.path.join(DATA_DIR, "scene_descriptions.parquet")
 OUTPUT_EMBEDDINGS = os.path.join(DATA_DIR, "description_embeddings.pt")

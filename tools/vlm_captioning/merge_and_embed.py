@@ -54,6 +54,12 @@ def merge_shards() -> pd.DataFrame:
     merged = merged.drop_duplicates(subset=["scene_id"], keep="last")
     logger.info(f"✅ Đã gộp thành công {len(merged):,} scenes duy nhất từ {len(shard_files)} shards.")
 
+    # Đọc dataset scene_descriptions hiện có để bảo toàn các mô tả đã có
+    if OUTPUT_PARQUET.exists():
+        existing_desc = pd.read_parquet(OUTPUT_PARQUET)
+        merged_all = pd.concat([existing_desc[["scene_id", "description"]], merged[["scene_id", "description"]]], ignore_index=True)
+        merged = merged_all.drop_duplicates(subset=["scene_id"], keep="last")
+
     # Đọc metadata gốc để giữ đúng thứ tự index
     df_meta = pd.read_parquet(METADATA_PARQUET)
     merged_ordered = pd.merge(
